@@ -54,8 +54,9 @@ a desktop UA. Add `--memory-class phone` to exercise the phone large-net policy
 recorder stores the viewport it actually got (`meta.measuredViewport`), and the index, review pages
 and sheets show it next to the requested size.
 
-`--sheets-only` refuses to write through symlinks inside the recording, and review pages only link
-the recorder's own `frames/*` and `video.webm` files, so a recording from someone else is safe to
+`--sheets-only` refuses a symlinked recording directory and never writes through symlinks inside
+it. Review pages and sheets only use the recorder's own `frames/*` and `video.webm` names, and only
+when they are regular files inside the recording, so a recording from someone else is safe to
 re-render.
 
 ## How it records
@@ -96,7 +97,8 @@ re-render.
 ```
 
 Contact sheets list consecutive identical frames once, labelled with how long the screen stayed
-unchanged ("held 4.20s"). Use them to spot stale state.
+unchanged ("held 4.20s"). Use them to spot stale state. A hold stops where capture paused for more
+than 5 s; the next frame is marked "unobserved Ns before", since nobody saw the screen then.
 
 ## Review
 

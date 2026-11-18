@@ -20,6 +20,7 @@ import {
   collapseFrames,
   DEFAULT_VIEWPORTS,
   FrameStore,
+  mediaPath,
   parseViewports,
   renderIndexHtml,
   renderJourneyHtml,
@@ -114,6 +115,9 @@ export function entryPath(journey, memoryClass) {
   return memoryClass ? `${entry}${entry.includes('?') ? '&' : '?'}memoryClass=${memoryClass}` : entry;
 }
 
+// Window for the final frame and session teardown once a run ends or times out.
+const CLEANUP_MS = 20000;
+
 async function bounded(promise, label, ms) {
   let timer;
   try {
@@ -139,20 +143,25 @@ async function serveDist(dist, signal) {
     await closed;
   };
   const base = `http://127.0.0.1:${port}`;
-  for (let i = 0; i < 100; i++) {
-    signal.throwIfAborted();
-    const ok = await fetch(`${base}/app/analysis/`, { signal: AbortSignal.timeout(1000) })
-      .then(async (r) => {
-        await r.body?.cancel();
-        return r.ok;
-      })
-      .catch(() => false);
-    if (ok) return { base, stop };
-    if (child.exitCode !== null) break;
-    await sleep(100);
+  try {
+    for (let i = 0; i < 100; i++) {
+      signal.throwIfAborted();
+      const ok = await fetch(`${base}/app/analysis/`, { signal: AbortSignal.timeout(1000) })
+        .then(async (r) => {
+          await r.body?.cancel();
+          return r.ok;
+        })
+        .catch(() => false);
+      if (ok) return { base, stop };
+      if (child.exitCode !== null) break;
+      await sleep(100);
+    }
+    throw Error('Static server did not become ready');
+  } catch (error) {
+    // The caller only gets `stop` on success; an interrupted or failed startup must not leave the child running.
+    await stop();
+    throw error;
   }
-  await stop();
-  throw Error('Static server did not become ready');
 }
 
 async function launchSheetBrowser(existing) {
@@ -221,12 +230,12 @@ async function chromeDriver(args) {
 
 const ELEMENT = 'element-6066-11e4-a52e-4f735466cecf';
 async function safariDriver(args) {
-  async function wd(method, path, body) {
+  async function wd(method, path, body, timeoutMs = 120000) {
     const r = await fetch(args.driver + path, {
       method,
       headers: { 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const data = await r.json();
     if (!r.ok || data.value?.error)
@@ -283,8 +292,9 @@ async function safariDriver(args) {
           const rect = await call('GET', '/window/rect');
           await call('POST', '/window/rect', { width: rect.width + viewport.width - inner[0], height: rect.height + viewport.height - inner[1] });
         },
+        // Not queued: teardown must not wait behind a hung capture command.
         async close() {
-          await call('DELETE', '').catch((error) => {
+          await wd('DELETE', s, undefined, CLEANUP_MS).catch((error) => {
             if (error.webDriverError !== 'invalid session id') throw error;
           });
           return null;
@@ -408,6 +418,7 @@ async function recordRun(driver, base, item, args, outDir, signal) {
     try {
       await bounded(journey, `${item.journey} run`, args.runTimeout);
     } catch (e) {
+      recording = false; // no new cadence captures past the deadline
       runAbort.abort(e);
       await bounded(
         journey.catch(() => {}),
@@ -417,10 +428,11 @@ async function recordRun(driver, base, item, args, outDir, signal) {
       throw e;
     } finally {
       failed ||= steps.some((s) => s.status === 'failed');
-      await capture('final', 'end of journey').catch(() => {});
       recording = false;
-      await loop;
-      await queue.idle();
+      // A hung browser must not hold teardown: the final frame and pending captures get a fixed window.
+      await bounded(Promise.all([capture('final', 'end of journey').catch(() => {}), loop, queue.idle()]), 'final capture', CLEANUP_MS).catch(() =>
+        onEvent({ type: 'warning', text: `Final capture did not finish within ${CLEANUP_MS / 1000} s` }),
+      );
     }
     if (failed) status = 'failed';
   } catch (e) {
@@ -432,7 +444,7 @@ async function recordRun(driver, base, item, args, outDir, signal) {
     failed = true;
     runAbort.abort(Error('run finished'));
     if (session)
-      video = await session.close().catch((e) => {
+      video = await bounded(session.close(), 'session close', CLEANUP_MS).catch((e) => {
         onEvent({ type: 'warning', text: `close: ${e.message}` });
         return null;
       });
@@ -484,18 +496,46 @@ function summarize(dir, timeline) {
  * recording that may have come from someone else, and must not truncate files outside it.
  */
 export function writeInside(root, rel, data) {
-  let path = root;
-  for (const part of rel.split('/')) {
+  lstatInside(root, rel);
+  writeFileSync(join(root, rel), data);
+}
+
+/** lstat of `rel` under `root` (null when missing); throws if the root or any component is a symlink. */
+function lstatInside(root, rel) {
+  let path = root,
+    stat = null;
+  for (const part of ['', ...rel.split('/')]) {
     path = join(path, part);
-    let stat = null;
     try {
       stat = lstatSync(path);
     } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
+      if (error.code === 'ENOENT') return null;
+      throw error;
     }
-    if (stat?.isSymbolicLink()) throw Error(`Refusing to write through symlink ${path}`);
+    if (stat.isSymbolicLink()) throw Error(`Refusing symlink ${path}`);
   }
-  writeFileSync(path, data);
+  return stat;
+}
+
+/** True for a regular file reached without symlinks: what Chromium may load into a shareable sheet. */
+export function inTreeFile(root, rel) {
+  try {
+    return !!lstatInside(root, rel)?.isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Drops frame and video references a shared recording could point outside itself with. */
+export function dropUnsafeMedia(timeline, runDir) {
+  const ok = new Map();
+  const safe = (file) => {
+    if (!ok.has(file)) ok.set(file, !!mediaPath(file) && inTreeFile(runDir, file));
+    return ok.get(file);
+  };
+  const frames = timeline.frames.map((f) => (f.file && !safe(f.file) ? { ...f, file: null } : f));
+  const { video, ...meta } = timeline.meta;
+  return { ...timeline, meta: video && safe(video) ? { ...meta, video } : meta, frames, droppedMedia: [...ok.values()].filter((v) => !v).length };
 }
 
 /** Writes each run's index.html and contact-sheet images (rendered by Chromium from HTML grids). */
@@ -508,7 +548,8 @@ async function renderReview(outDir, dirs, browser) {
     for (const dir of dirs) {
       const runDir = join(outDir, dir);
       const write = (rel, data) => writeInside(outDir, `${dir}/${rel}`, data);
-      const timeline = JSON.parse(readFileSync(join(runDir, 'timeline.json'), 'utf8'));
+      const timeline = dropUnsafeMedia(JSON.parse(readFileSync(join(runDir, 'timeline.json'), 'utf8')), runDir);
+      if (timeline.droppedMedia) console.error(`[uat] ${dir}: skipped ${timeline.droppedMedia} symlinked or missing media files`);
       const layout = sheetLayout(timeline.meta.viewport);
       const pages = chunk(collapseFrames(timeline.frames), layout.cols * layout.rows);
       const sheets = [];
@@ -539,7 +580,7 @@ async function renderReview(outDir, dirs, browser) {
 
 function findRunDirs(outDir) {
   return readdirSync(outDir, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && existsSync(join(outDir, d.name, 'timeline.json')))
+    .filter((d) => d.isDirectory() && inTreeFile(outDir, `${d.name}/timeline.json`))
     .map((d) => d.name)
     .sort();
 }
@@ -548,6 +589,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.sheetsOnly) {
     const outDir = resolve(args.sheetsOnly);
+    if (lstatSync(outDir).isSymbolicLink()) throw Error(`Refusing a symlinked recording directory: ${outDir}`);
     const dirs = findRunDirs(outDir);
     await renderReview(outDir, dirs);
     const runs = dirs.map((dir) => summarize(dir, JSON.parse(readFileSync(join(outDir, dir, 'timeline.json'), 'utf8'))));

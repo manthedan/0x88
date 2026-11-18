@@ -16,7 +16,8 @@ reviewed. Your job is the problems that appear only in motion or between states.
 - **Contact sheets.** Frames are in time order, left to right and then top to bottom. Each caption
   gives `t=` (seconds since the journey started), the current step, and how long the screen stayed
   unchanged (`held`). Orange-bordered frames carry automatic notes, such as `+1 overflow`,
-  `2 control resized`, `CLS 0.05` or `1 error`.
+  `2 control resized`, `CLS 0.05` or `1 error`. `unobserved Ns before` means capture paused; that
+  interval is missing coverage, not a frozen screen.
 - **Steps.** These are the user actions, with start times. Frames labelled `<step>: done` or
   `FAILED` mark step boundaries.
 - **Digest.** This lists overflow spans (element, kind, pixels, from/to), controls whose size

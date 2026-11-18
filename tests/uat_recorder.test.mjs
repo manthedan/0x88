@@ -22,7 +22,7 @@ import {
   viewportLabel,
 } from '../scripts/uat/lib.mjs';
 import { installUatProbe, PROBE_OPTIONS, probeScript } from '../scripts/uat/probe.mjs';
-import { entryPath, parseArgs, plan, writeInside } from '../scripts/uat/record_journeys.mjs';
+import { dropUnsafeMedia, entryPath, inTreeFile, parseArgs, plan, writeInside } from '../scripts/uat/record_journeys.mjs';
 
 const box = (left, top, right, bottom, extra = {}) => ({
   parent: -1,
@@ -82,6 +82,21 @@ test('frame store writes identical screenshots once', () => {
   assert.equal(store.total, 3);
   assert.equal(store.unique, 2);
   assert.equal(store.bytes, 14);
+});
+
+test('frame store registers a frame only after its write succeeds', () => {
+  let fail = true;
+  const writes = [];
+  const store = new FrameStore((file) => {
+    if (fail) throw Error('disk full');
+    writes.push(file);
+  });
+  assert.throws(() => store.add(Buffer.from('frame-a')), /disk full/);
+  assert.equal(store.unique, 0);
+  fail = false;
+  assert.deepEqual(store.add(Buffer.from('frame-a')).duplicate, false);
+  assert.deepEqual(writes, ['frames/0001.jpg']);
+  assert.equal(store.unique, 1);
 });
 
 test('overflow: button text wider than the button is a text spill', () => {
@@ -230,6 +245,17 @@ test('filmstrip collapses consecutive identical frames and reports how long the 
     ],
   );
   assert.deepEqual(chunk([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]);
+  // A capture gap ends the hold: the old screen is not reported as held while nothing was captured.
+  const gapped = collapseFrames([f(0, 0, 'a'), f(1, 250, 'a'), f(2, 20000, 'b'), f(3, 40000, 'b')]);
+  assert.deepEqual(
+    gapped.map((e) => [e.file, e.t, e.heldMs, e.unobservedMs ?? 0]),
+    [
+      ['frames/a.jpg', 0, 250, 0],
+      ['frames/b.jpg', 20000, 0, 19750],
+      ['frames/b.jpg', 40000, 0, 20000],
+    ],
+  );
+  assert.match(gapped[1].notes[0], /unobserved 19\.75s before/);
 });
 
 test('review pages escape page text and link frames', () => {
@@ -333,6 +359,49 @@ test('report writes refuse symlinks inside a recording (--sheets-only on shared 
     assert.equal(readFileSync(victim, 'utf8'), 'keep');
     writeInside(rec, 'run/index.html', 'ok');
     assert.equal(readFileSync(join(rec, 'run', 'index.html'), 'utf8'), 'ok');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('re-rendering drops symlinked frames, frame dirs and recording roots', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'uat-'));
+  try {
+    const secret = join(dir, 'secret.jpg');
+    writeFileSync(secret, 'private');
+    const run = join(dir, 'rec', 'run');
+    mkdirSync(join(run, 'frames'), { recursive: true });
+    writeFileSync(join(run, 'frames', '0001.jpg'), 'ok');
+    symlinkSync(secret, join(run, 'frames', '0002.jpg'));
+    symlinkSync(secret, join(run, 'video.webm'));
+    const other = join(dir, 'rec', 'other');
+    mkdirSync(other);
+    symlinkSync(join(dir, 'rec', 'run', 'frames'), join(other, 'frames'));
+    symlinkSync(join(dir, 'rec'), join(dir, 'link'));
+    assert.equal(inTreeFile(run, 'frames/0001.jpg'), true);
+    assert.equal(inTreeFile(run, 'frames/0002.jpg'), false);
+    assert.equal(inTreeFile(run, 'frames/0003.jpg'), false);
+    assert.equal(inTreeFile(other, 'frames/0001.jpg'), false);
+    assert.equal(inTreeFile(join(dir, 'link'), 'run/frames/0001.jpg'), false);
+    assert.throws(() => writeInside(join(dir, 'link'), 'index.html', 'x'), /symlink/);
+    const tl = dropUnsafeMedia(
+      {
+        meta: { journey: 'j', video: 'video.webm' },
+        frames: [
+          { i: 0, file: 'frames/0001.jpg' },
+          { i: 1, file: 'frames/0002.jpg' },
+          { i: 2, file: null },
+          { i: 3, file: '../../secret.jpg' },
+        ],
+      },
+      run,
+    );
+    assert.deepEqual(
+      tl.frames.map((f) => f.file),
+      ['frames/0001.jpg', null, null, null],
+    );
+    assert.equal(tl.meta.video, undefined);
+    assert.equal(tl.droppedMedia, 3);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -541,4 +610,19 @@ test('analysis journey waits for a BT4 line and fails on a BT4 error before remo
   await JOURNEYS['analysis-engines'].run(ctx);
   assert.deepEqual(steps.at(-1), ['BT4 download and first lines', 'failed', 'BT4 failed: WebGPU device lost']);
   assert.ok(!log.some(([kind, s]) => kind === 'click' && /row-rm/.test(s)), 'Berserk is not removed after a failed BT4 init');
+});
+
+test('phone journeys open Board tools for Play from here and show the engine cards first', async () => {
+  const { ctx, log } = fakeJourneyContext((e) => (/restartBanner/.test(e) ? false : /gameOverCard/.test(e) && !/status/.test(e) ? false : undefined));
+  await JOURNEYS['play-promotion'].run(ctx);
+  const clicks = log.filter(([kind]) => kind === 'click').map(([, s]) => s);
+  assert.equal(clicks[clicks.indexOf('#playFromHere') - 1], '#boardToolsButton');
+
+  const analysis = fakeJourneyContext((e) => (/option\[value="bt4"\]/.test(e) ? 'ok' : undefined));
+  await JOURNEYS['analysis-engines'].run(analysis.ctx);
+  const analysisClicks = analysis.log.filter(([kind]) => kind === 'click').map(([, s]) => s);
+  const tab = analysisClicks.indexOf('#enginesTab');
+  assert.ok(tab >= 0 && tab < analysisClicks.indexOf('#addEngineInManager'));
+  // Progress from the main-thread fallback shows on the page, not in the Lc0 worker counter.
+  assert.ok(analysis.log.some(([kind, e]) => kind === 'eval' && e.includes('.engine-card.searching') && e.includes('workerProgressMessages')));
 });

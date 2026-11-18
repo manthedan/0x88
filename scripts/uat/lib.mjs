@@ -58,10 +58,12 @@ export class FrameStore {
     const hash = createHash('sha1').update(buffer).digest('hex');
     const existing = this.byHash.get(hash);
     if (existing) return { file: existing, hash, duplicate: true };
-    const file = `${this.prefix}${String(++this.unique).padStart(4, '0')}.${this.ext}`;
+    const file = `${this.prefix}${String(this.unique + 1).padStart(4, '0')}.${this.ext}`;
+    // Register only a frame that reached disk, so a failed write is retried rather than referenced.
+    this.write(file, buffer);
+    this.unique++;
     this.byHash.set(hash, file);
     this.bytes += buffer.length;
-    this.write(file, buffer);
     return { file, hash, duplicate: false };
   }
 }
@@ -226,13 +228,25 @@ export function assembleTimeline({ meta, samples, steps = [], events = [] }) {
   return timeline;
 }
 
-/** Consecutive identical screenshots collapse into one entry with how long the screen was held. */
-export function collapseFrames(frames) {
+/**
+ * Consecutive identical screenshots collapse into one entry with how long the screen was held.
+ * Holds stop at capture gaps longer than `maxGapMs` (capture capped or failing): nobody saw the
+ * screen then, so the next entry is marked as following an unobserved interval instead.
+ */
+export function collapseFrames(frames, { maxGapMs = 5000 } = {}) {
   const entries = [];
+  let lastSeen = null;
   for (const f of frames) {
     const file = mediaPath(f.file);
     if (!file) continue;
     const last = entries.at(-1);
+    const gap = lastSeen !== null && f.t - lastSeen > maxGapMs ? f.t - lastSeen : 0;
+    lastSeen = f.t;
+    if (gap) {
+      entries.push({ ...entry(f, file), unobservedMs: gap });
+      entries.at(-1).notes.unshift(`unobserved ${secs(gap)} before`);
+      continue;
+    }
     if (last && last.hash === f.hash) {
       last.until = f.t;
       last.count++;
@@ -240,11 +254,13 @@ export function collapseFrames(frames) {
       continue;
     }
     if (last) last.until = f.t;
-    entries.push({ i: f.i, t: f.t, until: f.t, file, hash: f.hash, step: f.step, reason: f.reason, label: f.label, count: 1, notes: frameNotes(f) });
+    entries.push(entry(f, file));
   }
   for (const e of entries) e.heldMs = e.until - e.t;
   return entries;
 }
+
+const entry = (f, file) => ({ i: f.i, t: f.t, until: f.t, file, hash: f.hash, step: f.step, reason: f.reason, label: f.label, count: 1, notes: frameNotes(f) });
 
 function frameNotes(f) {
   const notes = [];
