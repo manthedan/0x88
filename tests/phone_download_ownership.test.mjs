@@ -414,16 +414,19 @@ test('Arena Start carries its consent to the load: a cache hit approves no downl
 test('a saved Arena run with no games shows its own opening, not the replaced run', () => {
   const calls = [];
   const opening = { name: 'new opening' };
+  const charts = { hidden: false };
   const deps = {
     showCheckpointResults() {},
     arenaRemainingIndices: () => [0],
     arenaMatchState: 'final',
-    el: () => ({}),
+    el: (id) => (id === 'chartsPanel' ? charts : {}),
     inputEl: () => ({}),
     finishedTrails: [],
+    // A finished live tournament: its last game is on the board, not in review.
     liveTrail: { label: 'old game' },
-    reviewing: true,
+    reviewing: false,
     exitReview: () => calls.push('exitReview'),
+    resetGameCharts: () => calls.push('resetGameCharts'),
     resultsSchedule: [{ opening }],
     setOpeningPreview: (shown) => calls.push(shown),
   };
@@ -433,7 +436,8 @@ test('a saved Arena run with no games shows its own opening, not the replaced ru
   )(deps);
   present({ completed: [] });
   // setOpeningPreview resets the board, last move and side labels.
-  assert.deepEqual(calls, ['exitReview', opening]);
+  assert.deepEqual(calls, ['exitReview', 'resetGameCharts', opening]);
+  assert.equal(charts.hidden, true, "the replaced run's charts are not shown beside the new scoreboard");
 });
 
 const restoreGuard = extract(source.play, 'async function ctxCheckRestoredDownloadConsent(', '/** Imported setup must not make');

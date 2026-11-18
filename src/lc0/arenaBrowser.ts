@@ -4182,9 +4182,12 @@ function presentSavedCheckpoint(saved: ArenaCheckpoint): void {
     setBoardSideEngines(null, resultsNames.get(scheduled.whiteId)!, null, resultsNames.get(scheduled.blackId)!);
     enterReview(trail, trail.entries.length - 1);
   } else {
-    // Nothing played yet: show this run's first opening, not the replaced run's last game.
+    // Nothing played yet: show this run's first opening, not the replaced run's last game
+    // or its charts (as Discard does).
     liveTrail = null;
-    if (reviewing) exitReview();
+    exitReview();
+    resetGameCharts();
+    el('chartsPanel').hidden = true;
     setOpeningPreview(resultsSchedule[0].opening);
   }
 }
