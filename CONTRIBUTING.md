@@ -25,6 +25,12 @@ The Lc0 model tests skip when their networks are missing;
 `npm run test:stage-lc0-assets` fetches the hash-pinned parity set into
 `../models/lc0-bestnets/` so they run.
 
+Working in an extra `git worktree`? It has no `node_modules` and none of the
+gitignored model links. `node scripts/worktree_setup.mjs <worktree-path>` links
+both from the main checkout (plus `<worktree>/../models`, where the model links
+point), then checks every model in the lc0 and Maia3 manifests resolves at the
+right size. Rerunning it is safe; `--check` only verifies.
+
 `npm run hooks:install` installs an opt-in git pre-push hook. It is not
 installed by `npm install`.
 
