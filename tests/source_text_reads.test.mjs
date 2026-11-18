@@ -70,6 +70,19 @@ test('imports, scratch-tree joins and files without a read API are not source re
   assert.deepEqual(scan("run(['--files', 'src/fake/util.ts']);"), []);
 });
 
+test('plain fs paths resolve from the repo root, URL paths from the test file', () => {
+  assert.deepEqual(scan("import { readFileSync } from 'node:fs';\nreadFileSync('./src/fake/util.ts', 'utf8');"), ['src/fake/util.ts']);
+  // new URL('./src/...', import.meta.url) from tests/ points at tests/src/, which is not source.
+  assert.deepEqual(scan("import { readFileSync } from 'node:fs';\nreadFileSync(new URL('./src/fake/util.ts', import.meta.url));"), []);
+});
+
+test('traced hole values containing a slash expand before matching', () => {
+  const text = holes(
+    "import { readFileSync } from 'node:fs';\nfor (const file of ['fake/util.ts', 'fake/playBrowser.ts']) readFileSync(new URL(`../src/#{file}`, import.meta.url));",
+  );
+  assert.deepEqual(scan(text), ['src/fake/playBrowser.ts', 'src/fake/util.ts']);
+});
+
 test('cwd-relative, root-joined and helper-argument paths count', () => {
   const text =
     "import { readFile } from 'node:fs/promises';\nreadFile('src/fake/util.ts');\nextract('../src/fake/arenaBrowser.ts', 'a', 'b');\nscan(join(ROOT, 'src'));";
