@@ -548,9 +548,16 @@ export class Bt4WorkerSearcher {
   }
 
   async search(input: Lc0EvaluatorInput, options: Bt4SearchOptions): Promise<Bt4SearchResult> {
-    if (options.signal?.aborted) return { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
-    await this.init({ evalCacheEntries: options.evalCacheEntries });
-    if (options.signal?.aborted) return { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
+    const cancelled: Bt4SearchResult = { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
+    if (options.signal?.aborted) return cancelled;
+    try {
+      await this.init({ evalCacheEntries: options.evalCacheEntries });
+    } catch (error) {
+      // An owner that stopped may retire a net still loading (Arena Stop): that is a cancellation.
+      if (options.signal?.aborted) return cancelled;
+      throw error;
+    }
+    if (options.signal?.aborted) return cancelled;
     const workerInput = options.swapColors ? swapColorsInput(input) : input;
     let searchId: number | null = null;
     const onAbort = () => {

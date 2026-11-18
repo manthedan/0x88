@@ -523,7 +523,8 @@ async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config
   // Storage can evict a model that was cached at Start (loading Lc0 Small into a
   // full cache is enough), so a load not covered by a download approval asks again.
   // Ask unless the warm session will be reused; preparePhoneBigNet retires one configured differently.
-  if (isMemoryConstrainedDevice() && !arenaRunDownloads.has(key) && !peekBigNetSearcher(key)?.isInitializedFor({ evalCacheEntries: arenaCacheEntries() })) {
+  const evalCacheEntries = arenaCacheEntries();
+  if (isMemoryConstrainedDevice() && !arenaRunDownloads.has(key) && !peekBigNetSearcher(key)?.isInitializedFor({ evalCacheEntries })) {
     const consent = await requestLargeNetDownloadConsent(BIG_NETS[key], signal);
     signal.throwIfAborted();
     if (!consent) throw new Error(`Lc0 ${BIG_NETS[key].name} is no longer cached and its download was not approved.`);
@@ -533,7 +534,7 @@ async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config
     isMemoryConstrainedDevice() &&
     preparePhoneBigNet(
       key,
-      arenaCacheEntries(),
+      evalCacheEntries,
       signal,
       disposeArenaCpuEngines,
       () => {
@@ -542,7 +543,19 @@ async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config
       true,
     );
   if (reclaim) await reclaim;
-  return { config: BIG_NETS[key], searcher: await acquireBigNetSearcherAsync(key, true, signal) };
+  const searcher = await acquireBigNetSearcherAsync(key, true, signal);
+  if (!searcher.isInitializedFor({ evalCacheEntries })) {
+    // init() does not watch the match signal, and a cold prefetch can stall:
+    // Stop retires a net that is still loading, as Analysis does.
+    signal.addEventListener(
+      'abort',
+      () => {
+        if (!searcher.loaded && peekBigNetSearcher(key) === searcher) disposeBigNetSearcherNow(key);
+      },
+      { once: true },
+    );
+  }
+  return { config: BIG_NETS[key], searcher };
 }
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
 let runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';

@@ -357,7 +357,7 @@ test('Arena Start carries its consent to the load: a cache hit approves no downl
     el: () => ({}),
     acquireBigNetSearcherAsync: async () => {
       loaded = true;
-      return { loaded };
+      return { loaded, isInitializedFor: () => true };
     },
   };
   const api = new Function(
