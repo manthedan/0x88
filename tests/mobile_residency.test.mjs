@@ -461,9 +461,12 @@ test('phone auto-analysis gate leaves Analyze enabled and an explicit tap admits
       });
     return elements.get(id);
   };
-  const gate = extract(text, '  if (!automaticAnalysisAllowed()) {', '\nlet lastAnalysisMountHref');
+  const gate = extract(text, '  const smallLc0 = activeEngineRows()', '\nlet lastAnalysisMountHref');
   await compile(`return async function(){${gate.slice(0, gate.lastIndexOf('\n}'))}\n};`, {
     automaticAnalysisAllowed: () => false,
+    activeEngineRows: () => [],
+    isLc0BigNetVariant: () => false,
+    inputEl: () => ({ checked: true }),
     el,
     selectEl: el,
   })();
@@ -503,5 +506,5 @@ test('phone auto-analysis gate: default untouched only; explicit input, moves, n
     assert.equal(shouldAutoAnalyzePosition(...args), true);
   const text = source('analysisBrowser');
   assert.match(text, /if \(options.force\) analysisHasExplicitInput = true/);
-  assert.match(text, /if \(!automaticAnalysisAllowed\(\)\) \{/);
+  assert.match(text, /if \(!automaticAnalysisAllowed\(\) \|\|/);
 });

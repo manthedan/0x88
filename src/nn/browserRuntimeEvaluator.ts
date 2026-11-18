@@ -70,6 +70,7 @@ async function createHybridEvaluator(
   manifestUrl: string | undefined,
   kernelBase: string | undefined,
   fixtureRoot: string | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<Evaluator> {
   const gpu = (navigator as NavigatorGpu).gpu;
   if (!gpu) throw new Error('WebGPU is unavailable for custom WebGPU runtime');
@@ -77,8 +78,9 @@ async function createHybridEvaluator(
   if (!adapter) throw new Error('WebGPU adapter unavailable for custom WebGPU runtime');
   const device = await adapter.requestDevice();
   try {
+    signal?.throwIfAborted();
     // On success the evaluator owns the device and destroys it in destroy().
-    return await SquareformerTvmHybridEvaluator.create(device as never, meta, { manifestUrl, kernelBase, fixtureRoot });
+    return await SquareformerTvmHybridEvaluator.create(device as never, meta, { manifestUrl, kernelBase, fixtureRoot }, signal);
   } catch (error) {
     device.destroy();
     throw error;
@@ -194,7 +196,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
 
   if (customRequested) {
     try {
-      const primary = await createHybridEvaluator(meta, manifestUrl, kernelBase, fixtureRoot);
+      const primary = await createHybridEvaluator(meta, manifestUrl, kernelBase, fixtureRoot, options.signal);
       const evaluator = fallback ? new RuntimeFallbackEvaluator(primary, createOrtEvaluator, auditBase, 'custom-webgpu-fallback-ort') : primary;
       const result = {
         evaluator,

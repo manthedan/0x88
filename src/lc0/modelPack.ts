@@ -94,6 +94,8 @@ export interface Lc0WebLoadOptions {
   loadWeights?: boolean;
   /** Load only these tensors and their containing shards. Defaults to all tensors. */
   tensorNames?: string[];
+  /** Owner cancellation: aborts the manifest and shard requests. */
+  signal?: AbortSignal;
 }
 
 function nowMs(): number {
@@ -173,8 +175,8 @@ export function validateLc0WebModelPackManifest(manifest: unknown): asserts mani
   }
 }
 
-async function fetchArrayBuffer(fetchFn: typeof fetch, url: string): Promise<ArrayBuffer> {
-  const response = await fetchFn(url);
+async function fetchArrayBuffer(fetchFn: typeof fetch, url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  const response = await fetchFn(url, { signal });
   if (!response.ok) throw new Error(`lc0web fetch failed for ${url}: ${response.status}`);
   return response.arrayBuffer();
 }
@@ -186,7 +188,7 @@ export async function loadLc0WebModelPack(manifestUrlInput: string, options: Lc0
   const loadWeights = options.loadWeights ?? true;
   const verifyShards = options.verifyShards ?? loadWeights;
   const verifyTensors = options.verifyTensors ?? false;
-  const manifestResponse = await fetchFn(manifestUrl);
+  const manifestResponse = await fetchFn(manifestUrl, { signal: options.signal });
   if (!manifestResponse.ok) throw new Error(`lc0web manifest fetch failed for ${manifestUrl}: ${manifestResponse.status}`);
   const manifest = (await manifestResponse.json()) as unknown;
   validateLc0WebModelPackManifest(manifest);
@@ -208,7 +210,7 @@ export async function loadLc0WebModelPack(manifestUrlInput: string, options: Lc0
   const shardBytes = new Map<string, Uint8Array>();
   const verifiedShards: Array<{ file: string; bytes: number; sha256: string }> = [];
   for (const shard of selectedShards) {
-    const bytes = new Uint8Array(await fetchArrayBuffer(fetchFn, shardUrl(manifestUrl, shard.file)));
+    const bytes = new Uint8Array(await fetchArrayBuffer(fetchFn, shardUrl(manifestUrl, shard.file), options.signal));
     if (bytes.byteLength !== shard.bytes) {
       throw new Error(`lc0web shard ${shard.file} byte length mismatch: got ${bytes.byteLength}, expected ${shard.bytes}`);
     }
