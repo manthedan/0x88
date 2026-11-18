@@ -6441,20 +6441,26 @@ async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal
           return created.evaluator;
         }
       };
-      nextEvaluator = await loadRetirableResource(createFallback, fallbackSignal);
-      if (loadCancelled()) {
-        trackEngineRetirement(Promise.resolve(nextEvaluator.dispose?.()));
-        return false;
+      // Until mainEvaluator owns it, cancellation publishes its release synchronously (as Arena does).
+      let uninstalled: Lc0EvaluationProvider | undefined;
+      const retireUninstalled = () => {
+        if (uninstalled) trackEngineRetirement(Promise.resolve(uninstalled.dispose?.()));
+        uninstalled = undefined;
+      };
+      fallbackSignal.addEventListener('abort', retireUninstalled, { once: true });
+      let diagnostics: Awaited<ReturnType<typeof collectOrtRuntimeDiagnostics>> | undefined;
+      try {
+        nextEvaluator = await loadRetirableResource(async () => (uninstalled = await createFallback()), fallbackSignal);
+        if (!loadCancelled() && runtime === 'onnx') diagnostics = await collectOrtRuntimeDiagnostics();
+        if (loadCancelled()) return false;
+        uninstalled = undefined; // mainEvaluator owns it below.
+      } finally {
+        fallbackSignal.removeEventListener('abort', retireUninstalled);
+        retireUninstalled();
       }
       nextEvaluator = new CachedLc0Evaluator(nextEvaluator, { maxEntries: 2048 });
-      const nextSearcher = new Lc0PuctSearcher(nextEvaluator);
-      const diagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics() : undefined;
-      if (loadCancelled()) {
-        trackEngineRetirement(Promise.resolve(nextEvaluator.dispose?.()));
-        return false;
-      }
       mainEvaluator = nextEvaluator;
-      searcher = nextSearcher;
+      searcher = new Lc0PuctSearcher(nextEvaluator);
       lc0ServedModelUrl = nextServedModelUrl;
       el('backend').textContent = `${diagnostics?.describe ?? 'whole-onnx-webgpu'} (main thread)`;
       publishBrowserRuntimeAudit({

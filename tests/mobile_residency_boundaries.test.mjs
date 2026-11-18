@@ -104,9 +104,67 @@ test('Analysis runtime teardown publishes main-thread fallback release to the re
   assert.equal(admitted, true);
   assert.match(
     source('analysisBrowser'),
-    /loadRetirableResource\(createFallback, fallbackSignal\)/,
+    /loadRetirableResource\(async \(\) => \(uninstalled = await createFallback\(\)\), fallbackSignal\)/,
     'canceled fallback creation uses the same tracked boundary as Arena',
   );
+});
+
+test('Analysis teardown while fallback diagnostics are pending still retires the uninstalled evaluator at once', async (t) => {
+  t.mock.method(console, 'warn', () => undefined);
+  const release = Promise.withResolvers();
+  const diagnosticsGate = Promise.withResolvers();
+  let diagnosticsAsked = false;
+  const operation = new AbortController();
+  const element = () => ({ textContent: '', disabled: false, toggleAttribute() {} });
+  const load = compile(
+    `
+    let mainEvaluator=null,searcher=null,lc0ServedModelUrl='';
+    ${extract(source('analysisBrowser'), 'async function loadLc0BackendOwned(', 'async function reloadLc0Backend(')}
+    return { load: loadLc0BackendOwned, installed: () => mainEvaluator };
+  `,
+    {
+      loadRetirableResource,
+      trackEngineRetirement,
+      awaitEngineRetirements,
+      selectedLc0Runtime: () => 'onnx',
+      lc0RuntimeLabel: () => 'ONNX',
+      el: element,
+      selectEl: element,
+      showModelProgress: () => {},
+      hideModelProgress: () => {},
+      initWorker: async () => {
+        throw new Error('worker init failed');
+      },
+      mountAbort: new AbortController(),
+      LC0_WHOLE_MODEL_WEBGPU_RUNTIME: 'whole-onnx-webgpu',
+      MODEL_URL: 'small.onnx',
+      LC0_DEVICE_MODEL_SELECTION: true,
+      createLc0OnnxEvaluatorFromUrl: async () => ({ servedUrl: 'small.onnx', evaluator: { dispose: () => release.promise } }),
+      collectOrtRuntimeDiagnostics: () => {
+        diagnosticsAsked = true;
+        return diagnosticsGate.promise;
+      },
+      CachedLc0Evaluator: class {},
+      Lc0PuctSearcher: class {},
+      publishBrowserRuntimeAudit: () => assert.fail('a cancelled fallback is not published'),
+      multiPv: () => 1,
+    },
+  );
+  const loading = load.load(() => operation.signal.aborted, operation.signal);
+  for (let i = 0; i < 100 && !diagnosticsAsked; i++) await new Promise(setImmediate);
+  assert.equal(diagnosticsAsked, true, `fallback reached diagnostics (load: ${await Promise.race([loading, 'pending'])})`);
+  operation.abort(); // route teardown cancels the load during the diagnostics wait
+  let admitted = false;
+  const barrier = awaitEngineRetirements().then(() => {
+    admitted = true;
+  });
+  await new Promise(setImmediate);
+  assert.equal(admitted, false, 'the next route waits for the uninstalled session');
+  release.resolve();
+  await barrier;
+  diagnosticsGate.resolve({ describe: 'wasm' });
+  assert.equal(await loading, false);
+  assert.equal(load.installed(), null);
 });
 
 for (const stale of [false, true])
