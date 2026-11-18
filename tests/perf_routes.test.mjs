@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, get } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { startCountingProxy } from '../scripts/perf_matrix/proxy.mjs';
+import { linkAssets, localAssets } from '../scripts/perf_routes/assets.mjs';
 import {
   chromeFootprint,
   compareRuns,
@@ -808,4 +809,90 @@ test('missing throughput for one selected engine cannot yield a clean comparison
   }));
   assert.equal(compareRuns(rows, options)[0].status, 'incomplete');
   assert.equal(compareRuns(rows, options)[0].metrics.find((m) => m.name === 'speed.berserk-nps').status, 'unavailable');
+});
+
+test('arm builds link ignored local assets instead of copying them, never replacing tracked bytes', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'perf-routes-assets-'));
+  try {
+    const write = (path, data) => {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, data);
+    };
+    const root = join(tmp, 'repo/wt'),
+      arm = join(tmp, 'repo/wt/out/builds/baseline'),
+      dist = join(arm, 'dist-client');
+    write(join(tmp, 'repo/models/store/net.onnx'), 'model-bytes');
+    write(join(tmp, 'repo/models/store/old.onnx'), 'old-model');
+    write(join(root, 'public/runtimes/r/big.wasm'), 'runtime');
+    write(join(root, 'public/tracked.txt'), 'worktree version');
+    write(join(root, 'public/engine.wasm'), 'engine');
+    mkdirSync(join(root, 'public/models/lc0'), { recursive: true });
+    symlinkSync('../../../../models/store/net.onnx', join(root, 'public/models/lc0/net.onnx'));
+    write(join(arm, 'public/tracked.txt'), 'historical version');
+    mkdirSync(join(arm, 'public/models/maia3'), { recursive: true });
+    symlinkSync('missing/target.wasm', join(arm, 'public/engine.wasm')); // dangling archived link
+    write(
+      join(arm, 'public/models/lc0/manifest.json'),
+      JSON.stringify({
+        models: [
+          { file: 'old.onnx', source: '../models/store/old.onnx' },
+          { file: 'net.onnx', source: 'x' },
+        ],
+      }),
+    );
+    write(join(arm, 'public/models/maia3/manifest.json'), JSON.stringify({ models: [{ file: 'gone.onnx', source: 'nowhere/gone.onnx' }] }));
+
+    const links = localAssets(root, arm);
+    assert.deepEqual([...links.keys()].sort(), ['engine.wasm', 'models/lc0/net.onnx', 'models/lc0/old.onnx', 'runtimes/r/big.wasm']);
+    assert.equal(readFileSync(join(arm, 'public/tracked.txt'), 'utf8'), 'historical version');
+    assert.equal(existsSync(join(arm, 'public/engine.wasm')), false, 'dangling archived link removed before the build stats public/');
+    assert.equal(existsSync(join(arm, 'public/runtimes')), false, 'nothing large is staged for Vite to copy');
+
+    write(join(dist, 'runtimes/r/big.wasm'), 'build output');
+    linkAssets(links, dist);
+    assert.equal(readFileSync(join(dist, 'runtimes/r/big.wasm'), 'utf8'), 'build output');
+    for (const [path, bytes] of [
+      ['models/lc0/net.onnx', 'model-bytes'],
+      ['models/lc0/old.onnx', 'old-model'],
+      ['engine.wasm', 'engine'],
+    ]) {
+      assert.ok(lstatSync(join(dist, path)).isSymbolicLink(), path);
+      assert.equal(readFileSync(join(dist, path), 'utf8'), bytes);
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('the isolated static server serves a linked asset like a copied one, under its own origin', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'perf-routes-serve-'));
+  const free = createServer();
+  await new Promise((r) => free.listen(0, '127.0.0.1', r));
+  const { port } = free.address();
+  await new Promise((r) => free.close(r));
+  const dist = join(tmp, 'dist');
+  mkdirSync(join(dist, 'models/lc0'), { recursive: true });
+  writeFileSync(join(tmp, 'net.onnx'), Buffer.alloc(70000, 7));
+  writeFileSync(join(dist, 'models/lc0/copy.onnx'), Buffer.alloc(70000, 7));
+  symlinkSync(join(tmp, 'net.onnx'), join(dist, 'models/lc0/link.onnx'));
+  const server = spawn(process.execPath, [new URL('../scripts/serve_isolated_static.mjs', import.meta.url).pathname, dist, String(port)], {
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  try {
+    await once(server.stdout, 'data');
+    const fetchHead = async (path) => {
+      const r = await fetch(`http://127.0.0.1:${port}${path}`);
+      const body = Buffer.from(await r.arrayBuffer());
+      const headers = Object.fromEntries(['content-length', 'content-type', 'cache-control', 'cross-origin-resource-policy'].map((h) => [h, r.headers.get(h)]));
+      return { status: r.status, headers, body };
+    };
+    const [copied, linked] = [await fetchHead('/models/lc0/copy.onnx'), await fetchHead('/models/lc0/link.onnx')];
+    assert.equal(linked.status, 200);
+    assert.deepEqual(linked.headers, copied.headers);
+    assert.ok(linked.body.equals(copied.body));
+  } finally {
+    server.kill();
+    await once(server, 'close');
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

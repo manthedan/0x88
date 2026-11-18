@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { linkAssets, localAssets } from './assets.mjs';
 import { compareRuns, HELP, parseArgs, plan, previewEnvironment } from './gate.mjs';
 import { acquireLock, claimOutput, cleanupMarker, releaseAfterSession, runOwnedSession, shutdownDelay, watchShutdown } from './lifecycle.mjs';
 
@@ -42,13 +43,6 @@ function git(...argv) {
   console.log(`pwd: ${process.cwd()}; git ${argv.join(' ')}`);
   return spawnSync('git', argv, { cwd: root, encoding: 'utf8', maxBuffer: 1024 * 1024 });
 }
-function sourceAsset(source) {
-  for (let dir = root; ; dir = dirname(dir)) {
-    const candidate = resolve(dir, source);
-    if (existsSync(candidate)) return candidate;
-    if (dirname(dir) === dir) return null;
-  }
-}
 function build(input, out, arm) {
   if (existsSync(input)) {
     const dir = resolve(input);
@@ -70,32 +64,18 @@ function build(input, out, arm) {
   const sameLock = readFileSync(join(dir, 'package-lock.json')).equals(readFileSync(join(root, 'package-lock.json')));
   if (sameLock) symlinkSync(realpathSync(join(root, 'node_modules')), join(dir, 'node_modules'), 'dir');
   else command('npm', ['ci', '--ignore-scripts'], dir);
-  // Supply ignored local runtime/model assets without replacing historical manifests or tracked bytes.
-  cpSync(join(root, 'public'), join(dir, 'public'), {
-    recursive: true,
-    dereference: false,
-    filter: (src, dst) => lstatSync(src).isDirectory() || !existsSync(dst),
-  });
-  for (const family of ['lc0', 'maia3']) {
-    const manifest = JSON.parse(readFileSync(join(dir, 'public/models', family, 'manifest.json'), 'utf8'));
-    for (const entry of manifest.models ?? []) {
-      if (!entry.file || !entry.source) continue;
-      const target = join(dir, 'public/models', family, entry.file);
-      if (existsSync(target)) continue;
-      const asset = sourceAsset(entry.source);
-      if (asset) {
-        rmSync(target, { force: true });
-        symlinkSync(asset, target);
-      }
-    }
-  }
+  const links = localAssets(root, dir);
   command('env', ['BUILD_SCOPE=product', 'npm', 'run', 'build:client'], dir);
+  linkAssets(links, join(dir, 'dist-client'));
+  // Intermediate copy of the client output; only dist-client is served.
+  rmSync(join(dir, '.svelte-kit/output'), { recursive: true, force: true });
   return {
     dist: join(dir, 'dist-client'),
     commit,
     input,
     kind: 'archived-source',
     dependencies: sameLock ? 'shared-installed/same-lockfile' : 'isolated-npm-ci',
+    linkedLocalAssets: links.size,
   };
 }
 async function serve(dist, out, arm, signal) {
