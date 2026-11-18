@@ -24,12 +24,12 @@ for (const move of [null, 'a1a8', 'e2e4']) {
       disposed: false,
       enginePreparationGeneration: 0,
       engineReady: false,
+      dom: { buttonEl: () => ({}) },
     };
     const deps = {
       ctxSelectedEngine: () => option,
       engines: { retireUnusedEngines: async () => {}, cpuEngineFor: async () => ({ setOptions() {}, bestMove: async () => move }) },
-      buttonEl: () => ({}),
-      ctxSetEngineNote: (text) => notes.push(text),
+      ctxSetEngineNote: (_ctx, text) => notes.push(text),
       ctxRender: () => {},
       ctxSetEngineFailure: (_ctx, error) => failures.push(error),
       ctxHideDownloadProgress: () => {},

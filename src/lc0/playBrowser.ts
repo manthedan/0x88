@@ -8,7 +8,8 @@ import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { sanToMove } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
-import { routeDom } from '../features/dom.ts';
+import type { RouteDom } from '../features/dom.ts';
+import type { RouteId } from '../features/registry.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import {
   BROWSER_RUNTIME_AUDIT_EVENT,
@@ -24,7 +25,7 @@ import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
-import { createBrowserDom, htmlEscape } from './browserDom.ts';
+import { createRootDom, htmlEscape, type RootDom } from './browserDom.ts';
 import {
   BIG_NETS,
   bigNetAssetStatusSync,
@@ -43,9 +44,9 @@ import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
-import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
 import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle } from './maia3.ts';
+import type { MountScope } from './mountScope.ts';
 import { rememberMoveFocus } from './moveListFocus.ts';
 import {
   displayedPly,
@@ -60,7 +61,14 @@ import {
 import { type OpeningNameIndex, openingPositionKey } from './openingNames.ts';
 import { type PendingInput, type PendingInputEvent, transitionPendingInput } from './pendingInput.ts';
 import { PHONE_LARGE_NET_CHANGE_EVENT, phoneLargeNetsBlocked, phoneSafeEngineVariant } from './phoneLargeNetPolicy.ts';
-import { createPlayEngines, type EngineUiPort, type PlayEngineSpec, type PlayFamily } from './play/playEngines.ts';
+import { createPlayEngines, type EngineUiPort, type Lc0SmallModel, type PlayEngineSpec, type PlayFamily } from './play/playEngines.ts';
+import {
+  createEngineUiPort,
+  hideDownloadProgress as ctxHideDownloadProgress,
+  setEngineNote as ctxSetEngineNote,
+  showDownloadProgress as ctxShowDownloadProgress,
+  type PlayEngineUiState,
+} from './play/playEngineUi.ts';
 import { BIG_NET_LEVELS, lqoSearchOptions, PLAY_DRAW_SCORE, PLAY_SEARCH_CONTEMPT_LIMIT } from './play/playSearchSettings.ts';
 import { playMaterial } from './playMaterial.ts';
 import { committedPlayOpponent, type PlayOpponentState, transitionPlayOpponent } from './playOpponentState.ts';
@@ -71,17 +79,18 @@ import { uciGameHistory } from './uciGameHistory.ts';
 import { createWakeLockManager } from './wakeLock.ts';
 import { createWorkspaceAutosave, decodePlaySnapshot, readWorkspace } from './workspaceAutosave.ts';
 
-const pageDom = createBrowserDom();
-const { buttonEl, el, maybeEl, selectEl } = routeDom<'play'>(pageDom);
-const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
-// v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
-const blockedModelOverride = phoneBlockedBigNetModelUrl(params.get('model'));
-const LC0_SMALL_MODEL = lc0SmallModelRequest(
-  DEFAULT_MODEL_URL,
-  isV0DeployProfile() || blockedModelOverride ? null : params.get('model'),
-  resolvePublicAssetUrl,
-);
+
+/** Read per mount: client-side navigation can change ?model= without reloading this module. */
+function playModelRequest(url: URL): { blockedModelOverride: boolean; lc0SmallModel: Lc0SmallModel } {
+  const requested = url.searchParams.get('model');
+  // v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
+  const blockedModelOverride = phoneBlockedBigNetModelUrl(requested);
+  return {
+    blockedModelOverride,
+    lc0SmallModel: lc0SmallModelRequest(DEFAULT_MODEL_URL, isV0DeployProfile() || blockedModelOverride ? null : requested, resolvePublicAssetUrl),
+  };
+}
 
 interface PlayEngineOption extends PlayEngineSpec {
   group: 'human' | 'odds' | 'engine';
@@ -106,7 +115,6 @@ const SF_LEVELS = [
 
 // Engines outlive page mounts; see play/playEngines.ts.
 const engines = createPlayEngines({ loadCentipawn: createBrowserSquareformerRuntimeEvaluator });
-const playRuntimeFallbackAudits = new Map<string, BrowserRuntimeAuditDetail>();
 
 // ---------------------------------------------------------------------------
 // Screen wake lock (best-effort): keeps the screen on while the engine is
@@ -121,12 +129,21 @@ function startFenFor(option: PlayEngineOption, human: Color): string {
 }
 
 // ---------------------------------------------------------------------------
-// Factory: scoped per-mount play context. All game/UI state lives here so
-// re-entrant mounts (SvelteKit preloading, error boundaries) cannot clobber
-// each other. The abort signal replaces the old gameSeq counter as the
-// stale-write guard for async engine callbacks.
+// Factory: scoped per-mount play context. All game/UI state lives here so a
+// remount (client navigation back to Play, a new ?model=) starts fresh. The
+// abort signal replaces the old gameSeq counter as the stale-write guard for
+// async engine callbacks.
 // ---------------------------------------------------------------------------
-interface PlayContext {
+/** A mount's root-scoped lookups with literal ids checked against the Play feature registry (src/features/dom.ts). */
+type PlayDom = Omit<RootDom, keyof RouteDom<string>> & RouteDom<RouteId<'play'>>;
+
+interface PlayContext extends PlayEngineUiState {
+  scope: MountScope;
+  /** Lookups confined to this mount's root; they keep working on the detached root during teardown. Ids are typed against the feature registry. */
+  dom: PlayDom;
+  blockedModelOverride: boolean;
+  lc0SmallModel: Lc0SmallModel;
+  runtimeFallbackAudits: Map<string, BrowserRuntimeAuditDetail>;
   autosave: ReturnType<typeof createWorkspaceAutosave> | null;
   pendingInput: PendingInput | null;
   restoredGame: boolean;
@@ -169,6 +186,8 @@ interface PlayContext {
   searchProgress: { label: string; progress: SearchProgress } | null;
   /** Last view key the move list was scrolled for, so engine replies do not yank a manually scrolled list. */
   moveListScrollKey: string;
+  /** This mount asked for the shared opening-name index (at most once). */
+  openingNamesRequested: boolean;
   opponent: PlayOpponentState;
   lastEngineId: string;
   pendingPreferredEngineId: string | null;
@@ -189,12 +208,15 @@ interface PlayContext {
   enginePreparationGeneration: number;
   /** Where engine loads report notes and progress; stale loads see a superseded generation. */
   engineUi: EngineUiPort;
-  // Bound listeners for cleanup
-  listeners: Array<{ type: string; target: EventTarget; fn: EventListenerOrEventListenerObject }>;
 }
 
-function createPlayContext(): PlayContext {
+function createPlayContext(scope: MountScope): PlayContext {
   const ctx: PlayContext = {
+    scope,
+    dom: createRootDom(scope.root),
+    ...playModelRequest(scope.url),
+    runtimeFallbackAudits: new Map(),
+    engineNote: '',
     autosave: null,
     pendingInput: null,
     restoredGame: false,
@@ -223,6 +245,7 @@ function createPlayContext(): PlayContext {
     viewPly: null,
     searchProgress: null,
     moveListScrollKey: '',
+    openingNamesRequested: false,
     opponent: committedPlayOpponent(DEFAULT_PLAY_PREFERENCES),
     lastEngineId: 'maia3',
     pendingPreferredEngineId: null,
@@ -238,35 +261,14 @@ function createPlayContext(): PlayContext {
     engineReady: false,
     preparingEngine: false,
     enginePreparationGeneration: 0,
-    engineUi: {
-      current: () => {
-        const generation = ctx.enginePreparationGeneration;
-        return () => ctxAsyncUiIsCurrent(ctx, generation);
-      },
-      mounted: () => !ctxIsDisposed(ctx),
-      note: (text, warn) => ctxSetEngineNote(text, warn),
-      clearNote: (text) => {
-        if (maybeEl('engineNote')?.textContent === text) ctxSetEngineNote('');
-      },
-      progress: (label, loadedBytes, totalBytes) => ctxShowDownloadProgress(label, loadedBytes, totalBytes),
-      hideProgress: () => ctxHideDownloadProgress(),
-    },
-    listeners: [],
+    engineUi: null as unknown as EngineUiPort,
   };
+  ctx.engineUi = createEngineUiPort(ctx);
   return ctx;
-}
-
-function trackListener(ctx: PlayContext, target: EventTarget, type: string, fn: EventListenerOrEventListenerObject): void {
-  target.addEventListener(type, fn);
-  ctx.listeners.push({ type, target, fn });
 }
 
 function ctxIsDisposed(ctx: PlayContext): boolean {
   return ctx.disposed;
-}
-
-function ctxAsyncUiIsCurrent(ctx: PlayContext, generation: number): boolean {
-  return !ctxIsDisposed(ctx) && generation === ctx.enginePreparationGeneration;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,25 +278,25 @@ function ctxAsyncUiIsCurrent(ctx: PlayContext, generation: number): boolean {
 function ctxSelectedEngine(ctx: PlayContext): PlayEngineOption {
   return ENGINE_OPTIONS.find((option) => option.id === ctx.opponent.active.engineId) ?? ENGINE_OPTIONS[0];
 }
-function ctxDraftEngine(): PlayEngineOption {
-  return ENGINE_OPTIONS.find((option) => option.id === selectEl('engineSelect').value) ?? ENGINE_OPTIONS[0];
+function ctxDraftEngine(ctx: PlayContext): PlayEngineOption {
+  return ENGINE_OPTIONS.find((option) => option.id === ctx.dom.selectEl('engineSelect').value) ?? ENGINE_OPTIONS[0];
 }
-function ctxSelectedLevel(): number {
-  return Math.max(0, Math.min(LEVEL_COUNT - 1, Number(selectEl('levelSelect').value) || 0));
+function ctxSelectedLevel(ctx: PlayContext): number {
+  return Math.max(0, Math.min(LEVEL_COUNT - 1, Number(ctx.dom.selectEl('levelSelect').value) || 0));
 }
-function ctxSelectedMaia3Elo(): number {
-  const input = el('maia3Elo') as HTMLInputElement;
+function ctxSelectedMaia3Elo(ctx: PlayContext): number {
+  const input = ctx.dom.el('maia3Elo') as HTMLInputElement;
   return Math.max(MAIA3_MIN_ELO, Math.min(MAIA3_MAX_ELO, Number(input.value) || MAIA3_DEFAULT_ELO));
 }
-function ctxSelectedMaia3Style(): Maia3MoveStyle {
-  return selectEl('maia3Style').value === 'argmax' ? 'argmax' : 'sample';
+function ctxSelectedMaia3Style(ctx: PlayContext): Maia3MoveStyle {
+  return ctx.dom.selectEl('maia3Style').value === 'argmax' ? 'argmax' : 'sample';
 }
-function ctxSelectedMaia3Temperature(): number {
-  const input = el('maia3Temperature') as HTMLInputElement;
+function ctxSelectedMaia3Temperature(ctx: PlayContext): number {
+  const input = ctx.dom.el('maia3Temperature') as HTMLInputElement;
   return Math.max(0.01, Math.min(5, Number(input.value) || 1));
 }
-function ctxSelectedMaia3TopP(): number {
-  const input = el('maia3TopP') as HTMLInputElement;
+function ctxSelectedMaia3TopP(ctx: PlayContext): number {
+  const input = ctx.dom.el('maia3TopP') as HTMLInputElement;
   return Math.max(0.01, Math.min(1, Number(input.value) || 1));
 }
 
@@ -306,15 +308,15 @@ function playPreferenceStorage(): PreferenceStorage | undefined {
   }
 }
 
-function ctxCurrentPlayPreferences(_ctx: PlayContext): PlayPreferences {
+function ctxCurrentPlayPreferences(ctx: PlayContext): PlayPreferences {
   return {
-    engineId: ctxDraftEngine().id,
-    level: ctxSelectedLevel(),
-    color: selectEl('colorSelect').value as PlayPreferences['color'],
-    maiaElo: ctxSelectedMaia3Elo(),
-    maiaStyle: ctxSelectedMaia3Style(),
-    maiaTemperature: ctxSelectedMaia3Temperature(),
-    maiaTopP: ctxSelectedMaia3TopP(),
+    engineId: ctxDraftEngine(ctx).id,
+    level: ctxSelectedLevel(ctx),
+    color: ctx.dom.selectEl('colorSelect').value as PlayPreferences['color'],
+    maiaElo: ctxSelectedMaia3Elo(ctx),
+    maiaStyle: ctxSelectedMaia3Style(ctx),
+    maiaTemperature: ctxSelectedMaia3Temperature(ctx),
+    maiaTopP: ctxSelectedMaia3TopP(ctx),
   };
 }
 
@@ -332,18 +334,18 @@ function ctxStrengthFor(option: PlayEngineOption, level: number): number {
   return enginePlayLevels(option.family)[level];
 }
 
-function ctxStrengthCaption(_ctx: PlayContext): string {
-  const option = ctxDraftEngine();
-  const level = ctxSelectedLevel();
+function ctxStrengthCaption(ctx: PlayContext): string {
+  const option = ctxDraftEngine(ctx);
+  const level = ctxSelectedLevel(ctx);
   if (option.family === 'maia3') {
-    const style = ctxSelectedMaia3Style();
+    const style = ctxSelectedMaia3Style(ctx);
     const suffix =
       style === 'argmax'
         ? 'deterministic top human move'
-        : `sampled, temperature ${ctxSelectedMaia3Temperature().toFixed(2)}, top-p ${ctxSelectedMaia3TopP().toFixed(2)}`;
+        : `sampled, temperature ${ctxSelectedMaia3Temperature(ctx).toFixed(2)}, top-p ${ctxSelectedMaia3TopP(ctx).toFixed(2)}`;
     const maia3Status = engines.maia3Status();
     const status = maia3Status ? ` ${maia3Status}.` : '';
-    return `Maia3 predicts human moves at Elo ${ctxSelectedMaia3Elo()} — ${suffix}. No LC0/PUCT search; its WDL output predicts the human game outcome, not an engine eval.${status}`;
+    return `Maia3 predicts human moves at Elo ${ctxSelectedMaia3Elo(ctx)} — ${suffix}. No LC0/PUCT search; its WDL output predicts the human game outcome, not an engine eval.${status}`;
   }
   if (option.family === 'sf') {
     const sf = SF_LEVELS[level];
@@ -358,10 +360,10 @@ function ctxStrengthCaption(_ctx: PlayContext): string {
   return isNeuralSearch ? `${base} — strong even on Fastest; pick a Maia for a human-level opponent${cpuNote}` : base;
 }
 
-function ctxRenderLevelOptions(_ctx: PlayContext): void {
-  const select = selectEl('levelSelect');
+function ctxRenderLevelOptions(ctx: PlayContext): void {
+  const select = ctx.dom.selectEl('levelSelect');
   const previous = select.value;
-  const option = ctxDraftEngine();
+  const option = ctxDraftEngine(ctx);
   const field = select.closest('.field') as HTMLElement;
   field.hidden = option.family === 'maia3';
   const labels = option.family === 'sf' ? SF_LEVELS.map((sf) => sf.label) : EFFORT_LEVEL_NAMES.map((name, i) => `${i + 1} · ${name}`);
@@ -369,40 +371,22 @@ function ctxRenderLevelOptions(_ctx: PlayContext): void {
   select.value = previous && Number(previous) < LEVEL_COUNT ? previous : '2';
 }
 
-function ctxRenderMaia3Controls(_ctx: PlayContext): void {
-  const isMaia3 = ctxDraftEngine().family === 'maia3';
-  el('maia3Controls').hidden = !isMaia3;
-  el('maia3Advanced').hidden = !isMaia3;
-  const elo = ctxSelectedMaia3Elo();
-  el('maia3EloValue').textContent = String(elo);
-  el('maia3Elo').setAttribute('aria-valuetext', `${elo} rating · ${maiaRatingBand(elo)}`);
-  const sample = ctxSelectedMaia3Style() === 'sample';
-  (el('maia3Temperature') as HTMLInputElement).disabled = !sample;
-  (el('maia3TopP') as HTMLInputElement).disabled = !sample;
-  (el('maia3TemperatureField') as HTMLElement).style.opacity = sample ? '' : '0.5';
-  (el('maia3TopPField') as HTMLElement).style.opacity = sample ? '' : '0.5';
+function ctxRenderMaia3Controls(ctx: PlayContext): void {
+  const isMaia3 = ctxDraftEngine(ctx).family === 'maia3';
+  ctx.dom.el('maia3Controls').hidden = !isMaia3;
+  ctx.dom.el('maia3Advanced').hidden = !isMaia3;
+  const elo = ctxSelectedMaia3Elo(ctx);
+  ctx.dom.el('maia3EloValue').textContent = String(elo);
+  ctx.dom.el('maia3Elo').setAttribute('aria-valuetext', `${elo} rating · ${maiaRatingBand(elo)}`);
+  const sample = ctxSelectedMaia3Style(ctx) === 'sample';
+  (ctx.dom.el('maia3Temperature') as HTMLInputElement).disabled = !sample;
+  (ctx.dom.el('maia3TopP') as HTMLInputElement).disabled = !sample;
+  (ctx.dom.el('maia3TemperatureField') as HTMLElement).style.opacity = sample ? '' : '0.5';
+  (ctx.dom.el('maia3TopPField') as HTMLElement).style.opacity = sample ? '' : '0.5';
 }
 
-/**
- * Engine notes are visible detail, not a second live region: #gameAnnouncement
- * already speaks readiness and turn changes. Only failures interrupt (role=alert);
- * routine readiness is hidden from sight and from the accessibility tree.
- */
-function ctxSetEngineNote(text: string, warn = false, routine = false): void {
-  const note = el('engineNote');
-  note.textContent = text;
-  note.hidden = !text;
-  note.classList.toggle('warn', warn);
-  note.dataset.routine = String(routine && !warn);
-  if (warn && text) note.setAttribute('role', 'alert');
-  else note.removeAttribute('role');
-  if (routine && !warn) note.setAttribute('aria-hidden', 'true');
-  else note.removeAttribute('aria-hidden');
-  if (!text) buttonEl('retryEngine').hidden = true;
-}
-
-function ctxSetRuntimeWarning(text: string): void {
-  const warning = el('runtimeWarning');
+function ctxSetRuntimeWarning(ctx: PlayContext, text: string): void {
+  const warning = ctx.dom.el('runtimeWarning');
   clearRuntimeFallbackWarning(warning);
   if (!text) return;
   warning.textContent = text;
@@ -420,10 +404,10 @@ function playOptionMatchesRuntimeAudit(option: PlayEngineOption, detail: Browser
 }
 
 function ctxRestoreSelectedRuntimeWarning(ctx: PlayContext): void {
-  const warning = el('runtimeWarning');
+  const warning = ctx.dom.el('runtimeWarning');
   clearRuntimeFallbackWarning(warning);
   const option = ctxSelectedEngine(ctx);
-  for (const detail of playRuntimeFallbackAudits.values()) {
+  for (const detail of ctx.runtimeFallbackAudits.values()) {
     if (playOptionMatchesRuntimeAudit(option, detail)) updateRuntimeFallbackWarning(warning, detail);
   }
 }
@@ -445,7 +429,7 @@ function ctxActionableEngineError(ctx: PlayContext, error: unknown): string {
 
 function ctxSetEngineFailure(ctx: PlayContext, error: unknown): void {
   ctxSetEngineNote(ctxActionableEngineError(ctx, error), true);
-  buttonEl('retryEngine').hidden = false;
+  ctx.dom.buttonEl('retryEngine').hidden = false;
 }
 
 type SearchProgress = { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number };
@@ -459,7 +443,7 @@ function ctxSearchProgressText(label: string, progress: SearchProgress): string 
 }
 
 function ctxShowSearchProgress(ctx: PlayContext, label: string, progress: SearchProgress): void {
-  const container = maybeEl('dlProgress');
+  const container = ctx.dom.maybeEl('dlProgress');
   if (!container) return;
   const completed = progress.completedVisits ?? progress.visits;
   const requested = Math.max(1, progress.requestedVisits ?? progress.visits);
@@ -481,7 +465,7 @@ function ctxShowSearchProgress(ctx: PlayContext, label: string, progress: Search
   const milestone = Math.min(4, Math.floor((4 * completed) / requested));
   if (milestone > ctx.lastProgressAnnouncement) {
     ctx.lastProgressAnnouncement = milestone;
-    el('progressAnnouncement').textContent = milestone === 4 ? `${label} search complete.` : `${label} search ${milestone * 25}% complete.`;
+    ctx.dom.el('progressAnnouncement').textContent = milestone === 4 ? `${label} search complete.` : `${label} search ${milestone * 25}% complete.`;
   }
 }
 
@@ -492,44 +476,32 @@ function ctxShowSearchProgress(ctx: PlayContext, label: string, progress: Search
  * hidden containers have no [data-search-progress] node).
  */
 function ctxRefreshSearchProgressLabel(ctx: PlayContext): void {
-  const text = maybeEl('dlProgress')?.querySelector<HTMLElement>('[data-search-progress]');
+  const text = ctx.dom.maybeEl('dlProgress')?.querySelector<HTMLElement>('[data-search-progress]');
   if (!text || !ctx.searchProgress) return;
   text.textContent = ctxSearchProgressText(searchProgressLabel(ctx.searchProgress.label, ctx.viewPly), ctx.searchProgress.progress);
-}
-
-function ctxShowDownloadProgress(label: string, loadedBytes?: number, totalBytes?: number, phase = 'Downloading'): void {
-  const container = maybeEl('dlProgress');
-  if (!container) return;
-  renderLoadingProgress(container, { label, phase, loadedBytes, totalBytes });
-}
-
-function ctxHideDownloadProgress(): void {
-  const container = maybeEl('dlProgress');
-  if (!container) return;
-  hideLoadingProgress(container);
 }
 
 async function ctxPreloadLqoAfterBookMove(ctx: PlayContext, signal: AbortSignal): Promise<boolean> {
   const searcher = await engines.acquireBigNet('lqo', signal, ctx.engineUi);
   if (searcher.loaded) return false;
   const label = `Lc0 ${searcher.config.name}`;
-  ctxShowDownloadProgress(label, undefined, undefined, 'Loading in background');
+  ctxShowDownloadProgress(ctx, label, undefined, undefined, 'Loading in background');
   searcher.onDownloadProgress = (loaded, total) => {
-    if (!signal.aborted && !ctxIsDisposed(ctx)) ctxShowDownloadProgress(label, loaded, total);
+    if (!signal.aborted && !ctxIsDisposed(ctx)) ctxShowDownloadProgress(ctx, label, loaded, total);
   };
   void searcher
     .init({ evalCacheEntries: 2048 })
     .then(() => {
       if (signal.aborted || ctxIsDisposed(ctx)) return;
       if (ctx.engineThinking) return;
-      ctxHideDownloadProgress();
-      ctxSetEngineNote('LQO model ready for post-book search.');
+      ctxHideDownloadProgress(ctx);
+      ctxSetEngineNote(ctx, 'LQO model ready for post-book search.');
     })
     .catch((error: Error) => {
       if (signal.aborted || ctxIsDisposed(ctx)) return;
       if (ctx.engineThinking) return;
-      ctxHideDownloadProgress();
-      ctxSetEngineNote(`LQO background load failed: ${error.message}`, true);
+      ctxHideDownloadProgress(ctx);
+      ctxSetEngineNote(ctx, `LQO background load failed: ${error.message}`, true);
     });
   return true;
 }
@@ -542,7 +514,7 @@ function ctxPreloadLqoInBackground(ctx: PlayContext, signal: AbortSignal): boole
       if (!signal.aborted && !ctxIsDisposed(ctx)) return ctxPreloadLqoAfterBookMove(ctx, signal);
     })
     .catch((error: Error) => {
-      if (!signal.aborted && !ctxIsDisposed(ctx) && !ctx.engineThinking) ctxSetEngineNote(`LQO background load failed: ${error.message}`, true);
+      if (!signal.aborted && !ctxIsDisposed(ctx) && !ctx.engineThinking) ctxSetEngineNote(ctx, `LQO background load failed: ${error.message}`, true);
     });
   return true;
 }
@@ -560,38 +532,38 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
       const bookMove = lqoBlackBookMove(ctx.board, ctx.moves.length, historyUcis);
       if (bookMove) {
         const preloading = isMemoryConstrainedDevice() ? ctxPreloadLqoInBackground(ctx, signal) : await ctxPreloadLqoAfterBookMove(ctx, signal);
-        ctxSetEngineNote(`LQO opening book: ${bookMove}${preloading ? ' · loading model in background' : ''}`);
+        ctxSetEngineNote(ctx, `LQO opening book: ${bookMove}${preloading ? ' · loading model in background' : ''}`);
         return bookMove;
       }
     } else if (ctx.moves.length === 0) {
       const searcher = await engines.acquireBigNet('lqo', signal, ctx.engineUi);
       let progressShown = false;
       if (!searcher.loaded) {
-        ctxSetEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
-        ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, undefined, undefined, 'Preparing');
+        ctxSetEngineNote(ctx, `Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
+        ctxShowDownloadProgress(ctx, `Lc0 ${searcher.config.name}`, undefined, undefined, 'Preparing');
         progressShown = true;
         searcher.onDownloadProgress = (loaded, total) => {
-          if (!signal.aborted && !ctxIsDisposed(ctx)) ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, loaded, total);
+          if (!signal.aborted && !ctxIsDisposed(ctx)) ctxShowDownloadProgress(ctx, `Lc0 ${searcher.config.name}`, loaded, total);
         };
       }
       const evaluation = await (async () => {
         try {
           return await searcher.evaluate({ positions: ctx.positions }, { evalCacheEntries: 2048 });
         } finally {
-          if (progressShown && !signal.aborted && !ctxIsDisposed(ctx)) ctxHideDownloadProgress();
+          if (progressShown && !signal.aborted && !ctxIsDisposed(ctx)) ctxHideDownloadProgress(ctx);
         }
       })();
       if (signal.aborted) return null;
       const bookMove = lqoWhiteFirstPolicyBookMove(ctx.board, ctx.moves.length, historyUcis, evaluation.legalPriors, Math.random, 8);
       if (bookMove) {
-        ctxSetEngineNote(`LQO policy book: ${bookMove}`);
+        ctxSetEngineNote(ctx, `LQO policy book: ${bookMove}`);
         return bookMove;
       }
     } else {
       const bookMove = lqoWhiteBookMove(ctx.board, ctx.moves.length, historyUcis);
       if (bookMove) {
         const preloading = isMemoryConstrainedDevice() ? ctxPreloadLqoInBackground(ctx, signal) : await ctxPreloadLqoAfterBookMove(ctx, signal);
-        ctxSetEngineNote(`LQO opening book: ${bookMove}${preloading ? ' · loading model in background' : ''}`);
+        ctxSetEngineNote(ctx, `LQO opening book: ${bookMove}${preloading ? ' · loading model in background' : ''}`);
         return bookMove;
       }
     }
@@ -636,13 +608,13 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
       return result.move ? moveToUci(result.move) : null;
     } finally {
       if (!signal.aborted && !ctxIsDisposed(ctx)) {
-        ctxHideDownloadProgress();
-        ctxSetEngineNote('');
+        ctxHideDownloadProgress(ctx);
+        ctxSetEngineNote(ctx, '');
       }
     }
   }
   if (option.family === 'lc0' && option.variant === 'small') {
-    const searcher = await engines.ensureLc0Small(LC0_SMALL_MODEL, ctx.engineUi);
+    const searcher = await engines.ensureLc0Small(ctx.lc0SmallModel, ctx.engineUi);
     try {
       const result = await searcher.search(
         { positions: ctx.positions },
@@ -663,16 +635,16 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
       );
       return result.move ?? null;
     } finally {
-      if (!signal.aborted && !ctxIsDisposed(ctx)) ctxHideDownloadProgress();
+      if (!signal.aborted && !ctxIsDisposed(ctx)) ctxHideDownloadProgress(ctx);
     }
   }
   if (option.family === 'lc0') {
     const searcher = await engines.acquireBigNet(option.variant as BigNetKey, signal, ctx.engineUi);
     if (!searcher.loaded && !signal.aborted && !ctxIsDisposed(ctx)) {
-      ctxSetEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
-      ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, undefined, undefined, 'Preparing');
+      ctxSetEngineNote(ctx, `Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
+      ctxShowDownloadProgress(ctx, `Lc0 ${searcher.config.name}`, undefined, undefined, 'Preparing');
       searcher.onDownloadProgress = (loaded, total) => {
-        if (!signal.aborted && !ctxIsDisposed(ctx)) ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, loaded, total);
+        if (!signal.aborted && !ctxIsDisposed(ctx)) ctxShowDownloadProgress(ctx, `Lc0 ${searcher.config.name}`, loaded, total);
       };
     }
     try {
@@ -695,12 +667,12 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
         },
       );
       if (!signal.aborted && !ctxIsDisposed(ctx)) {
-        ctxHideDownloadProgress();
-        ctxSetEngineNote('');
+        ctxHideDownloadProgress(ctx);
+        ctxSetEngineNote(ctx, '');
       }
       return result.cancelled ? null : (result.move ?? null);
     } finally {
-      if (!signal.aborted && !ctxIsDisposed(ctx)) ctxHideDownloadProgress();
+      if (!signal.aborted && !ctxIsDisposed(ctx)) ctxHideDownloadProgress(ctx);
     }
   }
   const engine = await engines.cpuEngineForMove(option, signal, ctx.engineUi);
@@ -727,8 +699,8 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
   const generation = ++ctx.enginePreparationGeneration;
   ctx.engineReady = false;
   ctx.preparingEngine = true;
-  buttonEl('retryEngine').hidden = true;
-  ctxSetEngineNote(resumingGame ? `Checking ${option.label} before play resumes…` : `Preparing ${option.label} before the first move…`);
+  ctx.dom.buttonEl('retryEngine').hidden = true;
+  ctxSetEngineNote(ctx, resumingGame ? `Checking ${option.label} before play resumes…` : `Preparing ${option.label} before the first move…`);
   ctxRender(ctx);
   try {
     await retirement;
@@ -750,7 +722,7 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
         legalMoves: legalMoves(ctx.board),
       });
     } else if (option.family === 'lc0' && option.variant === 'small') {
-      const searcher = await engines.ensureLc0Small(LC0_SMALL_MODEL, ctx.engineUi);
+      const searcher = await engines.ensureLc0Small(ctx.lc0SmallModel, ctx.engineUi);
       await searcher.search(
         { positions: ctx.positions },
         { visits: 1, signal, reuseTree: false, drawScore: PLAY_DRAW_SCORE, searchContemptLimit: PLAY_SEARCH_CONTEMPT_LIMIT },
@@ -787,13 +759,13 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
     }
     if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration || option.id !== ctxSelectedEngine(ctx).id) return;
     ctx.engineReady = true;
-    ctxSetEngineNote(resumingGame ? `${option.label} is ready. You can continue the game.` : `${option.label} is ready.`, false, true);
+    ctxSetEngineNote(ctx, resumingGame ? `${option.label} is ready. You can continue the game.` : `${option.label} is ready.`, false, true);
   } catch (error) {
     if (!signal.aborted && !ctx.disposed && generation === ctx.enginePreparationGeneration) ctxSetEngineFailure(ctx, error);
   } finally {
     if (!ctx.disposed && generation === ctx.enginePreparationGeneration) {
       ctx.preparingEngine = false;
-      ctxHideDownloadProgress();
+      ctxHideDownloadProgress(ctx);
       ctxRender(ctx);
     }
   }
@@ -832,7 +804,7 @@ function ctxCancelEngineTurn(ctx: PlayContext): void {
   ctxSetEngineThinking(ctx, false);
   ctx.preparingEngine = false;
   ctx.enginePreparationGeneration += 1;
-  ctxHideDownloadProgress();
+  ctxHideDownloadProgress(ctx);
 }
 
 function ctxPriorFens(ctx: PlayContext): string[] {
@@ -846,7 +818,7 @@ function ctxCheckGameOver(ctx: PlayContext): void {
 
 function ctxApplyMove(ctx: PlayContext, move: Move): void {
   if (ctx.moves.length === ctx.practiceBoundary) {
-    ctxSetEngineNote('');
+    ctxSetEngineNote(ctx, '');
   }
   ctx.sans.push(moveToSan(ctx.board, move));
   ctx.moves.push(move);
@@ -883,7 +855,7 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
   releaseUnusedBigNetSearchers(option.family === 'lc0' && option.variant !== 'small' ? [option.variant as BigNetKey] : [], 0);
   ctxSetEngineThinking(ctx, true);
   ctx.lastProgressAnnouncement = -1;
-  el('progressAnnouncement').textContent = '';
+  ctx.dom.el('progressAnnouncement').textContent = '';
   const releaseWakeLock = await wakeLocks.acquire(signal);
   if (signal.aborted || ctx.disposed) {
     releaseWakeLock();
@@ -963,14 +935,14 @@ function ctxHumanMoveBlockedReason(ctx: PlayContext): string | null {
 
 /** Keyboard move entry: SAN (Nf3, exd5, e8=Q) or UCI (g1f3, e7e8q). */
 function ctxSubmitTypedMove(ctx: PlayContext): void {
-  const input = el('moveInput') as HTMLInputElement;
+  const input = ctx.dom.el('moveInput') as HTMLInputElement;
   const raw = input.value.trim();
   if (!raw) return;
   const fail = (message: string) => {
     input.classList.add('invalid');
     input.setCustomValidity(message);
     input.reportValidity();
-    el('boardAnnouncement').textContent = message;
+    ctx.dom.el('boardAnnouncement').textContent = message;
   };
   if (!ctx.engineReady && !ctx.preparingEngine && !ctx.gameOver && ctx.board.turn === ctx.humanColor) void ctxVerifySelectedEngineReady(ctx);
   const blocked = ctxHumanMoveBlockedReason(ctx);
@@ -989,7 +961,7 @@ function ctxSubmitTypedMove(ctx: PlayContext): void {
   input.value = '';
   input.setCustomValidity('');
   input.classList.remove('invalid');
-  el('boardAnnouncement').textContent = `You played ${moveToSan(ctx.board, move)}.`;
+  ctx.dom.el('boardAnnouncement').textContent = `You played ${moveToSan(ctx.board, move)}.`;
   ctxApplyHumanMove(ctx, move);
 }
 
@@ -997,7 +969,7 @@ function ctxNewGame(ctx: PlayContext): void {
   ctxUpdatePendingInput(ctx, { type: 'discarded' });
   ctx.autosave?.clear();
   ctx.restoredGame = false;
-  el('playRestoreNotice').hidden = true;
+  ctx.dom.el('playRestoreNotice').hidden = true;
   ctxCancelEngineTurn(ctx);
   ctx.engineReady = false;
   ctxSetOpponent(ctx, committedPlayOpponent(ctxCurrentPlayPreferences(ctx)));
@@ -1010,7 +982,7 @@ function ctxNewGame(ctx: PlayContext): void {
   ctx.pendingPromotion = null;
   ctx.viewPly = null;
   engines.startNewGame(ctx.opponent.active.engineId);
-  ctxSetEngineNote('');
+  ctxSetEngineNote(ctx, '');
   ctxDisarmResign(ctx);
   ctxDisarmNewGame(ctx);
   ctxRestoreSelectedRuntimeWarning(ctx);
@@ -1039,11 +1011,11 @@ function ctxResign(ctx: PlayContext): void {
   if (ctx.gameOver || (!ctx.moves.length && !ctx.started)) return;
   if (!ctx.resignArmed) {
     ctx.resignArmed = true;
-    const btn = buttonEl('resign');
+    const btn = ctx.dom.buttonEl('resign');
     setButtonLabel(btn, 'Confirm resign');
     btn.classList.add('danger');
-    if (ctx.resignArmTimer) clearTimeout(ctx.resignArmTimer);
-    ctx.resignArmTimer = setTimeout(() => ctxDisarmResign(ctx), 4000);
+    if (ctx.resignArmTimer) ctx.scope.clearTimeout(ctx.resignArmTimer);
+    ctx.resignArmTimer = ctx.scope.timeout(() => ctxDisarmResign(ctx), 4000);
     return;
   }
   ctxDisarmResign(ctx);
@@ -1055,10 +1027,10 @@ function ctxResign(ctx: PlayContext): void {
 function ctxDisarmResign(ctx: PlayContext): void {
   ctx.resignArmed = false;
   if (ctx.resignArmTimer) {
-    clearTimeout(ctx.resignArmTimer);
+    ctx.scope.clearTimeout(ctx.resignArmTimer);
     ctx.resignArmTimer = null;
   }
-  const btn = buttonEl('resign');
+  const btn = ctx.dom.buttonEl('resign');
   if (btn.classList.contains('danger')) {
     btn.classList.remove('danger');
     setButtonLabel(btn, 'Resign');
@@ -1074,8 +1046,8 @@ function setButtonLabel(button: HTMLElement, text: string): void {
 
 function ctxArmNewGame(ctx: PlayContext): void {
   ctx.newGameArmed = true;
-  if (ctx.newGameArmTimer) clearTimeout(ctx.newGameArmTimer);
-  ctx.newGameArmTimer = setTimeout(() => {
+  if (ctx.newGameArmTimer) ctx.scope.clearTimeout(ctx.newGameArmTimer);
+  ctx.newGameArmTimer = ctx.scope.timeout(() => {
     ctxDisarmNewGame(ctx);
     ctxRender(ctx);
   }, 4000);
@@ -1085,7 +1057,7 @@ function ctxArmNewGame(ctx: PlayContext): void {
 function ctxDisarmNewGame(ctx: PlayContext): void {
   ctx.newGameArmed = false;
   if (ctx.newGameArmTimer) {
-    clearTimeout(ctx.newGameArmTimer);
+    ctx.scope.clearTimeout(ctx.newGameArmTimer);
     ctx.newGameArmTimer = null;
   }
 }
@@ -1140,7 +1112,7 @@ function ctxLiveStatusText(ctx: PlayContext): string {
 }
 
 function ctxRenderMoveList(ctx: PlayContext): void {
-  const list = el('moveList');
+  const list = ctx.dom.el('moveList');
   const restoreFocus = rememberMoveFocus(list, 'data-ply');
   if (!ctx.sans.length) {
     list.innerHTML = '<span class="placeholder">Your game starts here. Move a piece, or type a move below (e.g. Nf3).</span>';
@@ -1181,10 +1153,10 @@ function ctxRenderMoveList(ctx: PlayContext): void {
 
 function ctxRenderMoveNav(ctx: PlayContext): void {
   const available = moveNavAvailability(ctx.viewPly, ctx.moves.length);
-  buttonEl('navFirst').disabled = !available.first;
-  buttonEl('navPrev').disabled = !available.prev;
-  buttonEl('navNext').disabled = !available.next;
-  const last = buttonEl('navLast');
+  ctx.dom.buttonEl('navFirst').disabled = !available.first;
+  ctx.dom.buttonEl('navPrev').disabled = !available.prev;
+  ctx.dom.buttonEl('navNext').disabled = !available.next;
+  const last = ctx.dom.buttonEl('navLast');
   last.disabled = !available.last;
   last.classList.toggle('live-pending', ctx.viewPly !== null);
   last.title = ctx.viewPly === null ? 'Last move (End / ↓)' : 'Back to the live game (End / ↓)';
@@ -1207,7 +1179,7 @@ function ctxSetViewPly(ctx: PlayContext, viewPly: number | null): void {
 }
 
 function ctxRenderRestartBanner(ctx: PlayContext): void {
-  const banner = el('restartBanner');
+  const banner = ctx.dom.el('restartBanner');
   if (!ctx.opponent.pending) {
     banner.hidden = true;
     return;
@@ -1215,16 +1187,16 @@ function ctxRenderRestartBanner(ctx: PlayContext): void {
   banner.hidden = false;
   const engineLabel = ENGINE_OPTIONS.find((o) => o.id === ctx.opponent.pending?.engineId)?.label ?? 'the new engine';
   const colorLabel = ctx.opponent.pending.color === 'random' ? 'random side' : `as ${ctx.opponent.pending.color}`;
-  el('restartMessage').textContent = `Start a new game vs ${engineLabel}, ${colorLabel}? The current game will be discarded.`;
+  ctx.dom.el('restartMessage').textContent = `Start a new game vs ${engineLabel}, ${colorLabel}? The current game will be discarded.`;
 }
 
 function ctxRenderPromotionPicker(ctx: PlayContext): void {
   if (!ctx.pendingPromotion) {
-    hidePromotionOverlay(el('ground'));
+    hidePromotionOverlay(ctx.dom.el('ground'));
     return;
   }
   showPromotionOverlay({
-    boardContainer: el('ground'),
+    boardContainer: ctx.dom.el('ground'),
     orientation: ctx.orientation,
     color: ctx.humanColor,
     choices: ctx.pendingPromotion,
@@ -1251,7 +1223,7 @@ function ctxEngineOptionHtml(option: PlayEngineOption): string {
 }
 
 function ctxRefreshEngineOptions(ctx: PlayContext): void {
-  const select = selectEl('engineSelect');
+  const select = ctx.dom.selectEl('engineSelect');
   const selected = select.value;
   const group = (key: PlayEngineOption['group']) =>
     ENGINE_OPTIONS.filter((option) => option.group === key && (!ctx.practicePosition || option.group !== 'odds'))
@@ -1281,24 +1253,24 @@ function ctxResolvePendingPreferredEngine(ctx: PlayContext): void {
   if (status === 'unknown') return;
   ctx.pendingPreferredEngineId = null;
   if (ctx.pendingPreferredEngineTimer) {
-    clearTimeout(ctx.pendingPreferredEngineTimer);
+    ctx.scope.clearTimeout(ctx.pendingPreferredEngineTimer);
     ctx.pendingPreferredEngineTimer = null;
   }
   const restored = status === 'present';
-  if (restored) selectEl('engineSelect').value = option.id;
+  if (restored) ctx.dom.selectEl('engineSelect').value = option.id;
   ctxRenderLevelOptions(ctx);
   ctx.engineReady = false;
   ctxResetGameStateForMount(ctx);
   ctxPersistPlayPreferences(ctx);
   ctxRenderEngineCaution(ctx);
-  if (!restored) ctxSetRuntimeWarning('Your saved engine asset is unavailable, so Play is using Maia instead.');
+  if (!restored) ctxSetRuntimeWarning(ctx, 'Your saved engine asset is unavailable, so Play is using Maia instead.');
   ctxRender(ctx);
   ctxPrepareOrStartEngine(ctx);
 }
 
-function ctxRenderEngineCaution(_ctx: PlayContext): void {
-  const option = ctxDraftEngine();
-  const caution = el('engineCaution');
+function ctxRenderEngineCaution(ctx: PlayContext): void {
+  const option = ctxDraftEngine(ctx);
+  const caution = ctx.dom.el('engineCaution');
   if (option.family === 'lc0' && option.variant !== 'small') {
     const config = BIG_NETS[option.variant as BigNetKey];
     const memory = bigNetMemoryCaution(config);
@@ -1336,14 +1308,18 @@ let openingIndex: OpeningNameIndex | null = null;
 let openingIndexPromise: Promise<void> | null = null;
 
 function ctxEnsureOpeningNames(ctx: PlayContext): void {
-  if (openingIndex || openingIndexPromise || !ctx.moves.length || ctx.startFen !== START_FEN) return;
-  openingIndexPromise = fetch(resolvePublicAssetUrl('/openings/eco.json'))
+  if (openingIndex || ctx.openingNamesRequested || !ctx.moves.length || ctx.startFen !== START_FEN) return;
+  ctx.openingNamesRequested = true;
+  // The index is shared by every mount; each mount re-renders itself when it lands.
+  openingIndexPromise ??= fetch(resolvePublicAssetUrl('/openings/eco.json'))
     .then((response) => (response.ok ? response.json() : null))
     .then((index: unknown) => {
       if (index && typeof index === 'object' && !Array.isArray(index)) openingIndex = index as OpeningNameIndex;
-      if (!ctxIsDisposed(ctx)) ctxRender(ctx);
     })
     .catch(() => undefined);
+  void openingIndexPromise.then(() => {
+    if (!ctxIsDisposed(ctx) && openingIndex) ctxRender(ctx);
+  });
 }
 
 function ctxOpeningAt(ctx: PlayContext, ply: number): readonly [string, string] | null {
@@ -1375,11 +1351,11 @@ function ctxOpponentMeta(ctx: PlayContext): string {
   return `${option.variant === 'lqo' ? 'Queen odds · ' : ''}Level ${level + 1} · ${name}`;
 }
 
-function ctxOpponentBlurb(_ctx: PlayContext): string {
-  const option = ctxDraftEngine();
+function ctxOpponentBlurb(ctx: PlayContext): string {
+  const option = ctxDraftEngine(ctx);
   if (option.family === 'maia3') {
-    const elo = ctxSelectedMaia3Elo();
-    return ctxSelectedMaia3Style() === 'argmax'
+    const elo = ctxSelectedMaia3Elo(ctx);
+    return ctxSelectedMaia3Style(ctx) === 'argmax'
       ? `Always plays the most typical move of a ${elo}-rated human.`
       : `Plays like a ${elo}-rated human, mistakes included.`;
   }
@@ -1388,14 +1364,14 @@ function ctxOpponentBlurb(_ctx: PlayContext): string {
   return `A full-strength engine, strong even at level 1. For an even game, pick Maia3.`;
 }
 
-function playCtaLabel(): string {
-  const choice = selectEl('colorSelect').value;
+function playCtaLabel(ctx: PlayContext): string {
+  const choice = ctx.dom.selectEl('colorSelect').value;
   if (choice === 'random') return 'Play · random colour';
   return `Play as ${choice === 'black' ? 'Black' : 'White'}`;
 }
 
 function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shownPly: number, phase: PlayPhase): void {
-  const strip = el(id);
+  const strip = ctx.dom.el(id);
   const option = ctxSelectedEngine(ctx);
   const isHuman = color === ctx.humanColor;
   const side = color === 'w' ? 'White' : 'Black';
@@ -1419,7 +1395,8 @@ function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shownPly: nu
   else if (!isHuman && ctx.engineThinking) [text, kind] = ['', ''];
   else if (!isHuman && ctx.preparingEngine) [text, kind] = ['Loading…', 'thinking'];
   else if (!isHuman && ctx.practicePosition && !ctx.started && !ctx.engineReady) [text, kind] = ['Loads on Play', 'ready'];
-  else if (!isHuman && !ctx.engineReady && !ctx.gameOver) [text, kind] = buttonEl('retryEngine').hidden ? ['Loading…', 'thinking'] : ['Error · retry', 'error'];
+  else if (!isHuman && !ctx.engineReady && !ctx.gameOver)
+    [text, kind] = ctx.dom.buttonEl('retryEngine').hidden ? ['Loading…', 'thinking'] : ['Error · retry', 'error'];
   // Readiness only matters before the first move; during play the strips carry the turn.
   else if (!isHuman && phase === 'setup') [text, kind] = ['Ready', 'ready'];
   else if (isHuman && phase === 'playing' && ctx.viewPly === null && ctx.board.turn === color && ctx.engineReady && !ctx.pendingPromotion)
@@ -1432,12 +1409,12 @@ function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shownPly: nu
 
 function ctxRenderChrome(ctx: PlayContext, shownPly: number): void {
   const phase = ctxPhase(ctx);
-  const main = el('main');
+  const main = ctx.dom.el('main');
   main.dataset.phase = phase;
   main.dataset.opponentState = ctx.opponent.tag;
   main.dataset.opponent = ctx.opponent.active.engineId;
   main.dataset.pendingOpponent = ctx.opponent.pending?.engineId ?? '';
-  const hasNotice = !buttonEl('retryEngine').hidden || !el('runtimeWarning').hidden || !el('dlProgress').hidden;
+  const hasNotice = !ctx.dom.buttonEl('retryEngine').hidden || !ctx.dom.el('runtimeWarning').hidden || !ctx.dom.el('dlProgress').hidden;
   main.dataset.quiet = String(
     !hasNotice && ctx.engineReady && !ctx.preparingEngine && !ctx.thinkingShown && !ctx.pendingPromotion && ctx.viewPly === null && !boardCheck(ctx.board),
   );
@@ -1449,45 +1426,45 @@ function ctxRenderChrome(ctx: PlayContext, shownPly: number): void {
   ctxRenderStrip(ctx, 'bottomStrip', topColor === 'w' ? 'b' : 'w', shownPly, phase);
 
   // Setup controls mirror the hidden selects so preferences and listeners stay single-sourced.
-  const colorChoice = selectEl('colorSelect').value;
-  for (const button of document.querySelectorAll<HTMLButtonElement>('.color-choice [data-color]')) {
+  const colorChoice = ctx.dom.selectEl('colorSelect').value;
+  for (const button of ctx.dom.queryAll<HTMLButtonElement>('.color-choice [data-color]')) {
     button.setAttribute('aria-pressed', String(button.dataset.color === colorChoice));
   }
-  const elo = ctxSelectedMaia3Elo();
-  el('maia3EloBand').textContent = `· ${maiaRatingBand(elo)}`;
-  for (const chip of document.querySelectorAll<HTMLButtonElement>('.rating-presets [data-elo]')) {
+  const elo = ctxSelectedMaia3Elo(ctx);
+  ctx.dom.el('maia3EloBand').textContent = `· ${maiaRatingBand(elo)}`;
+  for (const chip of ctx.dom.queryAll<HTMLButtonElement>('.rating-presets [data-elo]')) {
     chip.setAttribute('aria-pressed', String(Number(chip.dataset.elo) === elo));
   }
-  el('opponentBlurb').textContent = ctxOpponentBlurb(ctx);
+  ctx.dom.el('opponentBlurb').textContent = ctxOpponentBlurb(ctx);
 
-  const change = buttonEl('changeOpponent');
+  const change = ctx.dom.buttonEl('changeOpponent');
   change.setAttribute('aria-expanded', String(ctx.configOpen));
   change.textContent = ctx.configOpen ? 'Done' : 'Change opponent';
   change.title = ctx.configOpen ? '' : 'Change opponent (asks before restarting the game)';
-  const detailsLabel = maybeEl('detailsLabel');
+  const detailsLabel = ctx.dom.maybeEl('detailsLabel');
   if (detailsLabel) detailsLabel.textContent = option.family === 'maia3' ? 'Exact rating & opponent details' : 'Opponent details';
 
-  const newGame = buttonEl('newGame');
+  const newGame = ctx.dom.buttonEl('newGame');
   newGame.classList.toggle('primary', phase === 'setup');
   newGame.classList.toggle('armed', ctx.newGameArmed);
-  setButtonLabel(newGame, phase === 'setup' ? playCtaLabel() : ctx.newGameArmed ? 'Confirm new game' : 'New game');
+  setButtonLabel(newGame, phase === 'setup' ? playCtaLabel(ctx) : ctx.newGameArmed ? 'Confirm new game' : 'New game');
   newGame.title = phase === 'playing' && !ctx.newGameArmed ? 'Abandon this game and start another (asks to confirm)' : '';
 
-  const card = el('gameOverCard');
+  const card = ctx.dom.el('gameOverCard');
   card.hidden = !ctx.gameOver;
   if (ctx.gameOver) {
     const { result, reason } = ctx.gameOver;
     const humanWon = result !== '1/2-1/2' && (result === '1-0') === (ctx.humanColor === 'w');
-    el('resultHeadline').textContent = result === '1/2-1/2' ? 'Draw' : humanWon ? 'You won' : `${opponent} won`;
-    el('resultScore').textContent = result === '1/2-1/2' ? '½–½' : result.replace('-', '–');
-    el('resultReason').textContent =
+    ctx.dom.el('resultHeadline').textContent = result === '1/2-1/2' ? 'Draw' : humanWon ? 'You won' : `${opponent} won`;
+    ctx.dom.el('resultScore').textContent = result === '1/2-1/2' ? '½–½' : result.replace('-', '–');
+    ctx.dom.el('resultReason').textContent =
       `${reason.charAt(0).toUpperCase()}${reason.slice(1)} · ${ctx.sans.length ? `${Math.ceil(ctx.sans.length / 2)} moves` : 'no moves'}`;
   }
 
   const hasRecord = ctx.moves.length > 0 || !!ctx.practicePosition;
-  buttonEl('copyPgn').disabled = !hasRecord;
-  buttonEl('downloadPgn').disabled = !hasRecord;
-  for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-analyze]')) {
+  ctx.dom.buttonEl('copyPgn').disabled = !hasRecord;
+  ctx.dom.buttonEl('downloadPgn').disabled = !hasRecord;
+  for (const link of ctx.dom.queryAll<HTMLAnchorElement>('[data-analyze]')) {
     link.setAttribute('aria-disabled', String(!hasRecord));
     // Mid-game, analysis opens beside the game instead of replacing it.
     if (phase === 'playing') {
@@ -1500,7 +1477,7 @@ function ctxRenderChrome(ctx: PlayContext, shownPly: number): void {
   }
 
   ctxEnsureOpeningNames(ctx);
-  const opening = el('openingName');
+  const opening = ctx.dom.el('openingName');
   const name = ctx.moves.length ? ctxOpeningAt(ctx, shownPly) : null;
   opening.hidden = !name;
   opening.innerHTML = name ? `<strong>${htmlEscape(name[0])}</strong>${htmlEscape(name[1])}` : '';
@@ -1530,21 +1507,21 @@ function ctxRender(ctx: PlayContext): void {
   const statusText = ctxStatusText(ctx);
   const setupReady = ctxPhase(ctx) === 'setup' && ctx.engineReady && !ctx.engineThinking && !ctx.preparingEngine && !browsing;
   // Setup reads as a heading; the "Press Play or make a move" hint lives under the Play button.
-  el('status').textContent = setupReady ? `New game vs ${ctxOpponentName(ctxSelectedEngine(ctx))}` : statusText;
+  ctx.dom.el('status').textContent = setupReady ? `New game vs ${ctxOpponentName(ctxSelectedEngine(ctx))}` : statusText;
   // The one live region: turn and readiness changes are announced here and nowhere else.
-  const announcement = el('gameAnnouncement');
+  const announcement = ctx.dom.el('gameAnnouncement');
   const spokenStatus = setupReady ? `${ctxOpponentName(ctxSelectedEngine(ctx))} is ready. ${statusText}` : statusText;
   if (announcement.textContent !== spokenStatus) announcement.textContent = spokenStatus;
-  el('status').classList.toggle('over', !!ctx.gameOver);
-  el('status').classList.toggle('browsing', browsing);
+  ctx.dom.el('status').classList.toggle('over', !!ctx.gameOver);
+  ctx.dom.el('status').classList.toggle('browsing', browsing);
   ctxRefreshSearchProgressLabel(ctx);
-  el('status').setAttribute('aria-busy', ctx.engineThinking ? 'true' : 'false');
+  ctx.dom.el('status').setAttribute('aria-busy', ctx.engineThinking ? 'true' : 'false');
   ctxRenderMaia3Controls(ctx);
-  el('levelCaption').textContent = ctxStrengthCaption(ctx);
-  buttonEl('takeback').disabled = ctx.moves.length <= ctx.practiceBoundary || !!ctx.pendingPromotion;
-  buttonEl('takeback').title = ctx.practicePosition ? 'Take back to your previous turn, no earlier than the imported position' : '';
-  buttonEl('resign').disabled = !!ctx.gameOver || (!ctx.moves.length && !ctx.started);
-  selectEl('engineSelect').disabled = ctx.engineThinking;
+  ctx.dom.el('levelCaption').textContent = ctxStrengthCaption(ctx);
+  ctx.dom.buttonEl('takeback').disabled = ctx.moves.length <= ctx.practiceBoundary || !!ctx.pendingPromotion;
+  ctx.dom.buttonEl('takeback').title = ctx.practicePosition ? 'Take back to your previous turn, no earlier than the imported position' : '';
+  ctx.dom.buttonEl('resign').disabled = !!ctx.gameOver || (!ctx.moves.length && !ctx.started);
+  ctx.dom.selectEl('engineSelect').disabled = ctx.engineThinking;
   ctxRenderMoveList(ctx);
   ctxRenderMoveNav(ctx);
   ctxRenderPromotionPicker(ctx);
@@ -1579,24 +1556,24 @@ function ctxRender(ctx: PlayContext): void {
     },
     lastMove: lastUci ? [lastUci.slice(0, 2) as Key, lastUci.slice(2, 4) as Key] : undefined,
   };
-  if (!ctx.ground) ctx.ground = Chessground(el('ground'), config);
+  if (!ctx.ground) ctx.ground = Chessground(ctx.dom.el('ground'), config);
   else ctx.ground.set(config);
   // Screen readers and keyboard users get the square grid; the drawn board is decorative to them.
-  el('ground').querySelector('cg-board')?.setAttribute('aria-hidden', 'true');
-  ctx.keyboardBoard ??= createAnalysisKeyboardBoard(el('keyboardBoard'), {
+  ctx.dom.el('ground').querySelector('cg-board')?.setAttribute('aria-hidden', 'true');
+  ctx.keyboardBoard ??= createAnalysisKeyboardBoard(ctx.dom.el('keyboardBoard'), {
     onSelect: (key) => ctx.ground?.selectSquare(key),
     onMove: (from, to) => ctxOnUserMove(ctx, from, to),
     announce: (text) => {
-      el('boardAnnouncement').textContent = text;
+      ctx.dom.el('boardAnnouncement').textContent = text;
     },
   });
   ctx.keyboardBoard.render(shownBoard, ctx.orientation);
-  el('positionNotice').hidden = !ctx.practicePosition && !ctx.handoffNotice;
-  el('positionNoticeText').textContent = ctx.practicePosition
+  ctx.dom.el('positionNotice').hidden = !ctx.practicePosition && !ctx.handoffNotice;
+  ctx.dom.el('positionNoticeText').textContent = ctx.practicePosition
     ? 'Continue this position. Queen-odds opponents are unavailable because they need their own starting position.'
     : ctx.handoffNotice;
   // Switching roots is only offered before play or after the game is finished.
-  buttonEl('useStartingPosition').hidden = !ctx.practicePosition || (ctx.started && !ctx.gameOver);
+  ctx.dom.buttonEl('useStartingPosition').hidden = !ctx.practicePosition || (ctx.started && !ctx.gameOver);
   ctxRenderChrome(ctx, shownPly);
 }
 
@@ -1616,15 +1593,15 @@ function ctxSetOpponent(ctx: PlayContext, next: PlayOpponentState): void {
 
 function ctxRestoreOpponentControls(ctx: PlayContext): void {
   const preferences = ctx.opponent.pending ?? ctx.opponent.active;
-  selectEl('engineSelect').value = preferences.engineId;
-  selectEl('colorSelect').value = preferences.color;
+  ctx.dom.selectEl('engineSelect').value = preferences.engineId;
+  ctx.dom.selectEl('colorSelect').value = preferences.color;
   ctx.lastEngineId = preferences.engineId;
   ctxRenderLevelOptions(ctx);
-  selectEl('levelSelect').value = String(preferences.level);
-  (el('maia3Elo') as HTMLInputElement).value = String(preferences.maiaElo);
-  selectEl('maia3Style').value = preferences.maiaStyle;
-  (el('maia3Temperature') as HTMLInputElement).value = String(preferences.maiaTemperature);
-  (el('maia3TopP') as HTMLInputElement).value = String(preferences.maiaTopP);
+  ctx.dom.selectEl('levelSelect').value = String(preferences.level);
+  (ctx.dom.el('maia3Elo') as HTMLInputElement).value = String(preferences.maiaElo);
+  ctx.dom.selectEl('maia3Style').value = preferences.maiaStyle;
+  (ctx.dom.el('maia3Temperature') as HTMLInputElement).value = String(preferences.maiaTemperature);
+  (ctx.dom.el('maia3TopP') as HTMLInputElement).value = String(preferences.maiaTopP);
   ctxRenderMaia3Controls(ctx);
   ctxRenderEngineCaution(ctx);
 }
@@ -1725,8 +1702,8 @@ async function ctxCheckRestoredDownloadConsent(ctx: PlayContext): Promise<boolea
       if (accepted) ctx.restoredDownloadEngineId = null;
       else {
         ctx.engineReady = false;
-        ctxSetEngineNote('Download cancelled. Use Retry when you want to load this opponent.');
-        buttonEl('retryEngine').hidden = false;
+        ctxSetEngineNote(ctx, 'Download cancelled. Use Retry when you want to load this opponent.');
+        ctx.dom.buttonEl('retryEngine').hidden = false;
         ctxRender(ctx);
       }
       return accepted;
@@ -1764,7 +1741,7 @@ function ctxResetGameStateForMount(ctx: PlayContext): void {
   ctx.pendingPromotion = null;
   ctx.viewPly = null;
   ctx.lastEngineId = ctx.opponent.active.engineId;
-  ctxSetEngineNote('');
+  ctxSetEngineNote(ctx, '');
   ctxDisarmResign(ctx);
 }
 
@@ -1776,17 +1753,17 @@ function ctxRevokePhoneLargeNets(ctx: PlayContext): void {
   const cancellingRestore = !!pending && phoneSafeEngineVariant(pending.family, pending.variant) !== pending.variant;
   if (cancellingRestore) ctx.pendingPreferredEngineId = null;
   if (cancellingRestore && ctx.pendingPreferredEngineTimer) {
-    clearTimeout(ctx.pendingPreferredEngineTimer);
+    ctx.scope.clearTimeout(ctx.pendingPreferredEngineTimer);
     ctx.pendingPreferredEngineTimer = null;
   }
   const active = ctxSelectedEngine(ctx);
-  const draft = ctxDraftEngine();
+  const draft = ctxDraftEngine(ctx);
   // An earlier game's gated net may still be retained behind an unaffected opponent.
   // Queen Odds is exempt and may own live work, so never evict it on revocation.
   releaseUnusedBigNetSearchers(['lqo'], 0);
   if (cancellingRestore || phoneSafeEngineVariant(active.family, active.variant) !== active.variant) {
     ctxCancelEngineTurn(ctx);
-    ctxSetEngineNote('');
+    ctxSetEngineNote(ctx, '');
     const preferences = { ...ctx.opponent.active, engineId: 'lc0-small' };
     ctxSetOpponent(ctx, committedPlayOpponent(preferences));
     ctxRestoreOpponentControls(ctx);
@@ -1803,7 +1780,7 @@ function ctxRevokePhoneLargeNets(ctx: PlayContext): void {
 }
 
 function ctxInit(ctx: PlayContext): void {
-  if (blockedModelOverride) showPhoneLargeNetFallback(true);
+  if (ctx.blockedModelOverride) showPhoneLargeNetFallback(true);
   // Only a decoded storage position handoff replaces a saved game. URL options never contain a Play game.
   const handedOff = ctxApplyPlayHandoffForMount(ctx);
   const validEngineIds = new Set(ENGINE_OPTIONS.map((option) => option.id));
@@ -1823,47 +1800,47 @@ function ctxInit(ctx: PlayContext): void {
   const preferredBigNetCanProbe =
     preferredOption?.family === 'lc0' && preferredOption.variant !== 'small' && (!isV0DeployProfile() || preferredOption.variant === 'lqo');
   ctx.pendingPreferredEngineId = !saved && preferredOption && preferredBigNetCanProbe && preferredBigNetStatus === 'unknown' ? preferredOption.id : null;
-  selectEl('engineSelect').value = preferredOption && (saved || !ctxEngineOptionState(preferredOption).disabled) ? preferredOption.id : 'maia3';
-  selectEl('colorSelect').value =
+  ctx.dom.selectEl('engineSelect').value = preferredOption && (saved || !ctxEngineOptionState(preferredOption).disabled) ? preferredOption.id : 'maia3';
+  ctx.dom.selectEl('colorSelect').value =
     ctx.practicePosition && !saved ? (replayPlayPosition(ctx.practicePosition).board.turn === 'w' ? 'white' : 'black') : preferences.color;
-  (el('maia3Elo') as HTMLInputElement).value = String(preferences.maiaElo);
-  selectEl('maia3Style').value = preferences.maiaStyle;
-  (el('maia3Temperature') as HTMLInputElement).value = String(preferences.maiaTemperature);
-  (el('maia3TopP') as HTMLInputElement).value = String(preferences.maiaTopP);
+  (ctx.dom.el('maia3Elo') as HTMLInputElement).value = String(preferences.maiaElo);
+  ctx.dom.selectEl('maia3Style').value = preferences.maiaStyle;
+  (ctx.dom.el('maia3Temperature') as HTMLInputElement).value = String(preferences.maiaTemperature);
+  (ctx.dom.el('maia3TopP') as HTMLInputElement).value = String(preferences.maiaTopP);
   ctxRenderLevelOptions(ctx);
-  selectEl('levelSelect').value = String(preferences.level);
+  ctx.dom.selectEl('levelSelect').value = String(preferences.level);
   ctxResetGameStateForMount(ctx);
   if (saved) {
     const { preferences: _preferences, ...game } = saved;
     Object.assign(ctx, game);
-    el('playRestoreNotice').hidden = false;
+    ctx.dom.el('playRestoreNotice').hidden = false;
   }
   ctx.restoredDownloadEngineId = preferredOption?.family === 'lc0' && preferredOption.variant !== 'small' ? preferredOption.id : null;
   ctx.autosave = createWorkspaceAutosave('play', undefined, 400, undefined, undefined, (type) => ctxUpdatePendingInput(ctx, { type }));
-  trackListener(ctx, window, 'pagehide', () => ctx.autosave?.flush());
-  trackListener(ctx, window, 'pageshow', (event: Event) => {
+  ctx.scope.listen(window, 'pagehide', () => ctx.autosave?.flush());
+  ctx.scope.listen(window, 'pageshow', (event: Event) => {
     if (!(event as PageTransitionEvent).persisted) return;
     ctxDisarmResign(ctx);
     ctxDisarmNewGame(ctx);
     ctxRender(ctx);
   });
-  trackListener(ctx, document, 'visibilitychange', () => {
+  ctx.scope.listen(document, 'visibilitychange', () => {
     if (document.hidden) ctx.autosave?.flush();
   });
-  trackListener(ctx, el('playRestoreDismiss'), 'click', () => {
-    el('playRestoreNotice').hidden = true;
+  ctx.scope.listen(ctx.dom.el('playRestoreDismiss'), 'click', () => {
+    ctx.dom.el('playRestoreNotice').hidden = true;
   });
-  trackListener(ctx, el('playRestoreNew'), 'click', () => {
+  ctx.scope.listen(ctx.dom.el('playRestoreNew'), 'click', () => {
     ctx.started = false;
     ctx.configOpen = false;
     ctxNewGame(ctx);
   });
 
-  trackListener(ctx, el('newGame'), 'click', () => {
+  ctx.scope.listen(ctx.dom.el('newGame'), 'click', () => {
     const resolvingSavedEngine = !!ctx.pendingPreferredEngineId;
     ctx.pendingPreferredEngineId = null;
     if (ctx.pendingPreferredEngineTimer) {
-      clearTimeout(ctx.pendingPreferredEngineTimer);
+      ctx.scope.clearTimeout(ctx.pendingPreferredEngineTimer);
       ctx.pendingPreferredEngineTimer = null;
     }
     const phase = ctxPhase(ctx);
@@ -1873,7 +1850,7 @@ function ctxInit(ctx: PlayContext): void {
       ctx.configOpen = false;
       if (!ctx.preparingEngine && !ctx.engineThinking) ctxPrepareOrStartEngine(ctx);
       ctxRender(ctx);
-      if (matchMedia('(max-width: 900px)').matches) document.querySelector('.board-panel')?.scrollIntoView({ block: 'start' });
+      if (matchMedia('(max-width: 900px)').matches) ctx.dom.query('.board-panel')?.scrollIntoView({ block: 'start' });
       return;
     }
     if (phase === 'playing' && ctxHumanMoveCount(ctx) > 0 && !ctx.newGameArmed) {
@@ -1884,7 +1861,7 @@ function ctxInit(ctx: PlayContext): void {
     ctx.started = true;
     ctxNewGame(ctx);
   });
-  trackListener(ctx, el('useStartingPosition'), 'click', () => {
+  ctx.scope.listen(ctx.dom.el('useStartingPosition'), 'click', () => {
     ctxUpdatePendingInput(ctx, { type: 'discarded' });
     ctx.practicePosition = null;
     ctx.handoffNotice = '';
@@ -1896,36 +1873,36 @@ function ctxInit(ctx: PlayContext): void {
     ctxRender(ctx);
     ctxPrepareOrStartEngine(ctx);
   });
-  trackListener(ctx, el('changeOpponent'), 'click', () => {
+  ctx.scope.listen(ctx.dom.el('changeOpponent'), 'click', () => {
     ctx.configOpen = !ctx.configOpen;
     ctxRender(ctx);
-    if (ctx.configOpen) selectEl('engineSelect').focus();
+    if (ctx.configOpen) ctx.dom.selectEl('engineSelect').focus();
   });
-  trackListener(ctx, document.querySelector('.color-choice') ?? document, 'click', (event: Event) => {
+  ctx.scope.listen(ctx.dom.query('.color-choice') ?? ctx.dom.root, 'click', (event: Event) => {
     const button = (event.target as HTMLElement | null)?.closest?.<HTMLButtonElement>('[data-color]');
-    const select = selectEl('colorSelect');
+    const select = ctx.dom.selectEl('colorSelect');
     if (!button?.dataset.color || button.dataset.color === select.value) return;
     select.value = button.dataset.color;
     select.dispatchEvent(new Event('change', { bubbles: true }));
   });
-  trackListener(ctx, document.querySelector('.rating-presets') ?? document, 'click', (event: Event) => {
+  ctx.scope.listen(ctx.dom.query('.rating-presets') ?? ctx.dom.root, 'click', (event: Event) => {
     const chip = (event.target as HTMLElement | null)?.closest?.<HTMLButtonElement>('[data-elo]');
-    const input = el('maia3Elo') as HTMLInputElement;
+    const input = ctx.dom.el('maia3Elo') as HTMLInputElement;
     if (!chip?.dataset.elo) return;
     input.value = chip.dataset.elo;
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  trackListener(ctx, el('moveForm'), 'submit', (event: Event) => {
+  ctx.scope.listen(ctx.dom.el('moveForm'), 'submit', (event: Event) => {
     event.preventDefault();
     ctxSubmitTypedMove(ctx);
   });
-  trackListener(ctx, el('moveInput'), 'input', () => {
-    const input = el('moveInput') as HTMLInputElement;
+  ctx.scope.listen(ctx.dom.el('moveInput'), 'input', () => {
+    const input = ctx.dom.el('moveInput') as HTMLInputElement;
     input.setCustomValidity('');
     input.classList.remove('invalid');
   });
-  for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-analyze]')) {
-    trackListener(ctx, link, 'click', (event: Event) => {
+  for (const link of ctx.dom.queryAll<HTMLAnchorElement>('[data-analyze]')) {
+    ctx.scope.listen(link, 'click', (event: Event) => {
       if (!ctx.moves.length && !ctx.practicePosition) {
         event.preventDefault();
         return;
@@ -1933,7 +1910,7 @@ function ctxInit(ctx: PlayContext): void {
       writeAnalysisHandoff(ctxExportPgn(ctx));
     });
   }
-  trackListener(ctx, el('downloadPgn'), 'click', () => {
+  ctx.scope.listen(ctx.dom.el('downloadPgn'), 'click', () => {
     if (!ctx.moves.length && !ctx.practicePosition) return;
     const pgn = ctxExportPgn(ctx);
     const url = URL.createObjectURL(new Blob([pgn], { type: 'application/x-chess-pgn' }));
@@ -1949,32 +1926,32 @@ function ctxInit(ctx: PlayContext): void {
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
-  trackListener(ctx, el('retryEngine'), 'click', () => {
+  ctx.scope.listen(ctx.dom.el('retryEngine'), 'click', () => {
     if (ctx.engineThinking || ctx.preparingEngine || ctx.gameOver) return;
-    buttonEl('retryEngine').hidden = true;
-    ctxSetEngineNote('Retrying engine…');
+    ctx.dom.buttonEl('retryEngine').hidden = true;
+    ctxSetEngineNote(ctx, 'Retrying engine…');
     if (ctx.board.turn === ctx.humanColor) void ctxVerifySelectedEngineReady(ctx);
     else void ctxEngineTurn(ctx);
   });
-  trackListener(ctx, window, BROWSER_RUNTIME_AUDIT_EVENT, (event: Event) => {
+  ctx.scope.listen(window, BROWSER_RUNTIME_AUDIT_EVENT, (event: Event) => {
     const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
     if (detail.surface && detail.surface !== 'play') return;
     const identity = browserRuntimeAuditIdentity(detail);
-    if (detail.fallbackReason) playRuntimeFallbackAudits.set(identity, detail);
-    else playRuntimeFallbackAudits.delete(identity);
+    if (detail.fallbackReason) ctx.runtimeFallbackAudits.set(identity, detail);
+    else ctx.runtimeFallbackAudits.delete(identity);
     if (playOptionMatchesRuntimeAudit(ctxSelectedEngine(ctx), detail)) ctxRestoreSelectedRuntimeWarning(ctx);
   });
-  trackListener(ctx, el('takeback'), 'click', () => ctxTakeback(ctx));
-  trackListener(ctx, el('navFirst'), 'click', () => ctxNavigate(ctx, 'first'));
-  trackListener(ctx, el('navPrev'), 'click', () => ctxNavigate(ctx, 'prev'));
-  trackListener(ctx, el('navNext'), 'click', () => ctxNavigate(ctx, 'next'));
-  trackListener(ctx, el('navLast'), 'click', () => ctxNavigate(ctx, 'last'));
-  trackListener(ctx, el('moveList'), 'click', (event: Event) => {
+  ctx.scope.listen(ctx.dom.el('takeback'), 'click', () => ctxTakeback(ctx));
+  ctx.scope.listen(ctx.dom.el('navFirst'), 'click', () => ctxNavigate(ctx, 'first'));
+  ctx.scope.listen(ctx.dom.el('navPrev'), 'click', () => ctxNavigate(ctx, 'prev'));
+  ctx.scope.listen(ctx.dom.el('navNext'), 'click', () => ctxNavigate(ctx, 'next'));
+  ctx.scope.listen(ctx.dom.el('navLast'), 'click', () => ctxNavigate(ctx, 'last'));
+  ctx.scope.listen(ctx.dom.el('moveList'), 'click', (event: Event) => {
     const span = (event.target as HTMLElement | null)?.closest?.('.san[data-ply]') as HTMLElement | null;
     if (!span) return;
     ctxSetViewPly(ctx, viewPlyFor(Number(span.dataset.ply), ctx.moves.length));
   });
-  trackListener(ctx, document, 'keydown', (event: Event) => {
+  ctx.scope.listen(document, 'keydown', (event: Event) => {
     const keyEvent = event as KeyboardEvent;
     // The promotion overlay owns the arrow keys (and Escape) while it is open.
     if (keyEvent.defaultPrevented || ctx.pendingPromotion) return;
@@ -1983,30 +1960,29 @@ function ctxInit(ctx: PlayContext): void {
     keyEvent.preventDefault();
     ctxNavigate(ctx, action);
   });
-  trackListener(ctx, el('resign'), 'click', () => ctxResign(ctx));
-  trackListener(ctx, el('flip'), 'click', () => {
+  ctx.scope.listen(ctx.dom.el('resign'), 'click', () => ctxResign(ctx));
+  ctx.scope.listen(ctx.dom.el('flip'), 'click', () => {
     ctx.orientation = ctx.orientation === 'white' ? 'black' : 'white';
     ctxRender(ctx);
   });
-  trackListener(ctx, el('copyPgn'), 'click', () => {
+  ctx.scope.listen(ctx.dom.el('copyPgn'), 'click', () => {
     void writeClipboard(ctxExportPgn(ctx)).then((copied) => {
       if (ctx.disposed) return;
-      const btn = buttonEl('copyPgn');
+      const btn = ctx.dom.buttonEl('copyPgn');
       setButtonLabel(btn, copied ? 'Copied' : 'Copy failed');
       btn.dataset.copied = String(copied);
-      if (!copied) el('gameAnnouncement').textContent = 'Could not copy PGN to the clipboard. Use Download PGN to keep the game.';
-      setTimeout(() => {
-        if (ctx.disposed) return;
+      if (!copied) ctx.dom.el('gameAnnouncement').textContent = 'Could not copy PGN to the clipboard. Use Download PGN to keep the game.';
+      ctx.scope.timeout(() => {
         setButtonLabel(btn, 'Copy PGN');
         btn.dataset.copied = 'false';
       }, 1500);
     });
   });
-  trackListener(ctx, el('confirmRestart'), 'click', () => ctxConfirmRestart(ctx));
-  trackListener(ctx, el('dismissRestart'), 'click', () => ctxDismissRestart(ctx));
-  trackListener(ctx, selectEl('colorSelect'), 'change', () => ctxMaybeQueueRestart(ctx));
-  trackListener(ctx, window, PHONE_LARGE_NET_CHANGE_EVENT, () => ctxRevokePhoneLargeNets(ctx));
-  trackListener(ctx, selectEl('engineSelect'), 'change', async () => {
+  ctx.scope.listen(ctx.dom.el('confirmRestart'), 'click', () => ctxConfirmRestart(ctx));
+  ctx.scope.listen(ctx.dom.el('dismissRestart'), 'click', () => ctxDismissRestart(ctx));
+  ctx.scope.listen(ctx.dom.selectEl('colorSelect'), 'change', () => ctxMaybeQueueRestart(ctx));
+  ctx.scope.listen(window, PHONE_LARGE_NET_CHANGE_EVENT, () => ctxRevokePhoneLargeNets(ctx));
+  ctx.scope.listen(ctx.dom.selectEl('engineSelect'), 'change', async () => {
     // Transfer abandoned saved-probe preparation to a superseding picker owner.
     const resumeFallback = !!ctx.pendingPreferredEngineId || !!ctx.pickerConsent?.resumeFallback;
     ctxCancelPickerConsent(ctx);
@@ -2015,7 +1991,7 @@ function ctxInit(ctx: PlayContext): void {
     const signal = AbortSignal.any([ctx.consentAbort.signal, ctx.abort.signal, request.controller.signal]);
     ctx.pendingPreferredEngineId = null;
     if (ctx.pendingPreferredEngineTimer) {
-      clearTimeout(ctx.pendingPreferredEngineTimer);
+      ctx.scope.clearTimeout(ctx.pendingPreferredEngineTimer);
       ctx.pendingPreferredEngineTimer = null;
     }
     const previousEngineId = ctx.lastEngineId;
@@ -2033,18 +2009,18 @@ function ctxInit(ctx: PlayContext): void {
         !ctx.gameOver &&
         ctx.lastEngineId === previousEngineId
       ) {
-        ctxSetEngineNote('');
+        ctxSetEngineNote(ctx, '');
         ctxPrepareOrStartEngine(ctx);
       }
     };
     if (ctx.engineThinking) {
-      selectEl('engineSelect').value = previousEngineId;
+      ctx.dom.selectEl('engineSelect').value = previousEngineId;
       ctxRender(ctx);
       return;
     }
-    const option = ctxDraftEngine();
+    const option = ctxDraftEngine(ctx);
     if (option.family === 'lc0' && option.variant !== 'small') {
-      selectEl('engineSelect').value = previousEngineId;
+      ctx.dom.selectEl('engineSelect').value = previousEngineId;
       if (!(await requestLargeNetConsent(BIG_NETS[option.variant as BigNetKey], signal, false))) {
         resumeRevertedOpponent();
         return;
@@ -2056,24 +2032,24 @@ function ctxInit(ctx: PlayContext): void {
         return;
       }
       ctxRefreshEngineOptions(ctx);
-      selectEl('engineSelect').value = option.id;
+      ctx.dom.selectEl('engineSelect').value = option.id;
       if (ctx.restoredDownloadEngineId === option.id) ctx.restoredDownloadEngineId = null;
     }
     if (option.family === 'maia3' && previousEngineId.startsWith('maia-')) {
       const carried = Number(ctx.lastEngineId.slice('maia-'.length));
       if (Number.isFinite(carried)) {
-        (el('maia3Elo') as HTMLInputElement).value = String(Math.max(MAIA3_MIN_ELO, Math.min(MAIA3_MAX_ELO, carried)));
+        (ctx.dom.el('maia3Elo') as HTMLInputElement).value = String(Math.max(MAIA3_MIN_ELO, Math.min(MAIA3_MAX_ELO, carried)));
       }
     }
     ctx.lastEngineId = option.id;
     ctxRenderLevelOptions(ctx);
     ctxMaybeQueueRestart(ctx);
   });
-  trackListener(ctx, selectEl('levelSelect'), 'change', () => ctxTuneOpponent(ctx));
-  trackListener(ctx, selectEl('maia3Style'), 'change', () => ctxTuneOpponent(ctx));
-  trackListener(ctx, el('maia3Elo'), 'input', () => ctxTuneOpponent(ctx));
-  trackListener(ctx, el('maia3Temperature'), 'input', () => ctxTuneOpponent(ctx));
-  trackListener(ctx, el('maia3TopP'), 'input', () => ctxTuneOpponent(ctx));
+  ctx.scope.listen(ctx.dom.selectEl('levelSelect'), 'change', () => ctxTuneOpponent(ctx));
+  ctx.scope.listen(ctx.dom.selectEl('maia3Style'), 'change', () => ctxTuneOpponent(ctx));
+  ctx.scope.listen(ctx.dom.el('maia3Elo'), 'input', () => ctxTuneOpponent(ctx));
+  ctx.scope.listen(ctx.dom.el('maia3Temperature'), 'input', () => ctxTuneOpponent(ctx));
+  ctx.scope.listen(ctx.dom.el('maia3TopP'), 'input', () => ctxTuneOpponent(ctx));
   const refreshIfMounted = () => {
     if (!ctxIsDisposed(ctx)) {
       ctxRefreshEngineOptions(ctx);
@@ -2091,14 +2067,14 @@ function ctxInit(ctx: PlayContext): void {
   }
   ctxRender(ctx);
   if (ctx.pendingPreferredEngineId) {
-    ctxSetEngineNote('Checking your saved engine assets…');
-    ctx.pendingPreferredEngineTimer = setTimeout(() => {
+    ctxSetEngineNote(ctx, 'Checking your saved engine assets…');
+    ctx.pendingPreferredEngineTimer = ctx.scope.timeout(() => {
       if (ctx.disposed || !ctx.pendingPreferredEngineId) return;
       ctx.pendingPreferredEngineId = null;
       ctx.pendingPreferredEngineTimer = null;
       ctxPersistPlayPreferences(ctx);
       ctx.engineReady = false;
-      ctxSetRuntimeWarning('The saved-engine check timed out, so Play is using Maia. You can retry the engine from the selector.');
+      ctxSetRuntimeWarning(ctx, 'The saved-engine check timed out, so Play is using Maia. You can retry the engine from the selector.');
       ctxRender(ctx);
       ctxPrepareOrStartEngine(ctx);
     }, 10_000);
@@ -2170,60 +2146,35 @@ function hasPlayBrowserDom(root: HTMLElement): boolean {
   return false;
 }
 
-let lastPlayMountHref: string | null = null;
-
-export function mountPlayBrowser(): () => void {
-  const root = document.getElementById('main');
-  if (!root || !hasPlayBrowserDom(root)) return () => undefined;
-  const href = location.href;
-  if (lastPlayMountHref !== null && lastPlayMountHref !== href) {
-    location.reload();
-    return () => undefined;
-  }
-  lastPlayMountHref = href;
+/** Mounts Play on `scope.root`. Engines are not mount-scoped: they live in the module-level host and outlive this mount. */
+export function mountPlayBrowser(scope: MountScope): void {
+  if (!hasPlayBrowserDom(scope.root)) return;
+  // Decided at mount: by teardown the URL may already show the next route.
   const retireCpuOnUnmount = isMemoryConstrainedDevice() && phoneReclaimSettings().retireCpu;
-  const releaseDom = pageDom.mount(root);
-  const ctx = createPlayContext();
+  const ctx = createPlayContext(scope);
+  // Registered before init so a mount that throws midway still retires what it started.
+  scope.defer(() => {
+    ctx.autosave?.flush();
+    ctx.autosave = null;
+    ctx.disposed = true;
+    ctx.consentAbort.abort();
+    ctxCancelEngineTurn(ctx);
+    ctx.abort.abort();
+    engines.unmounted(retireCpuOnUnmount);
+    ctx.keyboardBoard?.destroy();
+    ctx.keyboardBoard = null;
+    (ctx.ground as { destroy?: () => void } | null)?.destroy?.();
+    ctx.ground = null;
+  });
   ctxInit(ctx);
 
   // Test hook for automated browser checks: synthetic chessground drags are
   // unreliable, so smokes call this to route through the real user-move path.
   const hook = (from: string, to: string) => ctxOnUserMove(ctx, from as Key, to as Key);
-  (globalThis as unknown as { __playUserMove?: (from: string, to: string) => void }).__playUserMove = hook;
-
-  return () => {
-    try {
-      ctx.autosave?.flush();
-      ctx.autosave = null;
-      ctx.disposed = true;
-      ctx.consentAbort.abort();
-      ctxCancelEngineTurn(ctx);
-      ctx.abort.abort();
-      engines.unmounted(retireCpuOnUnmount);
-      playRuntimeFallbackAudits.clear();
-      if (ctx.resignArmTimer) {
-        clearTimeout(ctx.resignArmTimer);
-        ctx.resignArmTimer = null;
-      }
-      ctxDisarmNewGame(ctx);
-      ctx.keyboardBoard?.destroy();
-      ctx.keyboardBoard = null;
-      if (ctx.pendingPreferredEngineTimer) {
-        clearTimeout(ctx.pendingPreferredEngineTimer);
-        ctx.pendingPreferredEngineTimer = null;
-      }
-      (ctx.ground as { destroy?: () => void } | null)?.destroy?.();
-      ctx.ground = null;
-      for (const { target, type, fn } of ctx.listeners) {
-        target.removeEventListener(type, fn);
-      }
-      ctx.listeners = [];
-      // Only clear the test hook if it is still ours (a newer re-entrant mount
-      // may have installed its own).
-      const g = globalThis as unknown as { __playUserMove?: (from: string, to: string) => void };
-      if (g.__playUserMove === hook) delete g.__playUserMove;
-    } finally {
-      releaseDom();
-    }
-  };
+  const g = globalThis as unknown as { __playUserMove?: (from: string, to: string) => void };
+  g.__playUserMove = hook;
+  // Only clear the hook if it is still ours (a newer mount may have installed its own).
+  scope.defer(() => {
+    if (g.__playUserMove === hook) delete g.__playUserMove;
+  });
 }

@@ -13,8 +13,9 @@ function controllerContract(source) {
     for (const match of text.matchAll(/\bid\s*=\s*["']([\w-]+)["']/g)) generatedIds.add(match[1]);
   };
   function visit(node) {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && lookupNames.has(node.expression.text) && ts.isStringLiteralLike(node.arguments[0]))
-      lookups.add(node.arguments[0].text);
+    // Module-level `el('x')` (Analysis, Arena) or per-mount `ctx.dom.el('x')` (Play).
+    const callee = ts.isCallExpression(node) ? (ts.isPropertyAccessExpression(node.expression) ? node.expression.name : node.expression) : null;
+    if (callee && ts.isIdentifier(callee) && lookupNames.has(callee.text) && ts.isStringLiteralLike(node.arguments[0])) lookups.add(node.arguments[0].text);
     if (ts.isStringLiteralLike(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) addHtml(node.text);
     if (
       ts.isBinaryExpression(node) &&
@@ -70,8 +71,10 @@ for (const controller of ['play', 'analysis', 'arena'])
   });
 
 test('the id contract resolves component props and generated HTML but rejects a new missing literal id', () => {
-  const contract = controllerContract(`el('message'); inputEl('playRestoreNew'); maybeEl('generated'); el('typo'); const html='<div id="generated"></div>';`);
+  const contract = controllerContract(
+    `el('message'); inputEl('playRestoreNew'); maybeEl('generated'); el('typo'); ctx.dom.el('scopedTypo'); const html='<div id="generated"></div>';`,
+  );
   const available = markupIds(`<p id="message"></p><button id={\`\${area}RestoreNew\`}></button>`, { area: 'play' });
-  assert.deepEqual(missingIds(contract, available), ['typo']);
+  assert.deepEqual(missingIds(contract, available), ['scopedTypo', 'typo']);
   assert.deepEqual(missingIds(controllerContract("el('analysisRestoreNew')"), available), ['analysisRestoreNew'], 'another route cannot satisfy the contract');
 });

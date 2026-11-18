@@ -380,7 +380,7 @@ test('an explicit ?model= override, even naming the default file, loads exactly 
     // Known large-net overrides additionally require phone consent; ordinary overrides are unchanged.
     assert.match(
       source,
-      /lc0SmallModelRequest\(\s*DEFAULT_MODEL_URL,\s*isV0DeployProfile\(\)(?: \|\| blockedModelOverride)? \? null : params\.get\('model'\)/,
+      /lc0SmallModelRequest\(\s*DEFAULT_MODEL_URL,\s*isV0DeployProfile\(\)(?: \|\| blockedModelOverride)? \? null : (?:params\.get\('model'\)|requested)/,
       file,
     );
     assert.doesNotMatch(source, /(deviceSelection|deviceModelSelection): MODEL_URL === DEFAULT_MODEL_URL/, file);

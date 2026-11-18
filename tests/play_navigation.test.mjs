@@ -6,7 +6,10 @@ import { test } from 'node:test';
 test('Play bfcache restoration retires temporary resign and new-game confirmations', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const source = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
-  const wiring = source.slice(source.indexOf("  ctx.autosave = createWorkspaceAutosave('play'"), source.indexOf("  trackListener(ctx, el('newGame'), 'click'"));
+  const wiring = source.slice(
+    source.indexOf("  ctx.autosave = createWorkspaceAutosave('play'"),
+    source.indexOf("  ctx.scope.listen(ctx.dom.el('newGame'), 'click'"),
+  );
   const disarmResign = source.slice(source.indexOf('function ctxDisarmResign('), source.indexOf('/** Icon buttons'));
   const disarmNewGame = source.slice(source.indexOf('function ctxDisarmNewGame('), source.indexOf('function ctxExportPgn('));
   const window = new EventTarget(),
@@ -18,7 +21,8 @@ test('Play bfcache restoration retires temporary resign and new-game confirmatio
     const el = key => {if (!elements.has(key)) elements.set(key, new EventTarget()); return elements.get(key);};
     const buttonEl = () => ({classList: {contains: () => true, remove() {}}}), setButtonLabel = () => {};
     const createWorkspaceAutosave = () => ({}), ctxRender = () => renders++;
-    const trackListener = (ctx, target, event, callback) => target.addEventListener(event, callback);
+    ctx.dom = { el, buttonEl };
+    ctx.scope = { listen: (target, event, callback) => target.addEventListener(event, callback), clearTimeout };
     ${stripTypeScriptTypes(disarmResign + disarmNewGame + wiring)}
     return () => renders;
   `;
