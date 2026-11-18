@@ -232,6 +232,10 @@
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/playBrowser.ts"]
     },
+    "tests/perf_routes.test.mjs": {
+      "reason": "asserts these files are inputs to the perf harness identity hash (resume refuses a changed harness)",
+      "reads": ["src/chess/board.ts", "src/chess/moveCodec.ts", "src/chess/movegen.ts", "src/chess/san.ts"]
+    },
     "tests/phone_download_ownership.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts", "src/lc0/playBrowser.ts"]
