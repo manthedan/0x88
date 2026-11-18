@@ -354,6 +354,22 @@ test('only client aborts from the outgoing route during navigation, or at/after 
   );
 });
 
+test('a request that survives an intermediate route is not excused by the next transition', () => {
+  const marks = [
+    { route: 'analysis', at: 0, readyAt: 100 },
+    { route: 'play', at: 1000, readyAt: 1100 },
+    { route: 'arena', at: 2000, readyAt: 2100 },
+  ];
+  const base = { method: 'GET', path: '/models/x.onnx', status: 200, complete: false, clientAborted: true, failure: 'Browser disconnected before response finished' };
+  const leftover = { ...base, at: 500, endedAt: 2050 };
+  const fromPlay = { ...base, at: 1500, endedAt: 2050 };
+  assert.deepEqual(requestFailures([leftover, fromPlay], 'navigation', { routeMarks: marks, cutoff: { at: 9000, requestCount: 2 } }), {
+    optional: [],
+    teardownAborts: [fromPlay],
+    unexpected: [leftover],
+  });
+});
+
 test('the JS deadline ignores bodyless probes and optional prefetches, not late or aborted required bodies', () => {
   const get = { at: 10, method: 'GET', path: '/required.mjs?v=1', status: 200, bytes: 1, complete: false };
   const head = { ...get, method: 'HEAD', path: '/berserk/probe.js', bytes: 0 };
