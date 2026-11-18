@@ -2,7 +2,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { browserIdentity, chromeFootprint, compareRuns, footprintSum, parseArgs, plan, platformProblem } from '../scripts/perf_routes/gate.mjs';
-import { LINUX_CHROME_ARGS, linuxFootprintReader, parseNvidiaProcesses, parseSmapsRollup, warmWebGpu } from '../scripts/perf_routes/linux.mjs';
+import {
+  LINUX_CHROME_ARGS,
+  linuxFootprintReader,
+  parseNvidiaProcesses,
+  parseSmapsRollup,
+  warmWebGpu,
+  webgpuBackendProblem,
+} from '../scripts/perf_routes/linux.mjs';
+import { selectSessions, sessionId } from '../scripts/perf_routes/resume.mjs';
 
 // Captured on Yukon (Linux 7.0, Chromium 149, RTX 3090): headless GPU process after a 256 MiB WebGPU allocation.
 const GPU_SMAPS = `00010000-7ffcb8118000 ---p 00000000 00:00 0                              [rollup]
@@ -248,6 +256,76 @@ test('WebGPU warm-up retries the early null adapter, rejects software and f16-le
     /lacks shader-f16/,
   );
   assert.equal(noF16.state.closed, 1);
+});
+
+test('WebGPU warm-up gives up at its wall-clock deadline or on shutdown and closes what it opened', async () => {
+  const stalled = () => {
+    const state = { closed: 0, lateClosed: 0 };
+    const context = {
+      route: async () => {},
+      newPage: async () => ({ goto: async () => {}, evaluate: () => new Promise(() => {}) }),
+      close: async () => state.closed++,
+    };
+    return { state, newContext: async () => context };
+  };
+  const timedOut = stalled();
+  await assert.rejects(
+    warmWebGpu(timedOut, async () => true, { timeoutMs: 20 }),
+    /WebGPU warm-up exceeded 20 ms/,
+  );
+  assert.equal(timedOut.state.closed, 1, 'a stalled requestAdapter() does not keep the context open');
+  const shutdown = new AbortController();
+  const aborted = stalled();
+  const warming = warmWebGpu(aborted, async () => true, { signal: shutdown.signal });
+  setTimeout(() => shutdown.abort(Error('Interrupted by SIGTERM')), 10);
+  await assert.rejects(warming, /Interrupted by SIGTERM/);
+  assert.equal(aborted.state.closed, 1);
+  // A context that arrives after the deadline is closed when it lands.
+  let arrive;
+  const late = { close: async () => late.closed++, closed: 0 };
+  await assert.rejects(
+    warmWebGpu({ newContext: () => new Promise((resolve) => (arrive = resolve)) }, async () => true, { timeoutMs: 10 }),
+    /exceeded 10 ms/,
+  );
+  arrive(late);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(late.closed, 1);
+});
+
+test('Linux sessions refuse journeys whose ORT sessions ran on WASM or reported no backend', () => {
+  // Shapes captured on Yukon: CPU engine workers report no backend; Play's Maia3 lists its fallback provider.
+  const cpuEngine = { backend: undefined };
+  assert.equal(webgpuBackendProblem('analysis-default', [{ backend: 'auto->webgpu', ortIoMode: 'gpu-capture' }], []), null);
+  assert.equal(webgpuBackendProblem('analysis-four', [{ backend: 'auto->webgpu' }, cpuEngine, cpuEngine], []), null);
+  assert.equal(webgpuBackendProblem('play-maia3', [{ backend: 'auto->webgpu,wasm' }], []), null);
+  assert.equal(webgpuBackendProblem('arena-lc0', [], ['webgpu']), null, "Arena's main-thread Lc0 reports through the console");
+  assert.equal(webgpuBackendProblem('arena-cpu', [cpuEngine, cpuEngine], []), null, 'no neural engine to check');
+  assert.match(webgpuBackendProblem('analysis-default', [{ backend: 'auto->wasm', ortIoMode: 'cpu' }], []), /ORT ran on WASM, not WebGPU \(auto->wasm\)/);
+  assert.match(webgpuBackendProblem('arena-lc0', [], ['wasm']), /ORT ran on WASM/);
+  assert.match(webgpuBackendProblem('navigation', [{ backend: 'auto->webgpu' }, { backend: 'auto->wasm' }], []), /auto->wasm/);
+  assert.match(webgpuBackendProblem('arena-lc0', [cpuEngine], []), /No ORT backend observed for arena-lc0/);
+  const source = readFileSync(new URL('../scripts/perf_routes/session.mjs', import.meta.url), 'utf8');
+  const ready = source.indexOf('result.workerReady = await evaluate(');
+  const check = source.indexOf('webgpuBackendProblem(spec.journey, result.workerReady, result.ortSessions)');
+  assert.ok(check > ready && check < source.indexOf("result.status = 'ok'"), 'checked once workers have reported, before the session counts');
+  assert.ok(source.indexOf("page.on('console'") < source.indexOf('await navigate(entryUrl())'), 'listening before the app loads');
+  assert.match(source, /warmWebGpu\(browser, [^\n]*\{ signal \}\)/, 'warm-up observes the session shutdown signal');
+});
+
+test('a browser build that differs from the cohort is refused before measuring and re-runs on resume', () => {
+  const source = readFileSync(new URL('../scripts/perf_routes/session.mjs', import.meta.url), 'utf8');
+  const claim = source.indexOf('claimBrowser(browser.version()');
+  assert.ok(claim > 0 && claim < source.indexOf('await warmWebGpu('), 'checked right after launch, before the warm-up');
+  assert.ok(!/result\.browserVersion =/.test(source), 'only claimBrowser records an identity');
+  const coordinator = readFileSync(new URL('../scripts/perf_routes/run.mjs', import.meta.url), 'utf8');
+  assert.match(coordinator, /expectedBrowser: cohortBrowser\[cell\.browser\] \?\? null/);
+  const attempt = coordinator.slice(coordinator.indexOf('const row = recordAttempt('));
+  assert.ok(attempt.indexOf('if (row.browserMismatch') < attempt.indexOf("appendFileSync(join(out, 'runs.jsonl')"), 'never appended');
+  const options = parseArgs(['--baseline', 'a', '--candidate', 'b', '--dry-run', '--browser', 'chrome', '--journey', 'navigation']);
+  const cells = plan(options);
+  const refused = { ...cells[0], status: 'invalid', error: 'Error: Browser build changed mid-cohort', browserMismatch: '150.0 @ /c/other/chrome' };
+  const selected = selectSessions(cells, (id) => ({ result: id === sessionId(cells[0], 0) ? refused : null }));
+  assert.equal(selected[0].reuse, null, 'a refused build is not an outcome');
 });
 
 test('the gate refuses to combine sessions from different browser builds (browser update or PERF_ROUTES_CHROMIUM change on resume)', () => {

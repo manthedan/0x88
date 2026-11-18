@@ -7,7 +7,7 @@ import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { linkAssets, localAssets } from './assets.mjs';
-import { compareRuns, HELP, parseArgs, plan, platformProblem, previewEnvironment } from './gate.mjs';
+import { browserIdentity, compareRuns, HELP, parseArgs, plan, platformProblem, previewEnvironment } from './gate.mjs';
 import {
   acquireLock,
   cancellationMarker,
@@ -229,9 +229,13 @@ async function measure(signal, out, sources, resuming) {
     if (args['build-only']) return;
     // runs.jsonl is rebuilt in plan order from the session files; keep the old index for audit.
     if (existsSync(join(out, 'runs.jsonl'))) renameSync(join(out, 'runs.jsonl'), join(out, `runs.${Date.now()}.prev.jsonl`));
+    // Each session refuses, before measuring, a browser build other than the one already in the cohort.
+    const cohortBrowser = {};
+    const claim = (row) => (cohortBrowser[row.browser] ??= browserIdentity(row));
     for (const [i, { cell, id, reuse }] of cells.entries()) {
       signal.throwIfAborted();
       if (reuse) {
+        claim(reuse);
         appendFileSync(join(out, 'runs.jsonl'), `${JSON.stringify(reuse)}\n`);
         continue;
       }
@@ -239,7 +243,18 @@ async function measure(signal, out, sources, resuming) {
         resultFile = join(out, 'sessions', `${id}.json`);
       writeFileSync(
         specFile,
-        JSON.stringify({ ...cell, base: builds[cell.arm].base, source: builds[cell.arm], driver: args.driver, externalLock: !!args.benchlock }, null, 2),
+        JSON.stringify(
+          {
+            ...cell,
+            base: builds[cell.arm].base,
+            source: builds[cell.arm],
+            driver: args.driver,
+            externalLock: !!args.benchlock,
+            expectedBrowser: cohortBrowser[cell.browser] ?? null,
+          },
+          null,
+          2,
+        ),
       );
       console.log(`[${i + 1}/${cells.length}] ${id}`);
       let status, cleanupConfirmed;
@@ -274,6 +289,10 @@ async function measure(signal, out, sources, resuming) {
         lockDir: args['lock-dir'],
       });
       if (!cleanupConfirmed) console.error(row.error);
+      // Not an outcome (resume re-runs it), and never appended: the cohort stays combinable.
+      if (row.browserMismatch && cleanupConfirmed)
+        throw Error(`${id}: browser build changed mid-cohort (${row.browserMismatch}); restore ${row.expectedBrowser} and --resume, or start a new cohort`);
+      claim(row);
       appendFileSync(join(out, 'runs.jsonl'), `${JSON.stringify(row)}\n`);
       signal.throwIfAborted();
       if (!cleanupConfirmed) {

@@ -119,34 +119,70 @@ export const ADAPTER_INFO = `(async () => {
  * request happens right at page load and would silently fall back to WASM. Poll from a throwaway
  * context, closed before the measured context exists, until the GPU process returns a hardware adapter.
  * `isRendererGone` lets the caller wait for the throwaway renderer to exit so it is never sampled; the
- * warm-up fails if that exit is not confirmed.
+ * warm-up fails if that exit is not confirmed. A wall-clock deadline and the session's shutdown `signal`
+ * bound it: a stalled requestAdapter() never settles, and the caller may hold the shared GPU mutex.
  */
-export async function warmWebGpu(browser, isRendererGone, { attempts = 40, delayMs = 250, exitPolls = 50, exitDelayMs = 100 } = {}) {
+export async function warmWebGpu(browser, isRendererGone, { signal, timeoutMs = 30000, attempts = 40, delayMs = 250, exitPolls = 50, exitDelayMs = 100 } = {}) {
   const started = Date.now();
-  const context = await browser.newContext();
-  let adapter, tries;
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(Error(`WebGPU warm-up exceeded ${timeoutMs} ms`)), timeoutMs);
+  const stop = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
+  const stopped = new Promise((_, reject) => {
+    if (stop.aborted) reject(stop.reason);
+    else stop.addEventListener('abort', () => reject(stop.reason), { once: true });
+  });
+  stopped.catch(() => {});
+  // Closing the context settles a stalled call; until then the race lets the warm-up give up on it.
+  const bounded = (value) => {
+    const promise = Promise.resolve(value);
+    promise.catch(() => {});
+    return Promise.race([promise, stopped]);
+  };
+  const wait = (ms) => bounded(new Promise((r) => setTimeout(r, ms)));
+  const creating = browser.newContext();
+  let context, adapter, tries;
   try {
-    // A secure-context origin served by Playwright itself: no request reaches the counting proxy.
-    await context.route('**/*', (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>warm-up</title>' }));
-    const page = await context.newPage();
-    await page.goto('http://127.0.0.1/webgpu-warmup');
-    for (tries = 1; tries <= attempts && !adapter; tries++) {
-      adapter = await page.evaluate(ADAPTER_INFO);
-      if (!adapter) await new Promise((r) => setTimeout(r, delayMs));
+    try {
+      context = await bounded(creating);
+      // A secure-context origin served by Playwright itself: no request reaches the counting proxy.
+      await bounded(context.route('**/*', (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>warm-up</title>' })));
+      const page = await bounded(context.newPage());
+      await bounded(page.goto('http://127.0.0.1/webgpu-warmup'));
+      for (tries = 1; tries <= attempts && !adapter; tries++) {
+        adapter = await bounded(page.evaluate(ADAPTER_INFO));
+        if (!adapter) await wait(delayMs);
+      }
+    } finally {
+      if (context) await context.close();
+      else creating.then((late) => late.close()).catch(() => {});
+    }
+    if (!adapter || adapter.fallback || /swiftshader|llvmpipe/i.test(JSON.stringify(adapter)))
+      throw Error(`No hardware WebGPU adapter: ${JSON.stringify(adapter)}`);
+    // The app treats an adapter without shader-f16 as no adapter: every model would silently run on WASM.
+    if (!adapter.shaderF16) throw Error(`WebGPU adapter lacks shader-f16; the app would run its models on WASM: ${JSON.stringify(adapter)}`);
+    // A lingering warm-up renderer would be sampled as part of the measured footprint.
+    for (let i = 0; !(await bounded(isRendererGone())); i++) {
+      if (i >= exitPolls) throw Error(`WebGPU warm-up renderer still running after ${exitPolls * exitDelayMs} ms`);
+      await wait(exitDelayMs);
     }
   } finally {
-    await context.close();
-  }
-  if (!adapter || adapter.fallback || /swiftshader|llvmpipe/i.test(JSON.stringify(adapter)))
-    throw Error(`No hardware WebGPU adapter: ${JSON.stringify(adapter)}`);
-  // The app treats an adapter without shader-f16 as no adapter: every model would silently run on WASM.
-  if (!adapter.shaderF16) throw Error(`WebGPU adapter lacks shader-f16; the app would run its models on WASM: ${JSON.stringify(adapter)}`);
-  // A lingering warm-up renderer would be sampled as part of the measured footprint.
-  for (let i = 0; !(await isRendererGone()); i++) {
-    if (i >= exitPolls) throw Error(`WebGPU warm-up renderer still running after ${exitPolls * exitDelayMs} ms`);
-    await new Promise((r) => setTimeout(r, exitDelayMs));
+    clearTimeout(timer);
   }
   return { ...adapter, attempts: tries - 1, ms: Date.now() - started };
+}
+
+/**
+ * The warm-up only proves an f16 adapter exists: every ORT session requests its own and silently falls
+ * back to WASM, which would report CPU numbers as the WebGPU datapoint. Workers report their backend on
+ * ready (`workerReady`, e.g. `auto->webgpu`); Arena runs Lc0 on the main thread, whose ORT logs
+ * "session ready with WebGPU|WASM provider" (`ortSessions`). CPU engines report no backend.
+ */
+export function webgpuBackendProblem(journey, workerReady, ortSessions) {
+  const backends = [...(workerReady ?? []).map((w) => w?.backend).filter((b) => typeof b === 'string'), ...ortSessions];
+  const cpu = backends.filter((b) => !/webgpu/i.test(b));
+  if (cpu.length) return `ORT ran on WASM, not WebGPU (${cpu.join(', ')})`;
+  if (!backends.length && journey !== 'arena-cpu') return `No ORT backend observed for ${journey}; WebGPU unconfirmed`;
+  return null;
 }
 
 export const LINUX_LIMITATION =

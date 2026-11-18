@@ -6,6 +6,7 @@ import { median } from '../lib/perf_canary_stats.mjs';
 import { pgrep, readFootprint, sleep, WORKER_READY_SCRIPT } from '../perf_matrix/common.mjs';
 import { startCountingProxy } from '../perf_matrix/proxy.mjs';
 import {
+  browserIdentity,
   chromeFootprint,
   footprintSum,
   incompleteJsTransfers,
@@ -19,7 +20,7 @@ import {
 } from './gate.mjs';
 import { DOCS_READY, MIDGAME, routeFor, runJourney, waitFor } from './journeys.mjs';
 import { checkSessionCancellation, cleanupMarker, safariCreationRefused, shutdownDelay, waitForCleanup, watchShutdown } from './lifecycle.mjs';
-import { LINUX_CHROME_ARGS, LINUX_LIMITATION, linuxFootprintReader, warmWebGpu } from './linux.mjs';
+import { LINUX_CHROME_ARGS, LINUX_LIMITATION, linuxFootprintReader, warmWebGpu, webgpuBackendProblem } from './linux.mjs';
 
 const [specFile, outFile] = process.argv.slice(2);
 const spec = JSON.parse(readFileSync(specFile, 'utf8'));
@@ -137,6 +138,17 @@ async function sample() {
 function entryUrl() {
   return `${proxy.url}/app/${routeFor(spec.journey)}/${spec.journey.startsWith('analysis') ? `?fen=${encodeURIComponent(MIDGAME)}` : ''}`;
 }
+// A cohort keeps one browser build (compareRuns refuses a mix). Check right after launch, before
+// measuring, and keep a mismatched identity out of browserVersion so the row cannot poison the cohort;
+// the coordinator stops and a resume re-runs the cell once the cohort's browser is restored.
+function claimBrowser(browserVersion, browserExecutable) {
+  const launched = browserExecutable ? { browserVersion, browserExecutable } : { browserVersion };
+  if (spec.expectedBrowser && browserIdentity(launched) !== spec.expectedBrowser) {
+    result.browserMismatch = browserIdentity(launched);
+    throw Error(`Browser build changed mid-cohort: cohort ran ${spec.expectedBrowser}, this launch is ${result.browserMismatch}`);
+  }
+  Object.assign(result, launched);
+}
 async function uaMemory(label) {
   if (spec.browser !== 'chrome') return;
   const value = await evaluate(`(async () => {
@@ -174,8 +186,9 @@ try {
         throw error;
       });
     close = () => browser.close();
+    claimBrowser(browser.version(), linux ? realpathSync(process.env.PERF_ROUTES_CHROMIUM || chromium.executablePath()) : undefined);
     cdp = await browser.newBrowserCDPSession();
-    if (linux) result.webgpuWarmup = await warmWebGpu(browser, async () => !(await chromePids()).rendererPids.length);
+    if (linux) result.webgpuWarmup = await warmWebGpu(browser, async () => !(await chromePids()).rendererPids.length, { signal });
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     context.on('request', (request) => {
       const url = new URL(request.url());
@@ -183,12 +196,15 @@ try {
     });
     page = await context.newPage();
     page.on('dialog', (dialog) => dialog.accept()); // only local journey leave confirmations
+    // Main-thread ORT sessions (Arena's Lc0) post no worker ready message; their console line names the provider.
+    result.ortSessions = [];
+    page.on('console', (message) => {
+      const ready = /^Centipawn ORT: session ready with (WebGPU|WASM) provider/.exec(message.text());
+      if (ready) result.ortSessions.push(ready[1].toLowerCase());
+    });
     page.setDefaultTimeout(120000);
     evaluate = guarded((expression) => bounded(page.evaluate(expression), 'Chrome page evaluation'));
     navigate = guarded((url) => page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 }));
-    result.browserVersion = browser.version();
-    // compareRuns refuses a cohort that mixes builds (e.g. PERF_ROUTES_CHROMIUM changed on --resume).
-    if (linux) result.browserExecutable = realpathSync(process.env.PERF_ROUTES_CHROMIUM || chromium.executablePath());
     sampling = setInterval(sample, 100);
     await sample();
   } else {
@@ -219,7 +235,7 @@ try {
       });
     writeFileSync(pendingCleanup, `Owned Safari session ${sid} at ${spec.driver}\n`);
     signal.throwIfAborted();
-    result.browserVersion = session.capabilities?.browserVersion;
+    claimBrowser(session.capabilities?.browserVersion);
     await wd('POST', `/session/${sid}/timeouts`, { pageLoad: 90000, script: 120000 });
     await wd('POST', `/session/${sid}/window/rect`, { width: 1280, height: 900 });
     // Safari's automation window can be occluded by other mini apps: background rAF and
@@ -248,6 +264,10 @@ try {
   result.evidence = await runJourney(evaluate, spec.journey, mark, pause);
   result.probe = await evaluate(`JSON.parse(JSON.stringify(window.__routePerf))`);
   result.workerReady = await evaluate(`window.__perfWorkerReady`);
+  if (linux) {
+    const problem = webgpuBackendProblem(spec.journey, result.workerReady, result.ortSessions);
+    if (problem) throw Error(`${problem}: CPU numbers would stand in for the Linux WebGPU datapoint`);
+  }
   result.transitions = await evaluate(`window.__analysisTransitionLog?.() ?? []`);
   const p = result.probe;
   result.metrics.boardInteractiveMs = p.boardInteractiveMs;

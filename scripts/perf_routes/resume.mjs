@@ -98,7 +98,8 @@ export function sharesBaselineBuild(sources, savedBuilds) {
 
 // Operator stops and Safari-busy attempts are not outcomes (a fresh run would have retried them). A
 // `.cancelled` marker alone is not evidence: a benchlock cancel can land after the browser started.
-const notAnOutcome = (result) => result.status !== 'ok' && /^(?:Error: )?Interrupted\b|already paired/.test(result.error ?? '');
+// A refused browser build measured nothing; it re-runs once the cohort's browser is restored.
+const notAnOutcome = (result) => result.status !== 'ok' && (!!result.browserMismatch || /^(?:Error: )?Interrupted\b|already paired/.test(result.error ?? ''));
 
 // Reuse every recorded outcome, failures included: retrying only failures until clean would be
 // selective outlier removal. Missing, unreadable or interrupted sessions run again.
