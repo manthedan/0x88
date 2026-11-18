@@ -67,12 +67,13 @@ export interface Maia3Wdl {
 
 /** Decode one model-order [Loss, Draw, Win] `logits_value` row. A malformed row decodes to NaN fields. */
 export function decodeMaia3Value(row: ArrayLike<number>): { logits: Maia3Wdl; probabilities: Maia3Wdl } {
-  if (row.length !== 3) {
-    // NaN rather than a uniform softmax, so a broken output is not read as an uncertain position.
+  const values = Array.from(row);
+  if (values.length !== 3 || !values.every(Number.isFinite)) {
+    // NaN rather than softmax's uniform fallback, so a broken output is not read as an uncertain position.
     const missing = { win: Number.NaN, draw: Number.NaN, loss: Number.NaN };
     return { logits: missing, probabilities: { ...missing } };
   }
-  const [loss, draw, win] = Array.from(row);
+  const [loss, draw, win] = values;
   const [pLoss, pDraw, pWin] = softmax([loss, draw, win]);
   return { logits: { win, draw, loss }, probabilities: { win: pWin, draw: pDraw, loss: pLoss } };
 }

@@ -27,5 +27,13 @@ test('maia3WinProbability is the side-to-move score flipped to White', () => {
 test('a malformed value row decodes to NaN and scores as even', () => {
   const { probabilities } = decodeMaia3Value([1, 2]);
   assert.ok(Number.isNaN(probabilities.win));
+  // softmax would turn a non-finite logit into a plausible uniform 1/3 split
+  for (const row of [
+    [Number.NaN, 0, 0],
+    [0, Number.POSITIVE_INFINITY, 0],
+  ]) {
+    const decoded = decodeMaia3Value(row).probabilities;
+    assert.ok([decoded.win, decoded.draw, decoded.loss].every(Number.isNaN), JSON.stringify(decoded));
+  }
   assert.equal(maia3WinProbability({ fen: '8/8/8/8/8/8/8/K6k w - - 0 1', valueProbabilities: probabilities }), 0.5);
 });
