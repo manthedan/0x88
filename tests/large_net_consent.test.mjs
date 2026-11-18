@@ -147,7 +147,10 @@ test('a phone already opted in to t3 still warns when only the split-K model is 
     });
   const pending = f.request(BIG_NETS.t3, { inspect });
   const dialog = await f.dialog();
-  assert.match(dialog.children[1].textContent, /t3 may download up to 160 MB/);
+  assert.equal(
+    dialog.children[1].textContent,
+    'Large nets can crash the tab on phones. Model downloads with fallback are estimated at 160 MB. Retries can use more data.',
+  );
   choose(dialog, false);
   assert.equal(await pending, false);
 });

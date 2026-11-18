@@ -155,7 +155,7 @@ for (const placement of [
   });
 }
 
-test('the t3 probe counts bytes for every uncached artifact the Apple WebGPU path might load', async () => {
+test('the t3 probe includes the fallback even if its cached copy could be evicted by a split-K download', async () => {
   const original = BIG_NETS.t3.modelUrl;
   const splitK = lc0SplitKUrl(original);
   const sizes = new Map([
@@ -164,7 +164,7 @@ test('the t3 probe counts bytes for every uncached artifact the Apple WebGPU pat
   ]);
   for (const [cached, expectedUrl, expectedSize] of [
     [[splitK], original, 160_000_000],
-    [[original], splitK, 170_000_000],
+    [[original], splitK, 330_000_000],
     [[], splitK, 330_000_000],
   ]) {
     const result = await inspectLargeNetDownload(BIG_NETS.t3, undefined, {
@@ -172,6 +172,7 @@ test('the t3 probe counts bytes for every uncached artifact the Apple WebGPU pat
       inspect: async (url) => ({ url, downloadBytes: sizes.get(url), cached: cached.includes(url) }),
     });
     assert.equal(result.cached, false);
+    assert.equal(result.mayDownloadFallback, true);
     assert.equal(result.url, expectedUrl);
     assert.equal(result.downloadBytes, expectedSize);
   }

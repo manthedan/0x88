@@ -18,8 +18,9 @@ export async function inspectLargeNetDownload(config: BigNetConfig, signal?: Abo
   if (selectedUrl === originalUrl) return deps.inspect(originalUrl, { signal });
 
   const [selected, original] = await Promise.all([deps.inspect(selectedUrl, { signal }), deps.inspect(originalUrl, { signal })]);
-  if (original.cached) return selected;
+  if (selected.cached && original.cached) return selected;
   if (selected.cached) return { ...original, mayDownloadFallback: true };
+  // Caching split-K can evict the original before the worker tries its fallback.
   const downloadBytes =
     selected.downloadBytes === undefined || original.downloadBytes === undefined ? undefined : selected.downloadBytes + original.downloadBytes;
   return { ...selected, downloadBytes, mayDownloadFallback: true };
