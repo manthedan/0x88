@@ -1,3 +1,5 @@
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import adapter from '@sveltejs/adapter-static';
 import { loadEnv } from 'vite';
 import { executableAssetSources } from './scripts/csp_asset_origins.mjs';
@@ -28,15 +30,35 @@ export function createCspDirectives(env) {
   };
 }
 
+const staticAdapter = adapter({
+  pages: outDir,
+  assets: outDir,
+  // Netlify answers unknown paths with /404.html (status 404). Kit's fallback is a client shell
+  // that renders src/routes/+error.svelte; prerendered pages are unaffected.
+  fallback: '404.html',
+});
+
+// Kit's fallback shell is empty until its JS runs. This static copy keeps a missing URL readable
+// with JS off or a failed chunk load; +error.svelte removes it once the app mounts.
+export const STATIC_NOT_FOUND_ID = 'static-not-found';
+const STATIC_NOT_FOUND = `<main id="${STATIC_NOT_FOUND_ID}" class="wrap"><h1>Page not found</h1><p><a href="/">Home</a> · <a href="/app/play/">Play</a> · <a href="/docs/">Docs</a></p></main>`;
+const BODY_TARGET = '<div style="display: contents">';
+
 // Shared by the Vite plugin and deployment-policy checks; SvelteKit 3 reads no svelte.config.js.
 export default {
-  adapter: adapter({
-    pages: outDir,
-    assets: outDir,
-    // Netlify answers unknown paths with /404.html (status 404). Kit's fallback is a client shell
-    // that renders src/routes/+error.svelte; prerendered pages are unaffected.
-    fallback: '404.html',
-  }),
+  adapter: {
+    ...staticAdapter,
+    async adapt(builder) {
+      await staticAdapter.adapt(builder);
+      const file = join(outDir, '404.html');
+      const html = await readFile(file, 'utf8');
+      if (html.split(BODY_TARGET).length !== 2) throw new Error(`404.html: expected one ${BODY_TARGET} from src/app.html`);
+      await writeFile(file, html.replace(BODY_TARGET, BODY_TARGET + STATIC_NOT_FOUND));
+    },
+  },
+  // Root-absolute build URLs: the service worker may answer any failed navigation with a cached
+  // page, and that page's relative ../_app/ links would resolve against the wrong directory.
+  paths: { relative: false },
   csp: {
     mode: 'hash',
     directives: createCspDirectives(loadEnv(process.env.NODE_ENV === 'development' ? 'development' : 'production', process.cwd(), 'VITE_')),

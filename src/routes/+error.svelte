@@ -1,9 +1,13 @@
 <script lang="ts">
+import { onMount } from 'svelte';
 import SiteHeader from '#lib/components/SiteHeader.svelte';
 import { page } from '$app/state';
 
 const notFound = $derived(page.status === 404);
 const heading = $derived(notFound ? 'Page not found' : 'Something went wrong');
+
+// The static no-JS copy kit.config.js writes into 404.html; this page replaces it.
+onMount(() => document.getElementById('static-not-found')?.remove());
 </script>
 
 <svelte:head>
