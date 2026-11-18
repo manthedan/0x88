@@ -202,7 +202,10 @@ export function requestFailures(requestLog, journey, { routeMarks = [], cutoff }
     }
     if (r.clientAborted && (r.status === null || r.status < 400)) {
       // Transition aborts count as teardown only for requests the outgoing route started; an older survivor is a leak.
-      if (r.endedAt >= cutoff?.at || routeMarks.some((m, i) => i > 0 && r.at >= routeMarks[i - 1].at && r.at < m.at && r.endedAt >= m.at && r.endedAt <= m.readyAt)) {
+      if (
+        r.endedAt >= cutoff?.at ||
+        routeMarks.some((m, i) => i > 0 && r.at >= routeMarks[i - 1].at && r.at < m.at && r.endedAt >= m.at && r.endedAt <= m.readyAt)
+      ) {
         teardownAborts.push(r);
         continue;
       }
