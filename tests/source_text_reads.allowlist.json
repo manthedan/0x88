@@ -42,7 +42,7 @@
       "reads": ["src/lc0/analysisBrowser.ts"]
     },
     "tests/analysis_startup_auto_analyze.test.mjs": {
-      "reason": "derives the fake artifact manifest's array keys from the evaluator's arrays.<key>.file reads, so the cancellation fixture covers every weight the loader fetches",
+      "reason": "slices controller functions out of the source to run them in isolation; importing the controller module mounts DOM state at load (Analysis startup and Auto-analyze gating)",
       "reads": ["src/lc0/analysisBrowser.ts"]
     },
     "tests/analysis_stockfish_release.test.mjs": {
@@ -50,7 +50,7 @@
       "reads": ["src/lc0/analysisBrowser.ts"]
     },
     "tests/analysis_toolbar.test.mjs": {
-      "reason": "derives the fake artifact manifest's array keys from the evaluator's arrays.<key>.file reads, so the cancellation fixture covers every weight the loader fetches",
+      "reason": "reads the Analysis template's toolbar CSS to check the phone/desktop wrap rules keep the status width budget",
       "reads": ["src/routes/app/analysis/+page.svelte"]
     },
     "tests/analysis_url_input.test.mjs": {
@@ -114,7 +114,7 @@
       "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts"]
     },
     "tests/browser_dom_contract.test.mjs": {
-      "reason": "derives the fake artifact manifest's array keys from the evaluator's arrays.<key>.file reads, so the cancellation fixture covers every weight the loader fetches",
+      "reason": "cross-checks literal el()/maybeEl() ids in each controller against the ids its route markup and generated HTML provide",
       "reads": [
         "src/lc0/analysisBrowser.ts",
         "src/lc0/arenaBrowser.ts",
@@ -126,11 +126,15 @@
       ]
     },
     "tests/browser_dom_scope.test.mjs": {
-      "reason": "derives the fake artifact manifest's array keys from the evaluator's arrays.<key>.file reads, so the cancellation fixture covers every weight the loader fetches",
+      "reason": "checks each controller resolves ids through its scoped createBrowserDom() and never via document.getElementById",
       "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts", "src/lc0/playBrowser.ts"]
     },
+    "tests/build_scope.test.mjs": {
+      "reason": "lists src/routes page files (no text read) to require every route be classified as product or lab for the BUILD_SCOPE=product prerender gate",
+      "reads": ["src/routes/"]
+    },
     "tests/centipawn_s4fix_runtime.test.mjs": {
-      "reason": "derives the fake artifact manifest's array keys from the evaluator's arrays.<key>.file reads, so the cancellation fixture covers every weight the loader fetches",
+      "reason": "counts SquareFormerEvaluator.create call sites so the s4fix runtime keeps a single construction path",
       "reads": ["src/nn/browserRuntimeEvaluator.ts"]
     },
     "tests/centipawn_s4fix_search.test.mjs": {
@@ -244,15 +248,15 @@
       "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/playBrowser.ts"]
     },
     "tests/mobile_residency.test.mjs": {
-      "reason": "derives the fake artifact manifest's array keys from the evaluator's arrays.<key>.file reads, so the cancellation fixture covers every weight the loader fetches",
+      "reason": "slices controller functions out of the source to run them in isolation; importing the controller module mounts DOM state at load (phone residency: Small/Maia switch-away aborts)",
       "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts", "src/lc0/playBrowser.ts"]
     },
     "tests/mobile_residency_boundaries.test.mjs": {
-      "reason": "derives the fake artifact manifest's array keys from the evaluator's arrays.<key>.file reads, so the cancellation fixture covers every weight the loader fetches",
+      "reason": "slices controller functions out of the source to run them in isolation; importing the controller module mounts DOM state at load (setup cancel and fallback release barriers)",
       "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts"]
     },
     "tests/mobile_residency_edges.test.mjs": {
-      "reason": "derives the fake artifact manifest's array keys from the evaluator's arrays.<key>.file reads, so the cancellation fixture covers every weight the loader fetches",
+      "reason": "slices controller functions out of the source to run them in isolation; importing the controller module mounts DOM state at load (Maia reload and Arena residency reconciliation)",
       "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts"]
     },
     "tests/mobile_soak_controller.test.mjs": {
@@ -264,7 +268,7 @@
       "reads": ["src/nn/onnxDequantFold.ts"]
     },
     "tests/ort_cancellation.test.mjs": {
-      "reason": "derives the fake artifact manifest's array keys from the evaluator's arrays.<key>.file reads, so the cancellation fixture covers every weight the loader fetches",
+      "reason": "slices onnxEvaluator functions out of the source to run them in isolation; importing the onnxEvaluator module mounts DOM state at load (WebGPU probe cancellation)",
       "reads": ["src/lc0/onnxEvaluator.ts"]
     },
     "tests/ort_device_loss.test.mjs": {
@@ -283,7 +287,7 @@
       "reads": ["src/lc0/onnxEvaluator.ts", "src/lc0/searchWorkerCore.ts"]
     },
     "tests/ort_session_failure.test.mjs": {
-      "reason": "derives the fake artifact manifest's array keys from the evaluator's arrays.<key>.file reads, so the cancellation fixture covers every weight the loader fetches",
+      "reason": "slices evaluator functions out of the source to run them in isolation; importing the evaluator module mounts DOM state at load (first-error retention across ORT retries)",
       "reads": ["src/lc0/onnxEvaluator.ts", "src/nn/ortRuntime.ts"]
     },
     "tests/pending_input_wiring.test.mjs": {
@@ -303,7 +307,7 @@
       "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts", "src/lc0/playBrowser.ts"]
     },
     "tests/phone_heavy_net_invariant.test.mjs": {
-      "reason": "derives the fake artifact manifest's array keys from the evaluator's arrays.<key>.file reads, so the cancellation fixture covers every weight the loader fetches",
+      "reason": "slices controller functions out of the source to run them in isolation; importing the controller module mounts DOM state at load (one heavy net resident on phones across Play/Analysis/Arena)",
       "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts", "src/lc0/playBrowser.ts"]
     },
     "tests/phone_large_net_policy.test.mjs": {
@@ -335,7 +339,7 @@
       "reads": ["src/lc0/playBrowser.ts"]
     },
     "tests/production_browser_smoke.test.mjs": {
-      "reason": "derives the fake artifact manifest's array keys from the evaluator's arrays.<key>.file reads, so the cancellation fixture covers every weight the loader fetches",
+      "reason": "checks the smoke script and Play markup agree on the worker-retirement marker the smoke waits for",
       "reads": ["src/routes/app/play/+page.svelte"]
     },
     "tests/r2_artifact_cleanup.test.mjs": {

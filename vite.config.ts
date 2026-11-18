@@ -36,6 +36,9 @@ function chessgroundArrows(): Plugin {
 export default defineConfig({
   cacheDir: sharedNodeModules ? '.vite-cache' : undefined,
   plugins: labOnly ? [] : [chessgroundArrows(), sveltekit()],
+  // Build-time constant: src/hooks.ts refuses lab routes in product builds. A bare
+  // global, not import.meta.env.VITE_*, which Vite would also copy into every bundled env object.
+  define: { __BUILD_SCOPE__: JSON.stringify(process.env.BUILD_SCOPE ?? '') },
   optimizeDeps: labOnly ? { exclude: ['onnxruntime-web'] } : { exclude: ['chessground'] },
   resolve: {
     // ORT is configured to load its staged /ort/ glue and WASM at runtime.
