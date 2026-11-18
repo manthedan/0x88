@@ -6,21 +6,24 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
-import { FEATURES, ROUTES, routeForPath } from '../src/features/registry.ts';
+import { FEATURES, ROUTES } from '../src/features/registry.ts';
 import { parseScriptArgs } from './lib/cli.mjs';
 import {
   boardMoveExpression,
   chooseAction,
-  chooseIndex,
+  chooseTargetIndex,
   chooseValue,
   createRng,
   eligibilityExpression,
   evaluateInvariants,
+  locateRoute,
   parseSeed,
+  replayCommand,
   routeActions,
   routeInvariants,
   routeOwnedIds,
   snapshotExpression,
+  usableNodes,
 } from './lib/feature_walk_core.mjs';
 
 const VIEWPORTS = { desktop: { width: 1366, height: 900 }, phone: { width: 390, height: 844 } };
@@ -106,12 +109,12 @@ async function waitForExpression(page, expression, timeoutMs) {
   return false;
 }
 
-/** Visible matches of `target`, choosing one with the walk RNG when the step says `pick`. */
+/** A usable (visible, enabled, not behind a modal) match of `target`; `pick` draws one with the walk RNG. */
 async function targetLocator(page, rng, step) {
-  const visible = page.locator(step.target).filter({ visible: true });
-  const count = await visible.count();
-  if (!count) throw new Error(`No visible ${step.target}`);
-  return step.pick ? visible.nth(chooseIndex(rng, count)) : visible.first();
+  const matches = page.locator(step.target);
+  const index = chooseTargetIndex(rng, await matches.evaluateAll(usableNodes), step.pick);
+  if (index < 0) throw new Error(`No usable ${step.target}`);
+  return matches.nth(index);
 }
 
 async function performStep(page, rng, step) {
@@ -138,13 +141,10 @@ async function performStep(page, rng, step) {
     }
     case 'check': {
       // A DOM click toggles styled checkboxes whose input is visually hidden behind the label.
-      const checked = await page
-        .locator(step.target)
-        .first()
-        .evaluate((node) => {
-          node.click();
-          return node.checked;
-        });
+      const checked = await (await targetLocator(page, rng, step)).evaluate((node) => {
+        node.click();
+        return node.checked;
+      });
       return { target: step.target, checked };
     }
     case 'press': {
@@ -172,10 +172,12 @@ async function walk(args) {
   const browser = await chromium.launch({ headless: !args.headed });
   try {
     const context = await browser.newContext({ viewport: VIEWPORTS[args.viewport] });
-    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: args.baseUrl });
-    // A fresh id per document makes full reloads visible to the noFullReload invariant.
+    // Copy actions need write access only; never let the walked origin read the clipboard.
+    await context.grantPermissions(['clipboard-write'], { origin: args.baseUrl });
+    // A fresh id per document makes full reloads visible to noFullReload. Not crypto.randomUUID:
+    // that is missing on plain-HTTP LAN previews (insecure contexts).
     await context.addInitScript(() => {
-      window.__featureWalkDocumentId = crypto.randomUUID();
+      window.__featureWalkDocumentId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     });
     const page = await context.newPage();
     const pageErrors = [];
@@ -184,16 +186,38 @@ async function walk(args) {
     page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push({ level: 'error', text: message.text() });
     });
+    const documentId = () => page.evaluate(() => window.__featureWalkDocumentId).catch(() => null);
+
+    // Check the page where it is now: stay on the walk origin and a registered route, mount, then hold the invariants.
+    const checkRoute = async (step, action, errorMarks, documentIdBefore, allowsReload, routeBefore) => {
+      const route = locateRoute(page.url(), args.baseUrl);
+      if (!route) {
+        report.failures.push({ step, action, invariant: 'stayedInApp', detail: `left the registered routes: ${page.url()}` });
+        return null;
+      }
+      await waitForExpression(page, ROUTES[route].ready, route === routeBefore ? args.settleMs : args.readyTimeout);
+      const snap = await page.evaluate(snapshotExpression(routeOwnedIds(route), ROUTES[route].ready)).catch((error) => ({ error: error.message }));
+      if (snap.error) {
+        report.failures.push({ step, route, action, invariant: 'snapshot', detail: snap.error });
+        return route;
+      }
+      const failures = evaluateInvariants(routeInvariants(route), snap, {
+        route,
+        expectedIds: routeOwnedIds(route),
+        pageErrors: pageErrors.slice(errorMarks[0]),
+        consoleErrors: consoleErrors.slice(errorMarks[1]),
+        documentIdBefore,
+        allowsReload,
+      });
+      for (const failure of failures) report.failures.push({ step, route, action, ...failure });
+      return route;
+    };
 
     await page.goto(new URL(ROUTES[args.start].path, args.baseUrl).href, { waitUntil: 'domcontentloaded', timeout: 45_000 });
-    await waitForExpression(page, ROUTES[args.start].ready, args.readyTimeout);
+    // Startup errors and a controller that never mounts fail here, before any action can navigate away.
+    let route = await checkRoute('start', 'load', [0, 0], null, true, null);
 
-    for (let index = 0; index < args.steps; index++) {
-      const route = routeForPath(new URL(page.url()).pathname);
-      if (!route) {
-        report.failures.push({ step: index, invariant: 'stayedInApp', detail: `left the registered routes: ${page.url()}` });
-        break;
-      }
+    for (let index = 0; route && (args.keepGoing || !report.failures.length) && index < args.steps; index++) {
       const candidates = routeActions(route);
       const eligible = await page.evaluate(eligibilityExpression(candidates)).catch(() => []);
       const choice = chooseAction(
@@ -204,7 +228,8 @@ async function walk(args) {
         report.failures.push({ step: index, route, invariant: 'hasEligibleAction', detail: 'no registry action is usable here' });
         break;
       }
-      const documentIdBefore = await page.evaluate(() => window.__featureWalkDocumentId).catch(() => null);
+      const label = `${choice.feature}/${choice.action.name}`;
+      const documentIdBefore = await documentId();
       const errorMarks = [pageErrors.length, consoleErrors.length];
       const record = { step: index, route, feature: choice.feature, action: choice.action.name, results: [] };
       report.steps.push(record);
@@ -214,33 +239,17 @@ async function walk(args) {
           await delay(100);
         }
       } catch (error) {
-        report.failures.push({ step: index, route, action: `${choice.feature}/${choice.action.name}`, invariant: 'actionCompleted', detail: error.message });
+        report.failures.push({ step: index, route, action: label, invariant: 'actionCompleted', detail: error.message });
       }
       await delay(args.settleMs);
-      const after = routeForPath(new URL(page.url()).pathname);
-      if (after) await waitForExpression(page, ROUTES[after].ready, after === route ? args.settleMs : args.readyTimeout);
-      record.routeAfter = after;
-      const snap = after
-        ? await page.evaluate(snapshotExpression(routeOwnedIds(after), ROUTES[after].ready)).catch((error) => ({ error: error.message }))
-        : null;
-      if (snap && !snap.error) {
-        const failures = evaluateInvariants(routeInvariants(after), snap, {
-          route: after,
-          expectedIds: routeOwnedIds(after),
-          pageErrors: pageErrors.slice(errorMarks[0]),
-          consoleErrors: consoleErrors.slice(errorMarks[1]),
-          documentIdBefore,
-          allowsReload: choice.action.allowsReload,
-        });
-        for (const failure of failures) report.failures.push({ step: index, route: after, action: `${choice.feature}/${choice.action.name}`, ...failure });
-      } else if (snap?.error) report.failures.push({ step: index, route: after, invariant: 'snapshot', detail: snap.error });
-      if (report.failures.length && !args.keepGoing) break;
+      route = await checkRoute(index, label, errorMarks, documentIdBefore, choice.action.allowsReload, route);
+      record.routeAfter = route;
     }
   } finally {
     await browser.close().catch(() => undefined);
   }
   report.status = report.failures.length ? 'FEATURE_WALK_FAILED' : 'FEATURE_WALK_DONE';
-  report.replay = `node scripts/feature_walk.mjs --base-url ${args.baseUrl} --seed ${report.seed} --steps ${args.steps} --start ${args.start} --viewport ${args.viewport}`;
+  report.replay = replayCommand(args, report.seed);
   return report;
 }
 

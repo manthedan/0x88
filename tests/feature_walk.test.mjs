@@ -6,15 +6,19 @@ import { coverage, parseArgs } from '../scripts/feature_walk.mjs';
 import {
   boardMoveExpression,
   chooseAction,
+  chooseTargetIndex,
   chooseValue,
   createRng,
   eligibilityExpression,
   evaluateInvariants,
+  locateRoute,
   parseSeed,
+  replayCommand,
   routeActions,
   routeInvariants,
   routeOwnedIds,
   snapshotExpression,
+  usableNodes,
 } from '../scripts/lib/feature_walk_core.mjs';
 
 const draws = (rng, n) => Array.from({ length: n }, () => rng());
@@ -158,27 +162,133 @@ test('snapshot reports owned ids present, duplicates, widths, and readiness', ()
   });
 });
 
-test('boardMove clicks an own piece and a legal non-promotion destination', () => {
-  const clicks = [];
-  let selected = null;
-  const cell = (square, label) => ({
-    dataset: { square },
-    getAttribute: () => (selected === 'e2' && ['e3', 'e4'].includes(square) ? `${label}, legal destination` : label),
-    click() {
-      clicks.push(square);
-      selected = selected === square ? null : square;
-    },
-  });
-  const cells = [cell('e2', 'e2, White pawn'), cell('e7', 'e7, Black pawn'), cell('e3', 'e3, empty'), cell('e4', 'e4, empty')];
-  const host = {
-    querySelectorAll: (selector) => (selector === '[data-square]' ? cells : cells.filter((c) => c.getAttribute().includes('legal destination'))),
+// Fake accessible board: every selection change re-renders fresh cells, and a click on a
+// stale (detached) cell does nothing, as with the real innerHTML re-render.
+function fakeBoard(pieces, moves, selected = null) {
+  const state = { selected, played: null, clicks: [], staleClicks: 0 };
+  let generation = 0;
+  let cells = [];
+  const render = () => {
+    const current = ++generation;
+    cells = ['a7', 'a8', 'e1', 'e2', 'e6', 'e7'].map((square) => {
+      const legal = state.selected && moves[state.selected]?.includes(square);
+      const label = `${square}, ${pieces[square] ?? 'empty'}${legal ? ', legal destination' : ''}`;
+      return {
+        dataset: { square },
+        getAttribute: (name) => (name === 'aria-selected' ? String(state.selected === square) : label),
+        click() {
+          if (current !== generation) return void state.staleClicks++;
+          state.clicks.push(square);
+          if (state.selected && moves[state.selected]?.includes(square)) {
+            state.played = state.selected + square;
+            state.selected = null;
+          } else if (moves[square]) state.selected = state.selected === square ? null : square;
+          render();
+        },
+      };
+    });
   };
-  const result = vm.runInNewContext(boardMoveExpression("'White'", 0), { document: { querySelector: () => host } });
-  assert.equal(result.move, 'e2e3');
-  assert.deepEqual(clicks, ['e2', 'e3']);
-  selected = null;
-  const none = vm.runInNewContext(boardMoveExpression("'Black'", 0.5), { document: { querySelector: () => host } });
-  assert.match(none.error, /no legal non-promotion move for Black/);
+  render();
+  const host = {
+    querySelector(selector) {
+      if (selector === '[aria-selected="true"]') return cells.find((cell) => cell.getAttribute('aria-selected') === 'true') ?? null;
+      return cells.find((cell) => selector === `[data-square="${cell.dataset.square}"]`) ?? null;
+    },
+    querySelectorAll: (selector) =>
+      selector === '[data-square]' ? cells : cells.filter((cell) => cell.getAttribute('aria-label').includes('legal destination')),
+  };
+  return { state, document: { querySelector: () => host } };
+}
+
+const PIECES = { a7: 'White pawn', e1: 'White king', e7: 'Black pawn' };
+
+test('boardMove re-queries squares after each re-render and skips promotion-only pawns', () => {
+  const board = fakeBoard(PIECES, { a7: ['a8'], e1: ['e2'] });
+  const result = vm.runInNewContext(boardMoveExpression("'White'", 0), { document: board.document });
+  assert.equal(result.move, 'e1e2');
+  assert.equal(board.state.played, 'e1e2');
+  assert.deepEqual(board.state.clicks, ['a7', 'a7', 'e1', 'e2']);
+  assert.equal(board.state.staleClicks, 0);
+  assert.equal(board.state.selected, null);
+});
+
+test('boardMove clears an existing selection first and reports when no move is possible', () => {
+  const board = fakeBoard(PIECES, { a7: ['a8'], e1: ['e2'] }, 'a7');
+  assert.equal(vm.runInNewContext(boardMoveExpression("'White'", 0.5), { document: board.document }).move, 'e1e2');
+  assert.equal(board.state.clicks[0], 'a7');
+  const blocked = fakeBoard(PIECES, { a7: ['a8'] });
+  assert.match(vm.runInNewContext(boardMoveExpression("'Black'", 0), { document: blocked.document }).error, /no legal non-promotion move for Black/);
+  assert.equal(vm.runInNewContext(boardMoveExpression("'White'", 0), { document: blocked.document }).error, 'no legal non-promotion move for White');
+  assert.equal(blocked.state.selected, null);
+});
+
+test('target choice draws only from usable matches', () => {
+  // #navFirst, #navPrev usable at the live edge; #navNext, #navLast visible but disabled.
+  const flags = [true, true, false, false];
+  for (const seed of [1, 2, 3, 4, 5, 6]) assert.ok([0, 1].includes(chooseTargetIndex(createRng(seed), flags, true)));
+  assert.equal(
+    chooseTargetIndex(() => 0.99, [false, true, false, true], false),
+    1,
+  );
+  assert.equal(
+    chooseTargetIndex(() => 0.5, [false, false], true),
+    -1,
+  );
+});
+
+test('usableNodes rejects hidden, disabled, aria-disabled, inert, and outside-modal nodes', () => {
+  const node = (overrides = {}) => ({ ...fakeNode({}), ...overrides });
+  const nodes = [
+    node(),
+    node({ checkVisibility: () => false }),
+    node({ disabled: true }),
+    node({ getAttribute: (name) => (name === 'aria-disabled' ? 'true' : null) }),
+    node({ closest: () => ({}) }),
+  ];
+  const result = vm.runInNewContext(`(${usableNodes.toString()})(nodes)`, { nodes, document: { querySelector: () => null } });
+  assert.deepEqual([...result], [true, false, false, false, false]);
+});
+
+test('locateRoute requires the walk origin and a registered path', () => {
+  const base = 'http://127.0.0.1:5181';
+  assert.equal(locateRoute('http://127.0.0.1:5181/app/play/?x=1', base), 'play');
+  assert.equal(locateRoute('http://127.0.0.1:5181/docs', base), 'docs');
+  assert.equal(locateRoute('https://evil.example/app/play/', base), null);
+  assert.equal(locateRoute('http://127.0.0.1:5182/app/play/', base), null);
+  assert.equal(locateRoute('http://127.0.0.1:5181/lab/mobile-soak/', base), null);
+});
+
+test('replay command keeps every option that changes timing or stopping', () => {
+  const args = parseArgs([
+    '--base-url',
+    'http://127.0.0.1:5181',
+    '--steps',
+    '12',
+    '--start',
+    'arena',
+    '--viewport',
+    'phone',
+    '--settle-ms',
+    '900',
+    '--ready-timeout',
+    '5000',
+    '--keep-going',
+    '--headed',
+  ]);
+  assert.equal(
+    replayCommand(args, 77),
+    'node scripts/feature_walk.mjs --base-url http://127.0.0.1:5181 --seed 77 --steps 12 --start arena --viewport phone --settle-ms 900 --ready-timeout 5000 --keep-going --headed',
+  );
+  const roundTrip = parseArgs(replayCommand(args, 77).split(' ').slice(2));
+  for (const key of ['baseUrl', 'steps', 'start', 'viewport', 'settleMs', 'readyTimeout', 'keepGoing', 'headed']) assert.equal(roundTrip[key], args[key], key);
+  assert.equal(roundTrip.seed, '77');
+});
+
+test('the Play move side follows the human strip, not board orientation', () => {
+  const side = routeActions('play').find(({ action }) => action.name === 'move').action.steps[0].side;
+  // After Flip the bottom strip shows the engine; the human strip is found by data-player.
+  const strips = { '[data-player="you"] [data-meta]': { textContent: 'Black' }, '#bottomStrip [data-meta]': { textContent: '1500 rating · White' } };
+  assert.equal(vm.runInNewContext(side, { document: { querySelector: (selector) => strips[selector] ?? null } }), 'Black');
 });
 
 const cleanSnap = { pathname: '/app/play/', documentId: 'a', ready: true, scrollWidth: 390, viewportWidth: 390, presentIds: ['status'], duplicateIds: [] };

@@ -1,6 +1,6 @@
 // Pure parts of scripts/feature_walk.mjs: seeding, action/value choice, in-page
 // expression builders, and invariant evaluation. No browser here, so tests cover it.
-import { featuresOn } from '../../src/features/registry.ts';
+import { featuresOn, routeForPath } from '../../src/features/registry.ts';
 import { actionableErrorEntries } from '../production_browser_smoke.mjs';
 
 /** Numeric seeds are used as-is; any other string hashes (FNV-1a) so `--seed ci-42` works. */
@@ -64,11 +64,14 @@ export function routeOwnedIds(route) {
   return [...new Set(featuresOn(route).flatMap((feature) => feature.ids))];
 }
 
-// Visible + enabled, and inside the open modal dialog when there is one (a modal makes the rest inert).
-function usable(selector) {
+/**
+ * Per node: visible, enabled, and inside the open modal dialog when there is one (a modal
+ * makes the rest inert). Self-contained so Playwright's evaluateAll can run it as-is.
+ */
+export function usableNodes(nodes) {
   const modal = document.querySelector('dialog:modal');
-  return [...document.querySelectorAll(selector)].some((node) => {
-    const shown = (candidate) => candidate?.checkVisibility?.({ checkOpacity: true, checkVisibilityCSS: true }) ?? !!candidate?.getClientRects().length;
+  const shown = (candidate) => candidate?.checkVisibility?.({ checkOpacity: true, checkVisibilityCSS: true }) ?? !!candidate?.getClientRects().length;
+  return nodes.map((node) => {
     // Styled toggles hide the checkbox itself; its label is what the user sees.
     const visible = shown(node) || (node.type === 'checkbox' && [...(node.labels ?? [])].some(shown));
     const enabled = !node.disabled && node.getAttribute('aria-disabled') !== 'true' && !node.closest('[inert]');
@@ -79,35 +82,75 @@ function usable(selector) {
 /** One browser expression returning an eligibility boolean per candidate, in order. */
 export function eligibilityExpression(candidates) {
   const checks = candidates.map(
-    ({ action }) => `(() => { try { return usable(${JSON.stringify(action.when)}) && !!(${action.whenExpr ?? 'true'}); } catch { return false; } })()`,
+    ({ action }) =>
+      `(() => { try { return usableNodes([...document.querySelectorAll(${JSON.stringify(action.when)})]).some(Boolean) && !!(${action.whenExpr ?? 'true'}); } catch { return false; } })()`,
   );
-  return `(() => { const usable = ${usable.toString()}; return [${checks.join(',')}]; })()`;
+  return `(() => { const usableNodes = ${usableNodes.toString()}; return [${checks.join(',')}]; })()`;
+}
+
+/**
+ * Index of the step's target among all selector matches, drawn only from usable ones
+ * (a visible-but-disabled #navNext must not be clicked); `pick` draws, otherwise the
+ * first usable match. -1 when none is usable.
+ */
+export function chooseTargetIndex(rng, flags, pick) {
+  const usable = flags.flatMap((flag, index) => (flag ? [index] : []));
+  if (!usable.length) return -1;
+  return pick ? usable[chooseIndex(rng, usable.length)] : usable[0];
 }
 
 // Click a legal non-promotion move for `side` on the accessible board; `roll` is a host RNG draw.
+// Every selection re-renders the grid, so squares are re-queried by key after each click.
 function boardMove(side, roll) {
   const host = document.querySelector('#keyboardBoard');
   if (!host) return { error: 'no #keyboardBoard' };
-  const own = [...host.querySelectorAll('[data-square]')].filter((cell) => cell.getAttribute('aria-label')?.includes(side));
+  const square = (key) => host.querySelector(`[data-square="${key}"]`);
+  host.querySelector('[aria-selected="true"]')?.click();
+  const own = [...host.querySelectorAll('[data-square]')].filter((cell) => cell.getAttribute('aria-label')?.includes(side)).map((cell) => cell.dataset.square);
   const start = Math.floor(roll * own.length);
   for (let i = 0; i < own.length; i++) {
-    const source = own[(start + i) % own.length];
-    source.click();
-    const pawn = source.getAttribute('aria-label').includes('pawn');
-    const destinations = [...host.querySelectorAll('[aria-label*="legal destination"]')].filter((cell) => !pawn || !/[18]$/.test(cell.dataset.square));
+    const from = own[(start + i) % own.length];
+    const pawn = square(from).getAttribute('aria-label').includes('pawn');
+    square(from).click();
+    const destinations = [...host.querySelectorAll('[aria-label*="legal destination"]')]
+      .map((cell) => cell.dataset.square)
+      .filter((key) => !pawn || !/[18]$/.test(key));
     if (!destinations.length) {
-      source.click();
+      if (square(from)?.getAttribute('aria-selected') === 'true') square(from).click();
       continue;
     }
-    const target = destinations[Math.floor(((roll * 7919) % 1) * destinations.length)];
-    target.click();
-    return { move: source.dataset.square + target.dataset.square };
+    const to = destinations[Math.floor(((roll * 7919) % 1) * destinations.length)];
+    square(to).click();
+    return { move: from + to };
   }
   return { error: `no legal non-promotion move for ${side}` };
 }
 
 export function boardMoveExpression(sideExpression, roll) {
   return `(${boardMove.toString()})(${sideExpression}, ${JSON.stringify(roll)})`;
+}
+
+/** Route for a page URL, but only on the walk's own origin (another origin is never "in the app"). */
+export function locateRoute(href, baseUrl) {
+  const url = new URL(href);
+  if (url.origin !== new URL(baseUrl).origin) return null;
+  return routeForPath(url.pathname);
+}
+
+/** Replay command carrying every option that changes which actions are eligible when. */
+export function replayCommand(args, seed) {
+  const flags = [
+    `--base-url ${args.baseUrl}`,
+    `--seed ${seed}`,
+    `--steps ${args.steps}`,
+    `--start ${args.start}`,
+    `--viewport ${args.viewport}`,
+    `--settle-ms ${args.settleMs}`,
+    `--ready-timeout ${args.readyTimeout}`,
+    ...(args.keepGoing ? ['--keep-going'] : []),
+    ...(args.headed ? ['--headed'] : []),
+  ];
+  return `node scripts/feature_walk.mjs ${flags.join(' ')}`;
 }
 
 // One page read per step; `ids` are the route's owned ids, `ready` its mount expression.
