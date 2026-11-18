@@ -4127,7 +4127,11 @@ function cancelAnalysisOperation(operationId: number): void {
   const controller = analysisOperations.get(operationId);
   if (!controller) return;
   controller.abort();
-  if (analysisAbort === controller) retireAnalysisRunCentipawnKeys();
+  if (analysisAbort === controller) {
+    retireAnalysisRunCentipawnKeys();
+    const message = el('message');
+    if (message.textContent === 'Freeing memory…') message.textContent = 'Analysis stopped.';
+  }
   clearAnalysisSearchProgress();
   hideModelProgress();
   el('analyze').toggleAttribute('disabled', false);
@@ -4486,7 +4490,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     // no uninitialized big net does not yield.
     const bigNetInitErrors = new Map<AnalysisBigNetKey, Error>();
     const firstBigNet = rows.find((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant))?.variant;
-    if (isMemoryConstrainedDevice() && firstBigNet && isLc0BigNetVariant(firstBigNet)) {
+    const constrained = isMemoryConstrainedDevice();
+    if (constrained && firstBigNet && isLc0BigNetVariant(firstBigNet)) {
       maia3PanelBlockedByRun = controller;
       unloadMaia3Panel('Maia3 unloaded to make room for Lc0. Enable Maia3 after analysis finishes to reload.');
       for (const key of ANALYSIS_BIG_NET_KEYS) {
@@ -4502,15 +4507,11 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     const uninitializedBigNets = bigNetsAwaitingInit(rows).filter((key) => !bigNetInitErrors.has(key));
     if (uninitializedBigNets.length) {
       activeAnalysisSelectionKey = ''; // no keys yet: navigation during init cancels this run
-      const reclaim = preparePhoneBigNet(
-        uninitializedBigNets[0],
-        ANALYSIS_BIG_NET_SESSION.evalCacheEntries,
-        controller.signal,
-        disposeAnalysisCpuEngines,
-        () => {
+      const reclaim =
+        constrained &&
+        preparePhoneBigNet(uninitializedBigNets[0], ANALYSIS_BIG_NET_SESSION.evalCacheEntries, controller.signal, disposeAnalysisCpuEngines, () => {
           el('message').textContent = 'Freeing memory…';
-        },
-      );
+        });
       if (reclaim) {
         await reclaim;
         if (controller.signal.aborted || mountAbort.signal.aborted || !analysisCanPrepare(analysisRunState, owner)) return;
@@ -5786,7 +5787,7 @@ function wireEvents() {
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'prefetch');
     cancelAllAnalysisAssetPrefetches();
     cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
-    if (hiddenTab.hidden || el('message').textContent === 'Freeing memory…') el('message').textContent = 'Analysis stopped.';
+    if (hiddenTab.hidden) el('message').textContent = 'Analysis stopped.';
     // The paused run's finally already ran and left Stop enabled. Cancelling
     // the suspended search has to disable it here; that finally will not run again.
     maybeEl('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));

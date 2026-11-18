@@ -2443,6 +2443,7 @@ export function mountPlayBrowser(): () => void {
     return () => undefined;
   }
   lastPlayMountHref = href;
+  const retireCpuOnUnmount = isMemoryConstrainedDevice() && phoneReclaimSettings().retireCpu;
   const releaseDom = pageDom.mount(root);
   const ctx = createPlayContext();
   ctxInit(ctx);
@@ -2464,7 +2465,7 @@ export function mountPlayBrowser(): () => void {
       playRuntimeFallbackAudits.clear();
       // Stormphrax reserves a 512 MiB WASM heap, so unlike the smaller CPU
       // engines it must not remain cached after this Play route is gone.
-      if (isMemoryConstrainedDevice() && phoneReclaimSettings().retireCpu) disposePlayCpuEngines();
+      if (retireCpuOnUnmount) disposePlayCpuEngines();
       else disposeCachedCpuEngine('stormphrax');
       if (ctx.resignArmTimer) {
         clearTimeout(ctx.resignArmTimer);

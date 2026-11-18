@@ -47,7 +47,10 @@ export function phoneReclaimSettings(): { reclaimGapMs: number; retireCpu: boole
       return null;
     }
   };
-  const gap = setting(RECLAIM_GAP_KEY, (value) => value.trim() !== '' && Number.isFinite(Number(value)) && Number(value) >= 0);
+  const gap = setting(RECLAIM_GAP_KEY, (value) => {
+    const ms = Number(value);
+    return value.trim() !== '' && ms >= 0 && ms <= 120_000;
+  });
   return { reclaimGapMs: gap === null ? 20_000 : Number(gap), retireCpu: setting(RETIRE_CPU_KEY, (value) => value === '0' || value === '1') !== '0' };
 }
 

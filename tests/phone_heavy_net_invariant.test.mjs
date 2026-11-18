@@ -110,6 +110,12 @@ function nativeModels(t, { phone = true, gap = 0, retireCpu = true } = {}) {
   }
   const previousLocation = globalThis.location;
   const previousWorker = globalThis.Worker;
+  const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const stored = new Map();
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: { getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value) },
+  });
   // The original residency cases isolate terminal disposal from the optional time gap.
   globalThis.location = new URL(`https://test.invalid/?memoryClass=${phone ? 'phone' : 'desktop'}&0x88-reclaim-gap-ms=${gap}&0x88-retire-cpu=${+retireCpu}`);
   globalThis.Worker = Worker;
@@ -123,6 +129,8 @@ function nativeModels(t, { phone = true, gap = 0, retireCpu = true } = {}) {
     phoneLargeNetPreference.setEnabled(false);
     globalThis.Worker = previousWorker;
     globalThis.location = previousLocation;
+    if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage);
+    else delete globalThis.localStorage;
   });
   assert.equal(isMemoryConstrainedDevice(), phone);
   assert.equal(phoneBigNetBlocked('bt4'), false);
@@ -173,6 +181,7 @@ function playOwner(native) {
     handoffs = [];
   const owner = link(
     `
+    ${slice(play, '  const retireCpuOnUnmount =', '  const releaseDom =', play.indexOf('export function mountPlayBrowser('))}
     const ctx={abort:new AbortController(),consentAbort:new AbortController(),enginePreparationGeneration:0,
       board:{turn:'w'},humanColor:'w',positions:[],moves:[],listeners:[],opponent:{active:{maiaElo:1500}}};
     let option=maia;
@@ -226,8 +235,10 @@ function analysisOwner(native) {
     `
     const mountAbort=new AbortController();
     let explorerMaia=null, activeAnalysisSelectionKey='';
-    const analysisRunState={},owner={};
+    const analysisRunState={},owner={},analysisOperations=new Map();
     let analysisAbort=null, criticalDeferredMaia=false,stockfishLite=null,stockfishFull=null;
+    const analysisReloadAbort=null,activeWorkerSearchId=null,searchWorker=null;
+    ${slice(analysis, 'function cancelAnalysisOperation(', 'function scheduleAnalyzeCurrent(')}
     const tree={current:{fen:''}},preparedCpuEngineKeys=new Set(),cpu={disposeAll(){}};
     const recklessEngines=cpu,viridithasEngines=cpu,berserkEngines=cpu,plentyChessEngines=cpu,stormphraxEngines=cpu;
     ${slice(analysis, 'function threadedStockfishAvailable()', 'const ANALYSIS_CPU_ENGINE_OPTIONS')}
@@ -237,6 +248,8 @@ function analysisOwner(native) {
     ${slice(analysis, 'const ANALYSIS_BIG_NET_SESSION', '/** After initBigNetsForRun')}
     ${slice(analysis, 'const MAIA3_PANEL_RATINGS', 'function scheduleMaia3Panel()')}
     async function prepare(rows, controller = new AbortController()){
+      analysisOperations.set(1,controller);
+      analysisAbort=controller;
       try {
         ${slice(analysis, '    const bigNetInitErrors =', '    snapshotBigNetServedModels(rows);')}
         for (const row of rows) if (row.family === 'sf') getStockfish('lite').analyze(row.strength);
@@ -244,13 +257,17 @@ function analysisOwner(native) {
       } finally {
         ${slice(analysis, '    if (maia3PanelBlockedByRun === controller)', '\n    }', analysis.indexOf('async function performAnalysis(owner:'))}
         }
+        analysisOperations.delete(1);
+        analysisAbort=null;
       }
     }
-    return {prepare,enableMaia3Panel,unloadMaia3Panel,...criticalCallbacks,getStockfish,message,disposeAnalysisCpuEngines};`,
+    return {prepare,cancel:()=>cancelAnalysisOperation(1),enableMaia3Panel,unloadMaia3Panel,...criticalCallbacks,getStockfish,message,disposeAnalysisCpuEngines};`,
     {
       ANALYSIS_BIG_NET_KEYS: keys,
       message,
       el: (id) => (id === 'message' ? message : node()),
+      selectEl: node,
+      retireAnalysisRunCentipawnKeys: nop,
       StockfishEngine: native.StockfishEngine,
       stockfishFlavorUrl: (flavor) => flavor,
       cpuEngineHashMbForSurface: () => 128,
@@ -439,7 +456,7 @@ function fakeTime(t) {
 }
 
 for (const [name, phone, gap, elapsed, remaining] of [
-  ['recent', true, 20000, 6000, 14000],
+  ['recent', true, 30000, 6000, 24000],
   ['old', true, 20000, 21000, 0],
   ['disabled', true, 0, 1, 0],
   ['desktop', false, 20000, 1, 0],
@@ -452,6 +469,8 @@ for (const [name, phone, gap, elapsed, remaining] of [
     const maia = await native.get('maia3');
     maia.finishInit();
     await loading;
+    // SvelteKit may already expose the destination URL when Play unmounts.
+    globalThis.location = new URL(`https://test.invalid/analysis?memoryClass=${phone ? 'phone' : 'desktop'}`);
     assert.equal(play.analyzeThisGame(), '1. e4 *');
     await tick();
     maia.finishDispose();
@@ -481,7 +500,8 @@ test('cancelling Analysis during reclaim does not start a model or restart a ret
   const controller = new AbortController();
   const run = assert.rejects(owner.prepare([cpu, row('bt4')], controller), { name: 'AbortError' });
   assert.equal(owner.message.textContent, 'Freeing memory…');
-  controller.abort();
+  owner.cancel();
+  assert.equal(owner.message.textContent, 'Analysis stopped.');
   await run;
   await advance(20000);
   assert.deepEqual(

@@ -359,8 +359,9 @@ export class Maia3BrowserEvaluator {
       return await create(modelLoad);
     } catch (error) {
       options.signal?.throwIfAborted();
-      const failed = (error as { modelLoad?: Lc0ModelLoadInfo } | null)?.modelLoad ?? modelLoad;
-      if (!isOnnxModelParseError(error) || !isMetadataTrustedModel(failed)) throw error;
+      const workerFailure = error as { modelLoad?: Lc0ModelLoadInfo; modelParseError?: boolean } | null;
+      const failed = workerFailure?.modelLoad ?? modelLoad;
+      if (!(workerFailure?.modelParseError ?? isOnnxModelParseError(error)) || !isMetadataTrustedModel(failed)) throw error;
       await modelDeps.clear(failed.url, MAIA3_MODEL_CACHE_NAME);
       options.signal?.throwIfAborted();
       const reloaded = { ...(await load(failed.logicalUrl ?? modelLoad.logicalUrl ?? failed.url, true)), revalidated: true };
@@ -421,6 +422,7 @@ export class Maia3BrowserEvaluator {
           backend?: string;
           ortRuntime?: OrtSessionDiagnostics;
           modelLoad?: Lc0ModelLoadInfo;
+          modelParseError?: boolean;
         };
         if (data.type === 'deviceLost' || data.id !== id) return;
         if (data.type === 'ready') {
@@ -428,7 +430,12 @@ export class Maia3BrowserEvaluator {
           resolve({ inputNames: data.inputNames ?? [], outputNames: data.outputNames ?? [], backend: data.backend ?? 'unknown', ortRuntime: data.ortRuntime });
         } else if (data.type === 'error') {
           cleanup();
-          reject(Object.assign(new Error(data.message ?? 'Maia3 worker initialization failed'), data.modelLoad ? { modelLoad: data.modelLoad } : {}));
+          reject(
+            Object.assign(new Error(data.message ?? 'Maia3 worker initialization failed'), {
+              modelLoad: data.modelLoad,
+              modelParseError: data.modelParseError,
+            }),
+          );
         }
       };
       worker.addEventListener('message', onMessage);

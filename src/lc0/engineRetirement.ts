@@ -25,13 +25,10 @@ export async function awaitWorkerReclaim(gapMs: number, signal: AbortSignal, onW
         clearTimeout(timer);
         reject(signal.reason);
       };
-      const timer = setTimeout(
-        () => {
-          signal.removeEventListener('abort', onAbort);
-          resolve();
-        },
-        Math.min(Math.ceil(remaining), 2_147_483_647),
-      );
+      const timer = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, Math.ceil(remaining));
       signal.addEventListener('abort', onAbort, { once: true });
     });
   }

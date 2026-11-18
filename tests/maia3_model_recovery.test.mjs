@@ -127,7 +127,7 @@ test('Maia can repair metadata-trusted bytes reacquired by the worker after an i
         new MessageEvent('message', {
           data:
             this.index === 0
-              ? { type: 'error', id: message.id, message: 'INVALID_PROTOBUF', modelLoad: info }
+              ? { type: 'error', id: message.id, message: 'allocation failed (fallback: INVALID_PROTOBUF)', modelLoad: info, modelParseError: true }
               : { type: 'ready', id: message.id, backend: 'test', inputNames: [], outputNames: [] },
         }),
       ),
