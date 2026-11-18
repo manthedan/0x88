@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { BIG_NETS, bigNetLoadWarning } from '../src/lc0/bt4Engine.ts';
 import { requestLargeNetConsent } from '../src/lc0/largeNetConsent.ts';
+import { inspectLargeNetDownload } from '../src/lc0/largeNetDownload.ts';
 import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
 import { createSoakBigNetBinding } from '../src/lc0/mobileSoakBigNet.ts';
 import { requestSoakLargeNetConsent } from '../src/lc0/mobileSoakBrowser.ts';
@@ -133,6 +134,22 @@ test('BT4/t3 crash consent persists, but an uncached model still gets its downlo
   choose(dialog, false);
   assert.equal(await another, false);
   assert.equal(phoneLargeNetPreference.enabled(), true, 'cancelling a download does not revoke existing crash consent');
+});
+
+test('a phone already opted in to t3 still warns when only the split-K model is cached', async (t) => {
+  const f = browser(t);
+  phoneLargeNetPreference.setEnabled(true);
+  const splitK = lc0SplitKUrl(BIG_NETS.t3.modelUrl);
+  const inspect = (config, signal) =>
+    inspectLargeNetDownload(config, signal, {
+      placement: async () => ({ providers: ['webgpu', 'wasm'], adapterVendor: 'apple' }),
+      inspect: async (url) => ({ url, cached: url === splitK, downloadBytes: url === splitK ? 170_000_000 : 160_000_000 }),
+    });
+  const pending = f.request(BIG_NETS.t3, { inspect });
+  const dialog = await f.dialog();
+  assert.match(dialog.children[1].textContent, /t3 may download up to 160 MB/);
+  choose(dialog, false);
+  assert.equal(await pending, false);
 });
 
 for (const accept of [false, true]) {

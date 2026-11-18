@@ -1,6 +1,6 @@
 import { type BigNetConfig, bigNetLoadWarning } from './bt4Engine.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
-import { inspectLargeNetDownload } from './largeNetDownload.ts';
+import { inspectLargeNetDownload, type LargeNetDownloadState } from './largeNetDownload.ts';
 import { PHONE_LARGE_NET_REASON, phoneBigNetBlocked, phoneLargeNetPreference } from './phoneLargeNetPolicy.ts';
 
 export function showPhoneLargeNetFallback(modelOverride = false): void {
@@ -51,9 +51,9 @@ async function showLargeNetConsent(
   const cancelled = Promise.withResolvers<null>();
   const abortLookup = () => cancelled.resolve(null);
   signal?.addEventListener('abort', abortLookup, { once: true });
-  let state: { cached: boolean; downloadBytes?: number } | null = null;
+  let state: LargeNetDownloadState | null = null;
   try {
-    state = phone ? await Promise.race([inspect(config, signal).catch(() => ({ cached: false, downloadBytes: undefined })), cancelled.promise]) : null;
+    state = phone ? await Promise.race([inspect(config, signal).catch(() => null), cancelled.promise]) : null;
   } finally {
     signal?.removeEventListener('abort', abortLookup);
   }
@@ -67,7 +67,9 @@ async function showLargeNetConsent(
     downloadNotice ??
     (mb === undefined
       ? 'Download size is unavailable; cached after the first time.'
-      : `${phoneRisk ? `${name} is` : "It's"} a ${mb} MB download, cached after the first time.`);
+      : state?.mayDownloadFallback
+        ? `${phoneRisk ? name : 'This model'} may download up to ${mb} MB, cached after the first time.`
+        : `${phoneRisk ? `${name} is` : "It's"} a ${mb} MB download, cached after the first time.`);
   const dialog = document.createElement('dialog');
   dialog.className = 'large-net-consent';
   dialog.setAttribute('aria-modal', 'true');

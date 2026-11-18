@@ -1,16 +1,26 @@
 import { resolveOrtSessionPlacement } from '../nn/ortRuntime.ts';
 import type { BigNetConfig } from './bt4Engine.ts';
 import { lc0SplitKUrl, selectLc0OrtModelUrl } from './lc0SmallModelSelection.ts';
-import { inspectLc0ModelDownload } from './modelCache.ts';
+import { inspectLc0ModelDownload, type Lc0ModelDownloadState } from './modelCache.ts';
 
 const defaultDeps = { placement: resolveOrtSessionPlacement, inspect: inspectLc0ModelDownload };
 
-/** Match the production worker's model choice without creating a worker/session
- * or reading/downloading model bytes. The loader still verifies bytes at use.
+export type LargeNetDownloadState = Lc0ModelDownloadState & { mayDownloadFallback?: boolean };
+
+/** Estimate the production worker's downloads without creating a session or
+ * reading model bytes. Split-K load or WebGPU init failure can load the original.
  */
-export async function inspectLargeNetDownload(config: BigNetConfig, signal?: AbortSignal, deps = defaultDeps) {
+export async function inspectLargeNetDownload(config: BigNetConfig, signal?: AbortSignal, deps = defaultDeps): Promise<LargeNetDownloadState> {
   signal?.throwIfAborted();
-  const modelUrl = lc0SplitKUrl(config.modelUrl) ? selectLc0OrtModelUrl(config.modelUrl, await deps.placement()) : config.modelUrl;
+  const originalUrl = config.modelUrl;
+  const selectedUrl = lc0SplitKUrl(originalUrl) ? selectLc0OrtModelUrl(originalUrl, await deps.placement()) : originalUrl;
   signal?.throwIfAborted();
-  return deps.inspect(modelUrl, { signal });
+  if (selectedUrl === originalUrl) return deps.inspect(originalUrl, { signal });
+
+  const [selected, original] = await Promise.all([deps.inspect(selectedUrl, { signal }), deps.inspect(originalUrl, { signal })]);
+  if (original.cached) return selected;
+  if (selected.cached) return { ...original, mayDownloadFallback: true };
+  const downloadBytes =
+    selected.downloadBytes === undefined || original.downloadBytes === undefined ? undefined : selected.downloadBytes + original.downloadBytes;
+  return { ...selected, downloadBytes, mayDownloadFallback: true };
 }

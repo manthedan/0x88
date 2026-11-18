@@ -140,16 +140,42 @@ for (const placement of [
 ]) {
   test(`dialog inspection follows the production t3 device rule: ${JSON.stringify(placement)}`, async () => {
     const selected = placement.providers[0] === 'webgpu' && placement.adapterVendor === 'apple' ? lc0SplitKUrl(BIG_NETS.t3.modelUrl) : BIG_NETS.t3.modelUrl;
+    const inspected = [];
     const result = await inspectLargeNetDownload(BIG_NETS.t3, undefined, {
       placement: async () => placement,
       inspect: async (url) => {
-        assert.equal(url, selected);
+        inspected.push(url);
         return { url, downloadBytes: 171021068, cached: true };
       },
     });
     assert.equal(result.url, selected);
+    assert.equal(result.cached, true);
+    const original = BIG_NETS.t3.modelUrl;
+    assert.deepEqual(inspected, selected === original ? [original] : [selected, original]);
   });
 }
+
+test('the t3 probe counts bytes for every uncached artifact the Apple WebGPU path might load', async () => {
+  const original = BIG_NETS.t3.modelUrl;
+  const splitK = lc0SplitKUrl(original);
+  const sizes = new Map([
+    [original, 160_000_000],
+    [splitK, 170_000_000],
+  ]);
+  for (const [cached, expectedUrl, expectedSize] of [
+    [[splitK], original, 160_000_000],
+    [[original], splitK, 170_000_000],
+    [[], splitK, 330_000_000],
+  ]) {
+    const result = await inspectLargeNetDownload(BIG_NETS.t3, undefined, {
+      placement: async () => ({ providers: ['webgpu', 'wasm'], adapterVendor: 'apple' }),
+      inspect: async (url) => ({ url, downloadBytes: sizes.get(url), cached: cached.includes(url) }),
+    });
+    assert.equal(result.cached, false);
+    assert.equal(result.url, expectedUrl);
+    assert.equal(result.downloadBytes, expectedSize);
+  }
+});
 
 test('Queen Odds inspection needs no GPU allocation/probe and never substitutes a different model', async () => {
   const result = await inspectLargeNetDownload(BIG_NETS.lqo, undefined, {
