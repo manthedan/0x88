@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
+import { resolvePublicAssetUrl } from '../src/lc0/assetUrls.ts';
 import { createCriticalReport, criticalMomentCacheKey, runCriticalReport } from '../src/lc0/criticalMoments.ts';
 import {
   createLc0OnnxEvaluatorFromUrl,
@@ -14,7 +15,8 @@ import {
   lc0SplitKUrl,
   selectLc0OrtModelUrl,
 } from '../src/lc0/lc0SmallModelSelection.ts';
-import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
+import { maia3ModelFallbackUrls } from '../src/lc0/maia3.ts';
+import { createPlayEngines, playCentipawnAssets } from '../src/lc0/play/playEngines.ts';
 import {
   collectOrtRuntimeDiagnostics,
   gpuAdapterShaderF16,
@@ -400,9 +402,9 @@ test('an explicit ?model= override, even naming the default file, loads exactly 
   assert.deepEqual(loads, [[ORIGINAL, false]]);
 });
 
-// Play's own request builder plus its production readiness and move paths. `base` stands
-// in for the ?assetBase=/?modelBase= override that resolvePublicAssetUrl reads from the page URL.
-function playSmallNetPaths(engines, failures, assetBase = { current: '' }) {
+// Play's own request builder plus its production readiness and move paths, with the
+// real asset resolvers reading ?assetBase= from the page URL (see visitPlay).
+function playSmallNetPaths(engines, failures, option = { id: 'lc0-small', label: 'Lc0', family: 'lc0', variant: 'small' }) {
   const play = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
   const slice = (start, end) => {
     const from = play.indexOf(start);
@@ -414,15 +416,16 @@ function playSmallNetPaths(engines, failures, assetBase = { current: '' }) {
     ${slice('async function ctxRequestEngineMove(', 'async function ctxVerifySelectedEngineReady(')}
     ${slice('async function ctxVerifySelectedEngineReady(', '// ---')}
     return { request: playModelRequest, move: ctxRequestEngineMove, ready: ctxVerifySelectedEngineReady };`;
-  const small = { id: 'lc0-small', label: 'Lc0', family: 'lc0', variant: 'small' };
   const deps = {
     engines,
     LC0_SMALL_BATCH1_QDQ8_PATH,
-    resolvePublicAssetUrl: (url) => (url.startsWith('/models/') ? `${assetBase.current}${url}` : url),
+    resolvePublicAssetUrl,
+    maia3ModelFallbackUrls,
+    playCentipawnAssets,
     isV0DeployProfile: () => false,
     phoneBlockedBigNetModelUrl: () => null,
     lc0SmallModelRequest,
-    ctxSelectedEngine: () => small,
+    ctxSelectedEngine: () => option,
     ctxStrengthFor: () => 1,
     ctxSetEngineNote() {},
     ctxRender() {},
@@ -432,17 +435,25 @@ function playSmallNetPaths(engines, failures, assetBase = { current: '' }) {
   return new Function('deps', `const { ${Object.keys(deps)} } = deps; ${code}`)(deps);
 }
 
-function playMountCtx(api, query) {
+/** Point the page at Play with `query` (a local origin, so ?assetBase= is honoured) and mount it. */
+function visitPlay(t, query) {
+  const url = new URL(`http://localhost/app/play?${query}`);
+  globalThis.location = url;
+  t.after(() => delete globalThis.location);
+  return url;
+}
+
+function playMountCtx(api, url) {
   const engineUi = { current: () => () => false, mounted: () => true, note() {}, clearNote() {}, progress() {}, hideProgress() {} };
   return {
-    ...api.request(new URL(`https://0x88.test/app/play?${query}`)),
+    ...api.request(url),
     abort: new AbortController(),
     board: { turn: 'w' },
     humanColor: 'w',
     moves: [],
     positions: [],
     enginePreparationGeneration: 0,
-    opponent: { active: { level: 0 } },
+    opponent: { active: { level: 0, maiaElo: 1500 } },
     engineUi,
     dom: { buttonEl: () => ({}) },
   };
@@ -458,7 +469,7 @@ function recordingSmallNetHost(loads) {
   });
 }
 
-test("Play's readiness and move paths forward its small-net request to the engine host intact", async () => {
+test("Play's readiness and move paths forward its small-net request to the engine host intact", async (t) => {
   for (const [query, expected] of [
     ['', [ORIGINAL, true]],
     [`model=${ORIGINAL}`, [ORIGINAL, false]],
@@ -468,7 +479,7 @@ test("Play's readiness and move paths forward its small-net request to the engin
       const loads = [];
       const failures = [];
       const api = playSmallNetPaths(recordingSmallNetHost(loads), failures);
-      const ctx = playMountCtx(api, query);
+      const ctx = playMountCtx(api, visitPlay(t, query));
       if (path === 'ready') {
         await api.ready(ctx);
         assert.deepEqual(failures, ['loader stops here'], query);
@@ -478,20 +489,48 @@ test("Play's readiness and move paths forward its small-net request to the engin
   }
 });
 
-test("Play resolves the default small net against each mount's asset base, not the first module load's", async () => {
+test("Play resolves the default small net against each mount's asset base, not the first module load's", async (t) => {
   const loads = [];
-  const assetBase = { current: 'https://old.cdn' };
+  visitPlay(t, 'assetBase=https://old.cdn');
   // Evaluating the slice is the module load; each request is one mount.
-  const api = playSmallNetPaths(recordingSmallNetHost(loads), [], assetBase);
-  for (const base of ['https://new.cdn', '']) {
-    assetBase.current = base;
-    const ctx = playMountCtx(api, '');
+  const api = playSmallNetPaths(recordingSmallNetHost(loads), []);
+  for (const query of ['assetBase=https://new.cdn', '']) {
+    const ctx = playMountCtx(api, visitPlay(t, query));
     await assert.rejects(api.move(ctx, ctx.abort.signal), /loader stops here/);
   }
   assert.deepEqual(loads, [
     [`https://new.cdn${ORIGINAL}`, true],
     [ORIGINAL, true],
   ]);
+});
+
+test("Play loads Maia3 and Centipawn from each mount's asset base, not the first module load's", async (t) => {
+  for (const option of [
+    { id: 'maia3', label: 'Maia3', family: 'maia3', variant: 'maia3' },
+    { id: 'centipawn', label: 'Centipawn', family: 'centipawn', variant: 'centipawn' },
+  ]) {
+    const loads = [];
+    const failures = [];
+    const engines = createPlayEngines({
+      loadCentipawn: async (spec) => {
+        loads.push([spec.onnx, spec.meta]);
+        throw new Error('loader stops here');
+      },
+      createMaia3: async ({ fallbackUrls }) => {
+        loads.push(fallbackUrls);
+        throw new Error('loader stops here');
+      },
+    });
+    visitPlay(t, 'assetBase=https://bad.mirror');
+    const api = playSmallNetPaths(engines, failures, option);
+    for (const query of ['assetBase=https://new.cdn', '']) await api.ready(playMountCtx(api, visitPlay(t, query)));
+    assert.deepEqual(failures, ['loader stops here', 'loader stops here'], option.id);
+    const expected =
+      option.family === 'maia3'
+        ? (base) => ['qdq8.graph.onnx', 'qdq8.onnx', 'onnx'].map((suffix) => `${base}/models/maia3/maia3_simplified.${suffix}`)
+        : (base) => [`${base}/models/s4fix_v_ema.onnx`, `${base}/models/s4fix_v_ema.meta.json`];
+    assert.deepEqual(loads, [expected('https://new.cdn'), expected('')], option.id);
+  }
 });
 
 test('critical-moment results are keyed by the model the Lc0 lane actually ran', async () => {

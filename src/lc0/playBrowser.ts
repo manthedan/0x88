@@ -45,7 +45,7 @@ import { enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engine
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { LC0_SMALL_BATCH1_QDQ8_PATH, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
-import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle } from './maia3.ts';
+import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle, maia3ModelFallbackUrls } from './maia3.ts';
 import type { MountScope } from './mountScope.ts';
 import { rememberMoveFocus } from './moveListFocus.ts';
 import {
@@ -61,7 +61,15 @@ import {
 import { type OpeningNameIndex, openingPositionKey } from './openingNames.ts';
 import { type PendingInput, type PendingInputEvent, transitionPendingInput } from './pendingInput.ts';
 import { PHONE_LARGE_NET_CHANGE_EVENT, phoneLargeNetsBlocked, phoneSafeEngineVariant } from './phoneLargeNetPolicy.ts';
-import { createPlayEngines, type EngineUiPort, type Lc0SmallModel, type PlayEngineSpec, type PlayFamily } from './play/playEngines.ts';
+import {
+  type CentipawnAssets,
+  createPlayEngines,
+  type EngineUiPort,
+  type Lc0SmallModel,
+  type PlayEngineSpec,
+  type PlayFamily,
+  playCentipawnAssets,
+} from './play/playEngines.ts';
 import {
   createEngineUiPort,
   hideDownloadProgress as ctxHideDownloadProgress,
@@ -80,15 +88,17 @@ import { createWakeLockManager } from './wakeLock.ts';
 import { createWorkspaceAutosave, decodePlaySnapshot, readWorkspace } from './workspaceAutosave.ts';
 
 /** Read per mount: client-side navigation can change ?model=, ?assetBase= and ?modelBase= without reloading this module. */
-function playModelRequest(url: URL): { blockedModelOverride: boolean; lc0SmallModel: Lc0SmallModel } {
+function playModelRequest(url: URL): Pick<PlayContext, 'blockedModelOverride' | 'lc0SmallModel' | 'maia3ModelUrls' | 'centipawnAssets'> {
   const requested = url.searchParams.get('model');
-  // resolvePublicAssetUrl reads the asset base from the live page URL, which is this mount's.
+  // Asset URLs resolve against the live page URL, which is this mount's.
   const defaultModelUrl = resolvePublicAssetUrl(LC0_SMALL_BATCH1_QDQ8_PATH);
   // v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
   const blockedModelOverride = phoneBlockedBigNetModelUrl(requested);
   return {
     blockedModelOverride,
     lc0SmallModel: lc0SmallModelRequest(defaultModelUrl, isV0DeployProfile() || blockedModelOverride ? null : requested, resolvePublicAssetUrl),
+    maia3ModelUrls: maia3ModelFallbackUrls(),
+    centipawnAssets: playCentipawnAssets(),
   };
 }
 
@@ -143,6 +153,8 @@ interface PlayContext extends PlayEngineUiState {
   dom: PlayDom;
   blockedModelOverride: boolean;
   lc0SmallModel: Lc0SmallModel;
+  maia3ModelUrls: string[];
+  centipawnAssets: CentipawnAssets;
   runtimeFallbackAudits: Map<string, BrowserRuntimeAuditDetail>;
   autosave: ReturnType<typeof createWorkspaceAutosave> | null;
   pendingInput: PendingInput | null;
@@ -569,7 +581,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     }
   }
   if (option.family === 'maia3') {
-    const player = await engines.ensureMaia3(ctx.opponent.active.maiaElo, ctx.engineUi);
+    const player = await engines.ensureMaia3(ctx.opponent.active.maiaElo, ctx.engineUi, ctx.maia3ModelUrls);
     if (signal.aborted) return null;
     const choice = await player.chooseMove(
       { positions: ctx.positions },
@@ -584,7 +596,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     return choice.move;
   }
   if (option.family === 'centipawn') {
-    const evaluator = await engines.ensureCentipawn(ctx.engineUi);
+    const evaluator = await engines.ensureCentipawn(ctx.engineUi, ctx.centipawnAssets);
     if (signal.aborted) return null;
     try {
       const result = await chooseMove(ctx.board, evaluator, {
@@ -706,7 +718,7 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
     await retirement;
     if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration) return;
     if (option.family === 'maia3') {
-      const player = await engines.ensureMaia3(ctx.opponent.active.maiaElo, ctx.engineUi);
+      const player = await engines.ensureMaia3(ctx.opponent.active.maiaElo, ctx.engineUi, ctx.maia3ModelUrls);
       await player.chooseMove(
         { positions: ctx.positions },
         {
@@ -716,7 +728,7 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
         },
       );
     } else if (option.family === 'centipawn') {
-      const evaluator = await engines.ensureCentipawn(ctx.engineUi);
+      const evaluator = await engines.ensureCentipawn(ctx.engineUi, ctx.centipawnAssets);
       await evaluator.evaluate(ctx.board, {
         historyFens: searchHistoryFens(ctx.positions, ctx.positions.length),
         legalMoves: legalMoves(ctx.board),

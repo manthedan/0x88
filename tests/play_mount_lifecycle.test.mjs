@@ -363,6 +363,34 @@ test('a replacement retired before its predecessor finishes disposing still sett
   await settles(engines.retireUnusedEngines());
 });
 
+test('Maia3 and Centipawn are cached per resolved model URL: a new asset base retires the old session first', async () => {
+  const events = [];
+  const engines = createPlayEngines({
+    loadCentipawn: async (spec) => {
+      events.push(`load ${spec.onnx} ${spec.meta}`);
+      return { evaluator: { evaluate: async () => ({}), dispose: async () => events.push(`dispose ${spec.onnx}`) } };
+    },
+    createMaia3: async ({ fallbackUrls }) => {
+      events.push(`load ${fallbackUrls.join(',')}`);
+      return { modelLoad: { bytes: 1 }, dispose: async () => events.push(`dispose ${fallbackUrls[0]}`) };
+    },
+  });
+  const oldMaia = await engines.ensureMaia3(1500, quietUi, ['https://old/m.onnx', 'https://old/f.onnx']);
+  assert.equal(await engines.ensureMaia3(1500, quietUi, ['https://old/m.onnx', 'https://old/f.onnx']), oldMaia);
+  const newMaia = await engines.ensureMaia3(1500, quietUi, ['/m.onnx', '/f.onnx']);
+  assert.notEqual(newMaia, oldMaia);
+  assert.deepEqual(events, ['load https://old/m.onnx,https://old/f.onnx', 'dispose https://old/m.onnx', 'load /m.onnx,/f.onnx']);
+  events.length = 0;
+  await engines.retireUnusedEngines({ family: 'centipawn' });
+  events.length = 0;
+  const oldCp = await engines.ensureCentipawn(quietUi, { onnx: 'https://old/c.onnx', meta: 'https://old/c.json' });
+  assert.equal(await engines.ensureCentipawn(quietUi, { onnx: 'https://old/c.onnx', meta: 'https://old/c.json' }), oldCp);
+  const newCp = await engines.ensureCentipawn(quietUi, { onnx: '/c.onnx', meta: '/c.json' });
+  assert.notEqual(newCp, oldCp);
+  await engines.retireUnusedEngines();
+  assert.deepEqual(events, ['load https://old/c.onnx https://old/c.json', 'dispose https://old/c.onnx', 'load /c.onnx /c.json', 'dispose /c.onnx']);
+});
+
 function sourceFiles(dir) {
   return readdirSync(dir).flatMap((name) => {
     const path = `${dir}/${name}`;

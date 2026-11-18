@@ -12,7 +12,7 @@ import type { EngineFamily } from '../engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from '../engineProvision.ts';
 import { awaitEngineRetirements, trackEngineRetirement } from '../engineRetirement.ts';
 import { createLc0OnnxEvaluatorFromUrl } from '../lc0SmallModelSelection.ts';
-import { Maia3BrowserEvaluator } from '../maia3.ts';
+import { Maia3BrowserEvaluator, maia3ModelFallbackUrls } from '../maia3.ts';
 import { CachedLc0Evaluator } from '../onnxEvaluator.ts';
 import { Lc0PuctSearcher } from '../search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from '../stockfishEngine.ts';
@@ -61,9 +61,16 @@ export interface PlayEngineDeps {
 }
 
 const BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3', 'lqo'];
-const PLAY_CENTIPAWN_KEY = 's4fix-v-ema';
-const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl('/models/s4fix_v_ema.onnx');
-const CENTIPAWN_META_URL = resolvePublicAssetUrl('/models/s4fix_v_ema.meta.json');
+
+export interface CentipawnAssets {
+  onnx: string;
+  meta: string;
+}
+
+/** Resolved against the page's asset base when called: a client-side navigation can change ?assetBase=. */
+export function playCentipawnAssets(): CentipawnAssets {
+  return { onnx: resolvePublicAssetUrl('/models/s4fix_v_ema.onnx'), meta: resolvePublicAssetUrl('/models/s4fix_v_ema.meta.json') };
+}
 const RECLAIM_NOTE = 'Freeing memory…';
 
 function createPlayCpuEngine(option: PlayEngineSpec): CpuEngine | Promise<CpuEngine> {
@@ -96,6 +103,8 @@ export function createPlayEngines(deps: PlayEngineDeps) {
   let lc0SmallModel: Lc0SmallModel | null = null;
   let maia3Abort: AbortController | null = null;
   let maia3Promise: Promise<Maia3BrowserEvaluator> | null = null;
+  /** The model URLs the cached Maia3 was loaded from; a remount may resolve them against another asset base. */
+  let maia3Key: string | null = null;
   /** One-line model/cache status shown in the caption once Maia3 has loaded. */
   let maia3Status: string | null = null;
   const centipawn = createCentipawnEvaluatorCache(deps.loadCentipawn);
@@ -105,23 +114,27 @@ export function createPlayEngines(deps: PlayEngineDeps) {
   /** Retire every neural engine except `keep`'s; resolves once their workers are gone. */
   function retireUnusedEngines(keep?: PlayEngineSpec): Promise<void> {
     if (keep?.family !== 'centipawn') centipawn.clear();
-    if (keep?.family !== 'maia3' && maia3Promise) {
-      const pending = maia3Promise;
-      maia3Abort?.abort();
-      maia3Abort = null;
-      maia3Promise = null;
-      maia3Status = null;
-      // An aborted initialization publishes its worker cleanup through onInitCleanup.
-      trackEngineRetirement(
-        pending.then(
-          (evaluator) => evaluator.dispose(),
-          () => undefined,
-        ),
-      );
-    }
+    if (keep?.family !== 'maia3') retireMaia3();
     if (!(keep?.family === 'lc0' && keep.variant === 'small')) retireLc0Small();
     releaseUnusedBigNetSearchers(bigNetKeep(keep), 0);
     return awaitEngineRetirements();
+  }
+
+  function retireMaia3(): Promise<void> | undefined {
+    if (!maia3Promise) return undefined;
+    const pending = maia3Promise;
+    maia3Abort?.abort();
+    maia3Abort = null;
+    maia3Promise = null;
+    maia3Status = null;
+    maia3Key = null;
+    // An aborted initialization publishes its worker cleanup through onInitCleanup.
+    return trackEngineRetirement(
+      pending.then(
+        (evaluator) => evaluator.dispose(),
+        () => undefined,
+      ),
+    );
   }
 
   /** Resolves once this session is gone; replacements wait on exactly this, not the global barrier. */
@@ -212,13 +225,16 @@ export function createPlayEngines(deps: PlayEngineDeps) {
     return lc0LoadPromise;
   }
 
-  function ensureCentipawn(ui: EngineUiPort): Promise<Evaluator> {
-    const starting = !centipawn.has(PLAY_CENTIPAWN_KEY);
+  function ensureCentipawn(ui: EngineUiPort, assets: CentipawnAssets = playCentipawnAssets()): Promise<Evaluator> {
+    const key = `${assets.onnx}\n${assets.meta}`;
+    // One Centipawn resident: a session from another asset base retires.
+    centipawn.retain(new Set([key]));
+    const starting = !centipawn.has(key);
     const current = ui.current();
     const loading = centipawn.get(
-      PLAY_CENTIPAWN_KEY,
+      key,
       {
-        spec: { id: 's4fix-v-ema', modelId: 's4fix-v-ema', label: 'Centipawn', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL, runtime: 'ort' },
+        spec: { id: 's4fix-v-ema', modelId: 's4fix-v-ema', label: 'Centipawn', onnx: assets.onnx, meta: assets.meta, runtime: 'ort' },
         options: { runtime: 'ort', fallback: true, audit: { surface: 'play' } },
         maxEntries: 4096,
         label: 'centipawn-play:ort',
@@ -240,22 +256,31 @@ export function createPlayEngines(deps: PlayEngineDeps) {
   }
 
   /** `elo` seeds a new evaluator; each move still passes its own Elo. */
-  async function ensureMaia3(elo: number, ui: EngineUiPort): Promise<Maia3BrowserEvaluator> {
+  async function ensureMaia3(elo: number, ui: EngineUiPort, modelUrls: readonly string[] = maia3ModelFallbackUrls()): Promise<Maia3BrowserEvaluator> {
+    const key = modelUrls.join('\n');
+    // Another asset base's session must be gone first; wait on it only, as for Lc0 Small.
+    const predecessor = maia3Key !== null && maia3Key !== key ? retireMaia3() : undefined;
     if (maia3Promise) {
       const cached = maia3Promise;
       const owner = maia3Abort;
       const evaluator = await cached;
       if (owner?.signal.aborted) throw new DOMException('Maia3 owner retired', 'AbortError');
       if (!evaluator.failure) return evaluator;
-      if (maia3Promise === cached) maia3Promise = null;
-      return ensureMaia3(elo, ui);
+      if (maia3Promise === cached) {
+        maia3Promise = null;
+        maia3Key = null;
+      }
+      return ensureMaia3(elo, ui, modelUrls);
     }
     const current = ui.current();
     const owner = new AbortController();
     maia3Abort = owner;
+    maia3Key = key;
     maia3Promise = (async () => {
       if (current()) ui.note('Loading Maia3 human model…');
+      if (predecessor) await predecessor;
       const evaluator = await createMaia3({
+        fallbackUrls: modelUrls,
         selfElo: elo,
         oppoElo: elo,
         signal: owner.signal,
@@ -272,7 +297,10 @@ export function createPlayEngines(deps: PlayEngineDeps) {
       if (current()) ui.note('');
       return evaluator;
     })().catch((error: Error) => {
-      if (owner === maia3Abort) maia3Promise = null;
+      if (owner === maia3Abort) {
+        maia3Promise = null;
+        maia3Key = null;
+      }
       if (current()) {
         ui.hideProgress();
         ui.note(`Maia3 load failed: ${error.message}`, true);
