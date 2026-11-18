@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import { coverage, parseArgs } from '../scripts/feature_walk.mjs';
@@ -20,6 +21,7 @@ import {
   snapshotExpression,
   usableNodes,
 } from '../scripts/lib/feature_walk_core.mjs';
+import { FEATURES, ROUTES } from '../src/features/registry.ts';
 
 const draws = (rng, n) => Array.from({ length: n }, () => rng());
 
@@ -347,4 +349,69 @@ test('CLI: dry run prints registry coverage; a live run needs --base-url', () =>
   assert.throws(() => parseArgs(['--base-url', 'http://x', '--start', 'lab']), /Unknown --start route/);
   assert.throws(() => parseArgs(['--base-url', 'http://x', '--steps', '1.5']), /Invalid --steps/);
   assert.equal(parseArgs(['--base-url', 'http://127.0.0.1:5181/app/']).baseUrl, 'http://127.0.0.1:5181');
+});
+
+// Eligible action names on a route for a fake page where exactly `present` selectors match one usable node.
+function eligibleNames(route, present, globals = {}) {
+  const candidates = routeActions(route);
+  const flags = vm.runInNewContext(eligibilityExpression(candidates), {
+    ...globals,
+    document: { querySelector: () => null, querySelectorAll: (selector) => (present.includes(selector) ? [fakeNode({})] : []), ...globals.document },
+  });
+  return candidates.filter((_, i) => flags[i]).map(({ feature, action }) => `${feature}/${action.name}`);
+}
+
+test('an open mobile menu offers its links and a close, never a re-toggle that hides them', () => {
+  const open = eligibleNames(
+    'arena',
+    ['.site-header .menu-toggle', '.site-header .menu-toggle[aria-expanded="true"]', '.mobile-nav-menu a[href="/app/play/"]'],
+    {
+      location: { pathname: '/app/arena/' },
+    },
+  );
+  assert.ok(open.includes('nav/go:play:menuOpen'));
+  assert.ok(open.includes('nav/closeMenu'));
+  assert.ok(!open.some((name) => name.endsWith(':mobile')));
+  const closed = eligibleNames('arena', ['.site-header .menu-toggle', '.site-header .menu-toggle[aria-expanded="false"]'], {
+    location: { pathname: '/app/arena/' },
+  });
+  assert.ok(closed.includes('nav/go:play:mobile'));
+  assert.ok(!closed.includes('nav/go:arena:mobile'), 'no navigation to the current route');
+});
+
+test('Docs search is reachable on phones by opening the panel first', () => {
+  assert.deepEqual(eligibleNames('docs', ['.toc .mobile-search']), ['docs.search/openSearch']);
+  assert.ok(eligibleNames('docs', ['#docSearch']).includes('docs.search/search'));
+});
+
+test('Play moves are offered only at the live position', () => {
+  const move = routeActions('play').find(({ action }) => action.name === 'move').action;
+  const eligible = (status) => vm.runInNewContext(`!!(${move.whenExpr})`, { document: { querySelector: () => ({ textContent: status }) } });
+  assert.equal(eligible('Your move'), true);
+  assert.equal(eligible('You are in check'), true);
+  assert.equal(eligible('Viewing 1. e4 — press → or End to return. Live game: Your move.'), false);
+  assert.equal(eligible('Maia3 to move'), false);
+});
+
+test('walk choices stay reproducible and download-light', () => {
+  const steps = FEATURES.flatMap((feature) =>
+    feature.actions.flatMap((action) => action.steps.map((step) => ({ name: `${feature.id}/${action.name}`, step }))),
+  );
+  for (const { name, step } of steps) {
+    // Big nets (BT4/t3) load without consent on desktop Play; Random color uses the app's own Math.random.
+    for (const value of step.values ?? []) assert.doesNotMatch(String(value), /bt4|(^|-)t3$/, `${name} offers big net ${value}`);
+    assert.doesNotMatch(step.target ?? '', /data-color(?!="(white|black)")/, `${name} can pick an unseeded color`);
+    // .pv-move inserts moves; the preview has its own control.
+    if (name === 'analysis.pvPreview/openPv') assert.match(step.target, /\[data-pv-preview\]/);
+  }
+});
+
+test('Home and Docs wait for hydration, which the root layout signals', () => {
+  for (const route of ['home', 'docs']) {
+    const ready = (hydrated) =>
+      vm.runInNewContext(`!!(${ROUTES[route].ready})`, { document: { querySelector: () => ({}), documentElement: { hasAttribute: () => hydrated } } });
+    assert.equal(ready(false), false, `${route} ready before hydration`);
+    assert.equal(ready(true), true);
+  }
+  assert.match(readFileSync('src/routes/+layout.svelte', 'utf8'), /onMount\([\s\S]*document\.documentElement\.dataset\.hydrated = ''/);
 });

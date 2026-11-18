@@ -64,9 +64,13 @@ export type Feature = {
   invariants: readonly InvariantName[];
 };
 
+/** Set by src/routes/+layout.svelte onMount, i.e. after the client hydrated the page. */
+export const HYDRATED = `document.documentElement.hasAttribute('data-hydrated')`;
+
 export const ROUTES = {
-  home: { path: '/', markup: 'src/routes/+page.svelte', controllers: [], ready: `!!document.querySelector('#hero-h1')` },
-  docs: { path: '/docs/', markup: 'src/routes/docs/+page.svelte', controllers: [], ready: `!!document.querySelector('#doc-h1')` },
+  // Home and Docs headings are prerendered, so they also wait for the root layout's post-hydration flag.
+  home: { path: '/', markup: 'src/routes/+page.svelte', controllers: [], ready: `!!document.querySelector('#hero-h1') && ${HYDRATED}` },
+  docs: { path: '/docs/', markup: 'src/routes/docs/+page.svelte', controllers: [], ready: `!!document.querySelector('#doc-h1') && ${HYDRATED}` },
   analysis: {
     path: '/app/analysis/',
     markup: 'src/routes/app/analysis/+page.svelte',
@@ -107,13 +111,20 @@ function navActions(route: RouteKey): Action[] {
       steps: [{ do: 'click', target: `.site-header nav.primary a[href="${href}"]` }],
     },
     {
+      // Toggle only a closed menu: a cancelled navigation can leave it open.
       name: `go:${route}:mobile`,
-      when: '.site-header .menu-toggle',
+      when: '.site-header .menu-toggle[aria-expanded="false"]',
       whenExpr: away,
       steps: [
         { do: 'click', target: '.site-header .menu-toggle' },
         { do: 'click', target: `.mobile-nav-menu a[href="${href}"]` },
       ],
+    },
+    {
+      name: `go:${route}:menuOpen`,
+      when: `.mobile-nav-menu a[href="${href}"]`,
+      whenExpr: away,
+      steps: [{ do: 'click', target: `.mobile-nav-menu a[href="${href}"]` }],
     },
   ];
 }
@@ -125,6 +136,7 @@ export const FEATURES = [
     ids: [],
     actions: [
       ...ALL_ROUTES.flatMap(navActions),
+      { name: 'closeMenu', when: '.site-header .menu-toggle[aria-expanded="true"]', steps: [{ do: 'click', target: '.site-header .menu-toggle' }] },
       { name: 'toggleTheme', when: '.site-header .theme-toggle', steps: [{ do: 'click', target: '.site-header .theme-toggle' }], weight: 0.3 },
     ],
     invariants: ['noPageErrors', 'noConsoleErrors', 'noHorizontalOverflow', 'uniqueIds', 'noFullReload', 'routeReady'],
@@ -161,7 +173,11 @@ export const FEATURES = [
     id: 'docs.search',
     routes: ['docs'],
     ids: ['main', 'doc-h1', 'docSearch', 'pages-analysis'],
-    actions: [{ name: 'search', when: '#docSearch', steps: [{ do: 'fill', target: '#docSearch', values: ['cache', 'arena', 'webgpu', ''] }] }],
+    actions: [
+      // Narrow screens hide the search input until the contents panel opens.
+      { name: 'openSearch', when: '.toc .mobile-search', steps: [{ do: 'click', target: '.toc .mobile-search' }] },
+      { name: 'search', when: '#docSearch', steps: [{ do: 'fill', target: '#docSearch', values: ['cache', 'arena', 'webgpu', ''] }] },
+    ],
     invariants: OWNED,
   },
 
@@ -175,7 +191,8 @@ export const FEATURES = [
       {
         name: 'move',
         when: '#keyboardBoard',
-        whenExpr: `/Your move|You are in check/.test(document.querySelector('#status')?.textContent ?? '')`,
+        // Anchored: while browsing history the status starts "Viewing … Live game: Your move." and moves are rejected.
+        whenExpr: `/^(Your move|You are in check)/.test(document.querySelector('#status')?.textContent?.trim() ?? '')`,
         steps: [{ do: 'boardMove', side: PLAY_USER_SIDE }],
         weight: 4,
       },
@@ -234,14 +251,19 @@ export const FEATURES = [
     actions: [
       { name: 'changeOpponent', when: '#changeOpponent', steps: [{ do: 'click', target: '#changeOpponent' }] },
       {
-        // lc0-bt4 is a big net: it exercises the consent dialog, which the walk declines.
+        // No big nets (lc0-bt4/t3): desktop Play loads them without a consent dialog.
         name: 'pickEngine',
         when: '#engineSelect',
-        steps: [{ do: 'select', target: '#engineSelect', values: ['maia3', 'lc0-small', 'sf-lite', 'berserk', 'centipawn', 'lc0-bt4'] }],
+        steps: [{ do: 'select', target: '#engineSelect', values: ['maia3', 'lc0-small', 'sf-lite', 'berserk', 'centipawn'] }],
         weight: 2,
       },
       { name: 'pickLevel', when: '#levelSelect', steps: [{ do: 'select', target: '#levelSelect', values: ['0', '1'] }] },
-      { name: 'pickColor', when: '.color-choice [data-color]', steps: [{ do: 'click', target: '.color-choice [data-color]', pick: true }] },
+      {
+        // Explicit sides only: Random uses the app's unseeded Math.random and breaks seed replay.
+        name: 'pickColor',
+        when: '.color-choice [data-color="white"]',
+        steps: [{ do: 'click', target: '.color-choice [data-color="white"], .color-choice [data-color="black"]', pick: true }],
+      },
       { name: 'ratingPreset', when: '.rating-presets [data-elo]', steps: [{ do: 'click', target: '.rating-presets [data-elo]', pick: true }] },
       { name: 'toggleDetails', when: '#opponentDetails > summary', steps: [{ do: 'click', target: '#opponentDetails > summary' }], weight: 0.5 },
     ],
@@ -589,7 +611,8 @@ export const FEATURES = [
       'pvInsertLine',
     ],
     actions: [
-      { name: 'openPv', when: '#engineSummaries .pv-move', steps: [{ do: 'click', target: '#engineSummaries .pv-move', pick: true }] },
+      // .pv-move inserts the line into the game; [data-pv-preview] opens the preview dialog.
+      { name: 'openPv', when: '#engineSummaries [data-pv-preview]', steps: [{ do: 'click', target: '#engineSummaries [data-pv-preview]', pick: true }] },
       { name: 'stepPv', when: '#pvForward', steps: [{ do: 'click', target: '#pvStart, #pvBack, #pvForward, #pvEnd', pick: true }] },
       { name: 'closePv', when: '#closePvPreview', steps: [{ do: 'click', target: '#closePvPreview' }], weight: 2 },
     ],

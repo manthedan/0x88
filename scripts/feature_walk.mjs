@@ -183,6 +183,13 @@ async function walk(args) {
     const pageErrors = [];
     const consoleErrors = [];
     page.on('pageerror', (error) => pageErrors.push(`Uncaught ${error?.stack ?? error}`));
+    // Accept native dialogs deliberately (e.g. Arena's leave-during-match confirm) so navigation
+    // proceeds and the menu closes; Playwright would otherwise dismiss them silently.
+    const dialogs = [];
+    page.on('dialog', (dialog) => {
+      dialogs.push(dialog.message());
+      void dialog.accept().catch(() => undefined);
+    });
     page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push({ level: 'error', text: message.text() });
     });
@@ -231,6 +238,7 @@ async function walk(args) {
       const label = `${choice.feature}/${choice.action.name}`;
       const documentIdBefore = await documentId();
       const errorMarks = [pageErrors.length, consoleErrors.length];
+      const dialogMark = dialogs.length;
       const record = { step: index, route, feature: choice.feature, action: choice.action.name, results: [] };
       report.steps.push(record);
       try {
@@ -242,6 +250,7 @@ async function walk(args) {
         report.failures.push({ step: index, route, action: label, invariant: 'actionCompleted', detail: error.message });
       }
       await delay(args.settleMs);
+      if (dialogs.length > dialogMark) record.acceptedDialogs = dialogs.slice(dialogMark);
       route = await checkRoute(index, label, errorMarks, documentIdBefore, choice.action.allowsReload, route);
       record.routeAfter = route;
     }
