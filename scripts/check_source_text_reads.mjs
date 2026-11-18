@@ -36,13 +36,39 @@ function srcTree(root) {
   return out;
 }
 
-/** Map a literal path to a repo-relative src path, or null when it does not point into src/. */
-function resolveLiteral(text, testDir) {
-  let rel;
-  if (text.startsWith('./') || text.startsWith('../')) rel = posix.normalize(posix.join(testDir, text));
-  else if (text === 'src' || text.startsWith('src/')) rel = posix.normalize(text);
-  else return null;
-  return rel === 'src' || rel.startsWith('src/') ? rel : null;
+/**
+ * Repo-relative src candidates for a literal path. `new URL(path, import.meta.url)` resolves from the test
+ * file; a plain fs path resolves from the test runner's cwd, the repo root. A literal handed to a helper
+ * (`extract('../src/x.ts', ...)`) could be either, so it yields both and the caller keeps what exists.
+ */
+function resolveLiteral(text, testDir, base) {
+  const out = [];
+  const relative = text.startsWith('./') || text.startsWith('../');
+  if (!relative && text !== 'src' && !text.startsWith('src/')) return out;
+  if (relative && base !== 'cwd') out.push(posix.normalize(posix.join(testDir, text)));
+  if (base !== 'file') out.push(posix.normalize(text));
+  return out.filter((rel) => rel === 'src' || rel.startsWith('src/'));
+}
+
+/** 'file' inside `new URL(<node>, import.meta.url)`, 'cwd' as a direct fs-read argument, else null (unknown). */
+function resolutionBase(node, depth = 0) {
+  const parent = node.parent;
+  // `const fixturePath = './src/x.ts'`: the base is decided where the variable is used.
+  if (ts.isVariableDeclaration(parent) && parent.initializer === node && ts.isIdentifier(parent.name) && depth < MAX_DEPTH) {
+    const bases = new Set();
+    const name = parent.name.text;
+    const visit = (child) => {
+      if (ts.isIdentifier(child) && child.text === name && child !== parent.name) bases.add(resolutionBase(child, depth + 1));
+      ts.forEachChild(child, visit);
+    };
+    visit(node.getSourceFile());
+    return bases.size === 1 ? [...bases][0] : null;
+  }
+  if (ts.isNewExpression(parent) && parent.expression.getText() === 'URL' && parent.arguments?.[0] === node) {
+    return parent.arguments[1]?.getText() === 'import.meta.url' ? 'file' : null;
+  }
+  if (ts.isCallExpression(parent) && parent.arguments[0] === node && READ_API.test(parent.expression.getText())) return 'cwd';
+  return null;
 }
 
 function isModuleSpecifier(node) {
@@ -69,6 +95,7 @@ const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const HOLE = '\u0000';
 const ARRAY_CALLBACKS = new Set(['map', 'flatMap', 'forEach', 'filter', 'some', 'every']);
 const MAX_DEPTH = 8;
+const MAX_EXPANSIONS = 10_000;
 
 const isFunctionLike = (node) => ts.isArrowFunction(node) || ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node);
 const union = (sets) => (sets.some((set) => set === null) ? null : new Set(sets.flatMap((set) => [...set])));
@@ -158,7 +185,7 @@ export function scanTestSource(text, testFile, tree) {
   const templates = [];
   const visit = (node) => {
     if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      if (!isModuleSpecifier(node) && !joinedOntoNonRoot(node)) paths.push(node.text);
+      if (!isModuleSpecifier(node) && !joinedOntoNonRoot(node)) paths.push(node);
     } else if (ts.isTemplateExpression(node) && !isModuleSpecifier(node) && !joinedOntoNonRoot(node)) {
       templates.push(node);
     }
@@ -167,24 +194,40 @@ export function scanTestSource(text, testFile, tree) {
   visit(sourceFile);
 
   const reads = new Set();
-  for (const text of paths) {
-    const rel = resolveLiteral(text, testDir);
-    if (!rel) continue;
-    if (tree.files.includes(rel)) reads.add(rel);
-    else if (tree.dirs.has(`${rel}/`)) reads.add(`${rel}/`);
-  }
+  const addPath = (text, base) => {
+    for (const rel of resolveLiteral(text, testDir, base)) {
+      if (tree.files.includes(rel)) reads.add(rel);
+      else if (tree.dirs.has(`${rel}/`)) reads.add(`${rel}/`);
+    }
+  };
+  for (const node of paths) addPath(node.text, resolutionBase(node));
   for (const node of templates) {
-    const joined = [node.head.text, ...node.templateSpans.map((span) => span.literal.text)].join(HOLE);
-    if (!joined.includes('src/')) continue;
-    const rel = resolveLiteral(joined, testDir);
-    if (!rel) continue;
-    const pattern = new RegExp(`^${rel.split(HOLE).map(escapeRegex).join('([^/]*)')}$`);
-    const matches = tree.files.map((file) => [file, file.match(pattern)]).filter(([, match]) => match);
-    // `${surface}Browser.ts` inside `for (const surface of ['analysis', 'play'])`: keep only those expansions.
-    // A hole whose values cannot be traced to literals bound to it widens to every matching file.
+    const parts = [node.head.text, ...node.templateSpans.map((span) => span.literal.text)];
+    if (!parts.join('').includes('src/')) continue;
+    const base = resolutionBase(node);
     const holeValues = node.templateSpans.map((span) => valuesOf(span.expression));
-    for (const [file, match] of matches) {
-      if (holeValues.every((values, i) => values === null || values.has(match[i + 1]))) reads.add(file);
+    // Expansion is a cartesian product; past MAX_EXPANSIONS fall through to the pattern match below instead.
+    const combinations = holeValues.reduce((product, values) => product * (values === null ? Number.POSITIVE_INFINITY : values.size), 1);
+    if (combinations <= MAX_EXPANSIONS) {
+      // Every hole traced to literals (which may hold '/', e.g. file = 'lc0/maia3.ts'): expand and resolve each.
+      let expansions = [parts[0]];
+      holeValues.forEach((values, i) => {
+        expansions = expansions.flatMap((prefix) => [...values].map((value) => prefix + value + parts[i + 1]));
+      });
+      for (const text of expansions) addPath(text, base);
+      continue;
+    }
+    // An untraced hole widens to every src file matching the rest of the template; traced holes stay pinned.
+    const joined = parts.join(HOLE);
+    for (const rel of resolveLiteral(joined, testDir, base)) {
+      const pieces = rel.split(HOLE);
+      const source = pieces.map((piece, i) => {
+        if (i === 0) return escapeRegex(piece);
+        const values = holeValues[i - 1];
+        return `${values === null ? '[^/]*' : `(?:${[...values].map(escapeRegex).join('|')})`}${escapeRegex(piece)}`;
+      });
+      const pattern = new RegExp(`^${source.join('')}$`);
+      for (const file of tree.files) if (pattern.test(file)) reads.add(file);
     }
   }
   return [...reads].sort();

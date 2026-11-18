@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -111,4 +123,14 @@ test('a worktree with its own install keeps it', (t) => {
   const result = setup(worktree);
   assert.equal(result.status, 0, result.stderr);
   assert.equal(lstatSync(join(worktree, 'node_modules')).isSymbolicLink(), false);
+});
+
+test('an existing sibling models link whose target is unavailable is reported, not replaced', (t) => {
+  const { ws, worktree } = fixture(t);
+  const unmounted = join(ws, 'volume/models');
+  symlinkSync(unmounted, join(ws, 'trees/models'));
+  const result = setup(worktree);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /trees\/models -> .*volume\/models does not resolve/);
+  assert.equal(readlinkSync(join(ws, 'trees/models')), unmounted);
 });
