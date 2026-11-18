@@ -505,8 +505,13 @@ Owner iPhone, built reclaim branch, fresh origin per config, Play (Maia3 game) �
 | C: no CPU retire, gap 0 | BT4 unavailable: `[webgpu] RangeError: Out of memory` (tab survived) | ok | ok | ~10 s |
 | B: CPU retire, gap 0 | ok | ok | ok | ~10 s |
 | A: CPU retire, 20 s gap | ok | ok | inconclusive (free phase 45 s; still loading at the 90 s capture cutoff) | 26 / 26 / 55 s |
+| P: CPU retire, gap 0, cold prefetch worker | 5 cold runs: 5 pass, 0 kills (BT4 ~44 v/s after load) | — | — | — |
 
 Under A, `play-bt4` and `analysis-t3` also passed. The device log shows no WebContent kill of the active tab in any run; all ten
 WebContent kills were `long-idle-exit` of earlier tabs. The only failure needed CPU engines left resident on a cold load, so the
 default gap is now **0** with CPU retirement kept; `0x88-reclaim-gap-ms` remains a diagnostic override. n=3 per config is
 small: the evidence that CPU retirement matters rests on one cold failure.
+
+Row P (fix/phone-cold-prefetch, served from Yukon): a phone cold load downloads, verifies and caches the net in a throwaway
+worker, terminates it, then loads from cache. In comparison runs, CPU retire with gap 0 and no prefetch got 5/6 (one WebContent
+kill), and CPU retire with a 20 s gap got 6/6. Gap 0 stays the default because the prefetch removes the cold-path peak; n=5 is small.
