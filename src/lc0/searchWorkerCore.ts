@@ -290,6 +290,8 @@ let configuredOrtFallback: OrtRuntimeDiagnostics['fallback'];
 let configuredOrtRuntime: OrtSessionDiagnostics | undefined;
 /** In-flight search abort controllers keyed by request id, so cancel messages can stop them. */
 const activeSearches = new Map<number, AbortController>();
+/** The running model load. Disposal aborts it so release need not wait out a large download. */
+let activeInit: AbortController | null = null;
 /** Cancels whose search message is still queued behind the search that is running. */
 const pendingSearchCancels: number[] = [];
 // This worker owns exactly one ORT session. Queue all model operations so the
@@ -425,6 +427,8 @@ async function handleInit(message: InitMessage): Promise<void> {
   // main thread with one message per network chunk.
   let lastReportedBytes = -Infinity;
   const physicalBatchMode = message.physicalBatchMode === 'logical' ? 'logical' : 'declared';
+  const initAbort = new AbortController();
+  activeInit = initAbort;
   const created = await createLc0OnnxEvaluatorFromUrl(message.modelUrl, {
     deviceSelection: message.deviceModelSelection === true,
     evaluator: {
@@ -437,6 +441,7 @@ async function handleInit(message: InitMessage): Promise<void> {
       allowUnverified: message.allowUnverifiedModel,
       requestPersistentStorage: message.requestPersistentModelStorage,
       minimumFreeBytesAfterCache: message.minimumFreeBytesAfterModelCache,
+      signal: initAbort.signal,
       onProgress: message.reportDownloadProgress
         ? (loadedBytes, totalBytes) => {
             if (loadedBytes - lastReportedBytes < 2_000_000 && loadedBytes !== totalBytes) return;
@@ -445,6 +450,8 @@ async function handleInit(message: InitMessage): Promise<void> {
           }
         : undefined,
     },
+  }).finally(() => {
+    if (activeInit === initAbort) activeInit = null;
   });
   const baseEvaluator = created.evaluator;
   const modelLoad = created.modelLoad;
@@ -602,6 +609,7 @@ function handleCancel(message: CancelMessage): void {
     return;
   }
   for (const controller of activeSearches.values()) controller.abort();
+  activeInit?.abort();
 }
 
 export function startSearchWorker(options: { createHybridEvaluator?: HybridEvaluatorFactory } = {}): void {
