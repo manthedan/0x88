@@ -10,19 +10,13 @@ const defaultDeps = { placement: resolveOrtSessionPlacement, inspect: inspectLc0
 
 export type LargeNetDownloadState = Lc0ModelDownloadState & { mayDownloadFallback?: boolean; downloadBytesIncomplete?: boolean };
 
-/** The model URL the production worker selects first (split-K on Apple WebGPU where listed). */
-async function selectedLargeNetUrl(config: BigNetConfig, placement: () => ReturnType<typeof defaultDeps.placement>): Promise<string> {
-  const originalUrl = config.modelUrl;
-  return lc0SplitKUrl(originalUrl) ? selectLc0OrtModelUrl(originalUrl, await placement()) : originalUrl;
-}
-
 /** Estimate the production worker's downloads without creating a session or
  * reading model bytes. Split-K load or WebGPU init failure can load the original.
  */
 export async function inspectLargeNetDownload(config: BigNetConfig, signal?: AbortSignal, deps = defaultDeps): Promise<LargeNetDownloadState> {
   signal?.throwIfAborted();
   const originalUrl = config.modelUrl;
-  const selectedUrl = await selectedLargeNetUrl(config, deps.placement);
+  const selectedUrl = lc0SplitKUrl(originalUrl) ? selectLc0OrtModelUrl(originalUrl, await deps.placement()) : originalUrl;
   signal?.throwIfAborted();
   if (selectedUrl === originalUrl) return deps.inspect(originalUrl, { signal });
 
@@ -50,7 +44,8 @@ export type LargeNetPrefetchOptions = {
 };
 
 /**
- * 'cached': already in Cache Storage; 'prefetched': now in it; 'fallback': load as before.
+ * 'cached': already in Cache Storage; 'prefetched': in it now (a split-K net's worker may
+ * have found it there); 'fallback': load as before.
  * 'memory': cache.put failed; `load` holds the verified bytes of `modelUrl` for the
  * session worker, so the net is still downloaded once.
  */
@@ -59,7 +54,6 @@ export type LargeNetPrefetchResult =
   | { status: 'memory'; modelUrl: string; load: Lc0ModelLoadResult & { model: ArrayBuffer } };
 
 const defaultPrefetchDeps = {
-  placement: resolveOrtSessionPlacement,
   cached: lc0ModelCacheEntryExists,
   spawn: (): Worker => new Worker(new URL('./modelPrefetchWorker.ts', import.meta.url), { type: 'module' }),
   reclaimGapMs: () => phoneReclaimSettings().reclaimGapMs,
@@ -81,19 +75,19 @@ export async function prefetchLargeNetToCache(
 ): Promise<LargeNetPrefetchResult> {
   const { signal } = options;
   signal.throwIfAborted();
-  let modelUrl: string;
-  try {
-    modelUrl = await untilAborted(
-      selectedLargeNetUrl(config, () => deps.placement(options.ep)),
-      signal,
-    );
-    // Key presence only, no body read: a cached net must not pay for a worker or a second read.
-    // The session worker's loader still verifies the entry (metadata, else a rehash).
-    if (await deps.cached(modelUrl, { signal })) return { status: 'cached' };
-  } catch (error) {
-    signal.throwIfAborted();
-    console.warn(`Lc0 ${config.name}: cache probe failed; loading without prefetch.`, error);
-    return { status: 'fallback' };
+  // A net with a split-K file is resolved in the prefetch worker, with the session
+  // worker's own probe (modelPrefetchWorker.ts sessionModelUrl); others are fixed.
+  const selectFor = lc0SplitKUrl(config.modelUrl) ? options.ep : undefined;
+  if (!selectFor) {
+    try {
+      // Key presence only, no body read: a cached net must not pay for a worker or a second read.
+      // The session worker's loader still verifies the entry (metadata, else a rehash).
+      if (await untilAborted(deps.cached(config.modelUrl, { signal }), signal)) return { status: 'cached' };
+    } catch (error) {
+      signal.throwIfAborted();
+      console.warn(`Lc0 ${config.name}: cache probe failed; loading without prefetch.`, error);
+      return { status: 'fallback' };
+    }
   }
   const worker = deps.spawn();
   let result: LargeNetPrefetchResult = { status: 'fallback' };
@@ -103,16 +97,18 @@ export async function prefetchLargeNetToCache(
         const data = event.data;
         if (data.type === 'progress') options.onProgress?.(data.loadedBytes, data.totalBytes);
         else if (data.type === 'error') reject(new Error(data.error));
-        else resolve(data.cached ? { status: 'prefetched' } : { status: 'memory', modelUrl, load: data.load });
+        else resolve(data.cached ? { status: 'prefetched' } : { status: 'memory', modelUrl: data.modelUrl, load: data.load });
       });
+      worker.addEventListener('messageerror', () => reject(new Error('model prefetch reply could not be received')));
       worker.addEventListener('error', (event) => reject(new Error(event.message || 'model prefetch worker failed')));
-      worker.postMessage({ type: 'prefetch', modelUrl, ...options.load } satisfies ModelPrefetchRequest);
+      const request: ModelPrefetchRequest = { type: 'prefetch', modelUrl: config.modelUrl, ...options.load };
+      worker.postMessage(selectFor ? { ...request, selectFor } : request);
     });
     result = await untilAborted(reply, signal);
   } catch (error) {
     signal.throwIfAborted();
-    // No Cache Storage or quota (rejected before downloading), or a network/integrity
-    // failure: the session worker loads as before and reports its own error.
+    // No Cache Storage or quota (rejected before downloading), a network/integrity
+    // failure or an undeliverable reply: the session worker loads as before.
     console.warn(`Lc0 ${config.name}: prefetch failed; loading without it.`, error);
   } finally {
     terminateEngineWorker(worker);

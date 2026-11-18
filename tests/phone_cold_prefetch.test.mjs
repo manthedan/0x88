@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BT4_NET, Bt4WorkerSearcher, T3_NET } from '../src/lc0/bt4Engine.ts';
 import { prefetchLargeNetToCache } from '../src/lc0/largeNetDownload.ts';
-import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
+import { lc0SplitKUrl, selectLc0OrtModelUrl } from '../src/lc0/lc0SmallModelSelection.ts';
 import { loadLc0ModelForOrt, prefetchLc0ModelToCache } from '../src/lc0/modelCache.ts';
 import { resetWebGpuAdapterProbeForTests, resolveOrtSessionPlacement } from '../src/nn/ortRuntime.ts';
 
@@ -13,6 +13,9 @@ import { resetWebGpuAdapterProbeForTests, resolveOrtSessionPlacement } from '../
 const modelUrl = 'https://example.test/models/lc0/prefetch.onnx';
 const sha256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'; // sha256('abc')
 const config = { ...BT4_NET, modelUrl };
+const t3Url = `https://example.test/models/lc0/${T3_NET.modelUrl.split('/').at(-1)}`;
+const t3SplitKUrl = lc0SplitKUrl(t3Url);
+const t3Config = { ...T3_NET, modelUrl: t3Url };
 const tick = () => new Promise(setImmediate);
 
 function replaceGlobal(t, name, value) {
@@ -28,15 +31,18 @@ function replaceGlobal(t, name, value) {
 // `self` is a stand-in the fake Worker below bridges to.
 const workerScope = new EventTarget();
 let toPrefetchOwner = () => assert.fail('no prefetch worker is listening');
-workerScope.postMessage = (data) => toPrefetchOwner(data);
 globalThis.self = workerScope;
 await import('../src/lc0/modelPrefetchWorker.ts');
 
-/** Cache Storage, the app manifest and the network; `put` can be made to fail. */
-function environment(t, { phone = true, putFails = false, holdPrefetch = false, query = '' } = {}) {
+/** Cache Storage, the app manifest and the network; `put` and the worker's transfer can be made to fail. */
+function environment(t, { phone = true, putFails = false, postFails = false, holdPrefetch = false, query = '', files = [modelUrl] } = {}) {
   const trace = [];
   const responses = new Map();
-  const counts = { downloads: 0 };
+  const counts = { downloads: 0, urls: [] };
+  workerScope.postMessage = (data, options) => {
+    if (postFails && options?.transfer?.length) throw new DOMException('cannot transfer', 'DataCloneError');
+    toPrefetchOwner(data);
+  };
   replaceGlobal(t, 'location', new URL(`https://example.test/analysis?memoryClass=${phone ? 'phone' : 'desktop'}${query}`));
   replaceGlobal(t, 'localStorage', { getItem: () => null, setItem: () => undefined });
   const cache = {
@@ -57,9 +63,11 @@ function environment(t, { phone = true, putFails = false, holdPrefetch = false, 
   replaceGlobal(t, 'caches', { has: async () => true, open: async () => cache });
   t.mock.method(globalThis, 'fetch', async (input) => {
     const href = input.url ?? String(input);
-    if (href.endsWith('/models/lc0/manifest.json')) return Response.json({ models: [{ file: 'prefetch.onnx', url: modelUrl, bytes: 3, sha256 }] });
-    assert.equal(href, modelUrl);
+    if (href.endsWith('/models/lc0/manifest.json'))
+      return Response.json({ models: files.map((url) => ({ file: url.split('/').at(-1), url, bytes: 3, sha256 })) });
+    assert.ok(files.includes(href), href);
     counts.downloads++;
+    counts.urls.push(href);
     trace.push('download');
     return new Response('abc');
   });
@@ -128,30 +136,45 @@ test('phone cold load: prefetch worker caches the net and is terminated before t
   await warm.dispose();
 });
 
-test('t3 prefetch resolves its file with the EP the session worker will get, not the page preference', async (t) => {
-  // ?ortEp=webgpu page on an Apple adapter without shader-f16: the worker is sent `auto`,
-  // resolves to WASM and loads the original t3, so that is the file to prefetch.
-  environment(t, { query: '&ortEp=webgpu' });
-  replaceGlobal(t, 'navigator', { gpu: { requestAdapter: async () => ({ features: new Set(), info: { vendor: 'apple' } }) } });
+/** An adapter for the prefetch worker's (and session worker's) own probe. */
+function adapter(t, { vendor = 'apple', shaderF16 = true } = {}) {
+  replaceGlobal(t, 'navigator', { gpu: { requestAdapter: async () => ({ features: new Set(shaderF16 ? ['shader-f16'] : []), info: { vendor } }) } });
   resetWebGpuAdapterProbeForTests();
   t.after(resetWebGpuAdapterProbeForTests);
-  let sent;
-  const searcher = new Bt4WorkerSearcher(T3_NET, (_config, options) => {
-    sent = options.ep;
-    return undefined;
-  });
-  t.after(() => searcher.dispose());
-  void searcher.init().catch(() => undefined);
-  assert.equal(sent, 'auto');
-  const probed = [];
-  await prefetchLargeNetToCache(
-    T3_NET,
-    { signal: new AbortController().signal, ep: sent, load: {} },
-    { placement: resolveOrtSessionPlacement, cached: async (url) => (probed.push(url), true), spawn: () => assert.fail(), reclaimGapMs: () => 0 },
-  );
-  assert.deepEqual(probed, [T3_NET.modelUrl]);
-  assert.notEqual(lc0SplitKUrl(T3_NET.modelUrl), undefined, 'the page preference alone would have picked split-K');
-  assert.deepEqual((await resolveOrtSessionPlacement()).providers, ['webgpu']);
+}
+
+test('t3 prefetch: the worker picks the file with the session worker rule and its own probe', async (t) => {
+  const env = environment(t, { files: [t3Url, t3SplitKUrl] });
+  adapter(t);
+  const searcher = new Bt4WorkerSearcher(t3Config);
+  assert.equal(await searcher.init(), 'mock-webgpu');
+  const request = env.workers[0].messages[0];
+  assert.equal(request.modelUrl, t3Url, 'the page sends the shipped URL, unresolved');
+  assert.equal(request.selectFor, 'auto', 'with the EP the session worker is sent');
+  assert.deepEqual(env.counts.urls, [t3SplitKUrl]);
+  // What the session worker's createLc0OnnxEvaluatorFromUrl selects under the same pin.
+  assert.equal(selectLc0OrtModelUrl(t3Url, await resolveOrtSessionPlacement('auto')), t3SplitKUrl);
+  await searcher.dispose();
+  // Warm: the worker finds the selected file by key and downloads nothing.
+  env.trace.length = 0;
+  const warm = new Bt4WorkerSearcher(t3Config);
+  assert.equal(await warm.init(), 'mock-webgpu');
+  assert.deepEqual(env.trace, ['prefetch:spawn', 'prefetch:terminate', 'search:spawn', 'search:init']);
+  assert.equal(env.counts.downloads, 1);
+  await warm.dispose();
+});
+
+test('t3 prefetch uses the EP the session worker will get, not the page preference', async (t) => {
+  // ?ortEp=webgpu page on an Apple adapter without shader-f16: the worker is sent `auto`,
+  // resolves to WASM and loads the original t3, so that is the file to prefetch.
+  const env = environment(t, { query: '&ortEp=webgpu', files: [t3Url, t3SplitKUrl] });
+  adapter(t, { shaderF16: false });
+  const searcher = new Bt4WorkerSearcher(t3Config);
+  assert.equal(await searcher.init(), 'mock-webgpu');
+  assert.equal(env.workers[0].messages[0].selectFor, 'auto');
+  assert.deepEqual(env.counts.urls, [t3Url]);
+  assert.deepEqual((await resolveOrtSessionPlacement()).providers, ['webgpu'], 'the page preference alone would have picked split-K');
+  await searcher.dispose();
 });
 
 test('desktop init does not prefetch and creates its worker without awaiting', async (t) => {
@@ -194,6 +217,35 @@ test('a failed cache.put hands the verified bytes to the session worker: one dow
   await searcher.dispose();
 });
 
+test('a reply the prefetch worker cannot post falls back to the normal load instead of hanging', async (t) => {
+  const env = environment(t, { putFails: true, postFails: true });
+  const warn = t.mock.method(console, 'warn', () => undefined);
+  const searcher = new Bt4WorkerSearcher(config);
+  assert.equal(await searcher.init(), 'mock-webgpu');
+  assert.deepEqual(env.trace, ['prefetch:spawn', 'download', 'prefetch:terminate', 'search:spawn', 'search:init']);
+  assert.equal(env.workers[1].messages[0].prefetchedModel, undefined, 'the session worker loads by URL');
+  assert.match(String(warn.mock.calls[0].arguments[1]), /cannot transfer/);
+  await searcher.dispose();
+});
+
+test('a messageerror on the prefetch reply falls back and terminates the worker', async (t) => {
+  environment(t);
+  t.mock.method(console, 'warn', () => undefined);
+  const worker = new EventTarget();
+  let terminated = false;
+  worker.postMessage = () => queueMicrotask(() => worker.dispatchEvent(new MessageEvent('messageerror')));
+  worker.terminate = () => {
+    terminated = true;
+  };
+  const result = await prefetchLargeNetToCache(
+    config,
+    { signal: new AbortController().signal, ep: 'auto', load: {} },
+    { cached: async () => false, spawn: () => worker, reclaimGapMs: () => 0 },
+  );
+  assert.deepEqual(result, { status: 'fallback' });
+  assert.equal(terminated, true);
+});
+
 test('prefetch reports put failure and refuses to download what Cache Storage cannot keep', async (t) => {
   const env = environment(t, { putFails: true });
   const manifestEntry = { file: 'prefetch.onnx', url: modelUrl, bytes: 3, sha256 };
@@ -218,7 +270,7 @@ test('the session load waits out the phone reclaim gap counted from the prefetch
   const result = await prefetchLargeNetToCache(
     config,
     { signal: new AbortController().signal, ep: 'auto', load: {} },
-    { placement: () => assert.fail('unused'), cached: async () => false, spawn: () => worker, reclaimGapMs: () => 40 },
+    { cached: async () => false, spawn: () => worker, reclaimGapMs: () => 40 },
   );
   assert.deepEqual(result, { status: 'prefetched' });
   assert.ok(performance.now() - terminatedAt >= 35, 'resolved only after the gap');
