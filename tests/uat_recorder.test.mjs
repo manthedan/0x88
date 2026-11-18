@@ -490,6 +490,9 @@ test('recorder plan covers every journey at every viewport and keeps FEN encodin
   assert.throws(() => parseArgs(['--journeys', 'nope']), /Unknown journey/);
   assert.throws(() => parseArgs(['--browser', 'firefox']), /chrome or safari/);
   assert.throws(() => parseArgs(['--dist', 'x', '--base-url', 'http://a']), /not both/);
+  // A repeated pair would record twice into one directory.
+  assert.throws(() => parseArgs(['--journeys', 'route-tour,route-tour']), /route-tour twice/);
+  assert.throws(() => parseArgs(['--viewports', '390x844,1280x800,390x844']), /390x844 twice/);
   for (const journey of Object.values(JOURNEYS)) {
     assert.equal(typeof journey.run, 'function');
     assert.match(journey.entry, /^\/app\//);
@@ -497,6 +500,8 @@ test('recorder plan covers every journey at every viewport and keeps FEN encodin
 });
 
 // Scripted page: every wait is satisfied at once unless respond() says otherwise.
+const ENGINE_CARDS = "[...document.querySelectorAll('#engineSummaries .engine-card')]";
+
 function fakeJourneyContext(respond = () => undefined) {
   const log = [];
   const steps = [];
@@ -506,6 +511,7 @@ function fakeJourneyContext(respond = () => undefined) {
     async evaluate(expression) {
       log.push(['eval', expression]);
       const answer = respond(expression);
+      if (answer === undefined && expression.startsWith(ENGINE_CARDS)) return [];
       return answer === undefined ? true : answer;
     },
     async click(selector) {
@@ -604,7 +610,7 @@ test('play journey fails when the game-over card records an engine forfeit', asy
 test('analysis journey waits for a BT4 line and fails on a BT4 error before removing Berserk', async () => {
   const { ctx, log, steps } = fakeJourneyContext((e) => {
     if (/option\[value="bt4"\]/.test(e)) return 'ok';
-    if (/\.line-error/.test(e)) return { error: 'WebGPU device lost' };
+    if (/BT4/.test(e) && /\.line-error/.test(e)) return { error: 'WebGPU device lost' };
     return undefined;
   });
   await JOURNEYS['analysis-engines'].run(ctx);
@@ -623,6 +629,38 @@ test('phone journeys open Board tools for Play from here and show the engine car
   const analysisClicks = analysis.log.filter(([kind]) => kind === 'click').map(([, s]) => s);
   const tab = analysisClicks.indexOf('#enginesTab');
   assert.ok(tab >= 0 && tab < analysisClicks.indexOf('#addEngineInManager'));
-  // Progress from the main-thread fallback shows on the page, not in the Lc0 worker counter.
-  assert.ok(analysis.log.some(([kind, e]) => kind === 'eval' && e.includes('.engine-card.searching') && e.includes('workerProgressMessages')));
+  // Each engine card must show a line (from either backend) before the streaming steps pass.
+  assert.ok(analysis.log.some(([kind, e]) => kind === 'eval' && e.includes('cards.length >= 2') && e.includes('c.pv || c.error')));
+  assert.ok(analysis.log.some(([kind, e]) => kind === 'eval' && e.includes('cards.length >= 3')));
+});
+
+test("analysis journey fails a streaming step with the failing engine's error", async () => {
+  const { ctx, steps } = fakeJourneyContext((e) =>
+    e.startsWith(ENGINE_CARDS)
+      ? [
+          { name: 'Lc0 Small', error: null, pv: true },
+          { name: 'Stockfish 18 lite', error: 'Worker failed to load', pv: false },
+        ]
+      : undefined,
+  );
+  await JOURNEYS['analysis-engines'].run(ctx);
+  assert.deepEqual(steps.at(-1), ['two engines streaming', 'failed', 'Stockfish 18 lite: Worker failed to load']);
+});
+
+test('route tour keeps the memory-class override on every hop', async () => {
+  const { ctx, log } = fakeJourneyContext((e) => {
+    if (e === 'location.search') return '?memoryClass=phone';
+    if (e === 'window.__uat?.documentId') return 'doc';
+    if (/menu-toggle/.test(e)) return false;
+    return undefined;
+  });
+  await JOURNEYS['route-tour'].run(ctx);
+  const clicks = log.filter(([kind]) => kind === 'click').map(([, s]) => s);
+  assert.deepEqual(clicks, [
+    '.site-header nav.primary a[href="/app/play/?memoryClass=phone"]',
+    '.site-header nav.primary a[href="/app/arena/?memoryClass=phone"]',
+    '.site-header nav.primary a[href="/?memoryClass=phone"]',
+    '.site-header nav.primary a[href="/app/analysis/?memoryClass=phone"]',
+  ]);
+  assert.ok(!log.some(([kind]) => kind === 'warning'));
 });
