@@ -16,7 +16,9 @@ installation, not the shared main-checkout directory. No deployment or upload.
 - Kept ONNX Runtime at **1.27.0** and tightened its former caret to an exact pin;
   its checked-in/staged glue, WASM and measured kernel contracts are unchanged.
 - **Audit is not green:** one unpatched advisory, GHSA-fc5q-39xc-vjpf, propagates
-  into eight high-severity package records. No ignore or audit-gate change applied.
+  into eight high-severity package records. No ignore applied. Main has since made
+  the CI audit job report-only (owner decision 2026-11-17, `continue-on-error`), so
+  this residual shows in CI without failing it.
 - Clean `npm ci`, full tests, Biome, product build and interactive static-browser
   verification pass. Detailed verification and owner decisions follow.
 
@@ -79,10 +81,11 @@ server hooks, parameter matchers or custom adapters requiring those migrations.
   GHSA-6cf5-gc4q-fm3x are absent after the Kit upgrade.
 - npm suggests a forced Vite 6 downgrade; **rejected**. Vite 8 is retained.
 
-**Owner decision, not applied:** preferably keep the existing red gate until a
-patched upstream release exists, then update the lockfile (use a narrowly scoped
+**Owner decision, not applied:** the CI audit job is now report-only on main, so
+no exception is needed to keep CI green. When a patched upstream release exists,
+update the lockfile (use a narrowly scoped
 picomatch override only if the fixed version satisfies the actual consumer API).
-If an immediate CI exception is required, approve only **GHSA-fc5q-39xc-vjpf**,
+If the audit job is ever made blocking again before then, approve only **GHSA-fc5q-39xc-vjpf**,
 with an expiry of **2026-12-01**, named owner and weekly upstream checks. Any
 future filter must inspect the advisory graph: remove only this advisory leaf,
 retain inherited records that have another active cause, fail for every other
@@ -181,6 +184,23 @@ or data, not additional vendored UI libraries. No hidden jQuery/framework bundle
 was found. Generated Emscripten glue and TVMJS are accounted for above rather than
 misclassified as first-party JS. Existing source/archive and model-licence caveats
 in `NOTICE.md` are not resolved by npm audit.
+
+### Vendored Chessground CSS differs from 9.2.1
+
+`public/chessground.cburnett.css` is byte-identical to the 9.2.1 package asset.
+`public/chessground.base.css` and `public/chessground.brown.css` are **local edits**
+(history: 3433f659 theming, 5509e47a/6abf54f2/50d16708 coordinate fixes), so a
+Chessground upgrade must not overwrite them with package assets:
+
+- base: coordinates restyled lichess-like: ranks on the right edge and files on the
+  bottom edge as 12.5% strips inside the board, lowercase bold labels, no 0.8
+  opacity, no `.ranks.left` variant.
+- brown: board squares from a `repeating-conic-gradient` over `--board-light` /
+  `--board-dark` (set in app-shell.css for theme/board-style switching) instead of
+  the embedded base64 SVG; coordinate colors via `--coord-dark` / `--coord-light`.
+
+Re-apply these as overrides (or keep the files vendored) during the scoped
+`@lichess-org/chessground` migration proposed below.
 
 ## Replacement / consolidation proposals — not implemented
 
@@ -285,9 +305,9 @@ notes and verified PNGs for Home, Docs, both Play opponents, Analysis and Arena.
 
 ## Closeout / owner decisions
 
-No suppression was applied, so the audit CI job intentionally remains red on the
-single upstream picomatch mechanism. Owner decisions: whether to authorize the
-narrow expiring advisory exception above; schedule Chessground scoped migration,
+No suppression was applied; the audit CI job (report-only on main since
+2026-11-17) still reports the single upstream picomatch mechanism. Owner decisions:
+whether a narrow expiring advisory exception is wanted if the job becomes blocking again; schedule Chessground scoped migration,
 browser-tool consolidation and asset staging work; retain/confirm existing
 third-party model/artwork licensing obligations. No push, merge, deploy or upload.
 
