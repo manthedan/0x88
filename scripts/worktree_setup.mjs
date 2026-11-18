@@ -5,7 +5,9 @@
 //   node scripts/worktree_setup.mjs <worktree-path> --check    verify only
 //
 // A new worktree lacks three untracked things:
-//   1. node_modules: symlinked to the main checkout's install (relative link).
+//   1. node_modules: symlinked to the main checkout's install (relative link) when package-lock.json is
+//      identical; a branch that changes dependencies needs its own `npm ci`. An installed node_modules
+//      directory is left alone. vite.config.ts gives a linked install its own cache dir (.vite-cache).
 //   2. ../models: model sources live beside the repo (lc0_prepare_model_assets.mjs, the parity tests and
 //      the public/models symlinks all resolve `<repo>/../models`). For a worktree in .claude/worktrees/<name>
 //      that is .claude/worktrees/models, linked to the main checkout's ../models.
@@ -99,8 +101,29 @@ function checkSize(path, bytes, label, log) {
   else log.verified += 1;
 }
 
-function verify(worktree, log) {
-  if (!existsSync(join(worktree, 'node_modules/.bin/vite'))) log.problems.push('node_modules/.bin/vite missing');
+const readOrNull = (path) => {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+};
+
+/** node_modules is shared only while both checkouts pin the same dependency tree. */
+function nodeModulesPlan(main, worktree) {
+  let stat = null;
+  try {
+    stat = lstatSync(join(worktree, 'node_modules'));
+  } catch {}
+  if (stat && !stat.isSymbolicLink()) return 'own';
+  const sameLock = readOrNull(join(main, 'package-lock.json')) === readOrNull(join(worktree, 'package-lock.json'));
+  return sameLock ? 'share' : 'lock-differs';
+}
+
+function verify(main, worktree, log) {
+  if (nodeModulesPlan(main, worktree) === 'lock-differs') {
+    log.problems.push(`package-lock.json differs from the main checkout, so its install cannot be shared: rm -f node_modules && npm ci (in ${worktree})`);
+  } else if (!existsSync(join(worktree, 'node_modules/.bin/vite'))) log.problems.push('node_modules/.bin/vite missing');
   if (!realOrNull(join(worktree, '..', 'models'))) log.problems.push(`${resolve(worktree, '..', 'models')} does not resolve`);
   for (const dir of ['public/models/lc0', 'public/models/maia3']) {
     const manifest = JSON.parse(readFileSync(join(worktree, dir, 'manifest.json'), 'utf8'));
@@ -135,14 +158,15 @@ function main(argv) {
   const log = { created: [], problems: [], verified: 0 };
   if (!argv.includes('--check')) {
     const nodeModules = join(main, 'node_modules');
-    ensureLink(join(worktree, 'node_modules'), relative(worktree, nodeModules), realpathSync(nodeModules), worktree, log);
+    if (nodeModulesPlan(main, worktree) === 'share')
+      ensureLink(join(worktree, 'node_modules'), relative(worktree, nodeModules), realpathSync(nodeModules), worktree, log);
     const models = realOrNull(join(main, '..', 'models'));
     // The one deliberate write outside the worktree: the sibling `models` link every model path goes through.
     if (models) ensureLink(join(worktree, '..', 'models'), models, models, realpathSync(dirname(worktree)), log);
     else log.problems.push(`${resolve(main, '..', 'models')} missing in the main checkout; model links cannot resolve`);
     mirrorModels(join(main, 'public/models'), join(worktree, 'public/models'), worktree, log);
   }
-  verify(worktree, log);
+  verify(main, worktree, log);
   for (const line of log.created) console.log(`linked ${line}`);
   for (const line of log.problems) console.error(`problem: ${line}`);
   console.log(`${worktree}: ${log.created.length} links created, ${log.verified} manifest files verified, ${log.problems.length} problems`);

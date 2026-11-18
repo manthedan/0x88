@@ -12,6 +12,7 @@ data/tcec_training_*.jsonl
 data/balanced_*.jsonl
 data/balanced_*.json
 data/cache/
+.vite-cache/
 data/datasets/
 data/stockfish_aug/
 data/teacher/

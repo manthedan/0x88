@@ -4,8 +4,9 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
-const SCRIPT = new URL('../scripts/worktree_setup.mjs', import.meta.url).pathname;
+const SCRIPT = fileURLToPath(new URL('../scripts/worktree_setup.mjs', import.meta.url));
 const PACK_URL = '/models/lc0/p.lc0web/model.lc0web.json';
 
 const run = (cmd, args, cwd) => {
@@ -35,6 +36,7 @@ function fixture(t) {
   write(join(repo, 'public/models/lc0/manifest.json'), JSON.stringify(lc0Manifest));
   write(join(repo, 'public/models/maia3/manifest.json'), JSON.stringify({ models: [{ file: 'm.onnx', bytes: 2 }] }));
   write(join(repo, '.gitignore'), 'node_modules\n*.onnx\n*.lc0web/\n');
+  write(join(repo, 'package-lock.json'), '{"lockfileVersion":3}\n');
   run('git', ['init', '-q'], repo);
   run('git', ['add', '.'], repo);
   run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init'], repo);
@@ -91,4 +93,22 @@ test('does not write through a model directory that links out of the worktree', 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /links outside the worktree/);
   assert.deepEqual(readdirSync(outside), []);
+});
+
+test('a worktree whose lockfile differs gets no shared install and is told to npm ci', (t) => {
+  const { worktree } = fixture(t);
+  writeFileSync(join(worktree, 'package-lock.json'), '{"lockfileVersion":3,"changed":true}\n');
+  const result = setup(worktree);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /package-lock\.json differs.*npm ci/);
+  assert.equal(existsSync(join(worktree, 'node_modules')), false);
+});
+
+test('a worktree with its own install keeps it', (t) => {
+  const { worktree } = fixture(t);
+  writeFileSync(join(worktree, 'package-lock.json'), '{"lockfileVersion":3,"changed":true}\n');
+  write(join(worktree, 'node_modules/.bin/vite'), '');
+  const result = setup(worktree);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(lstatSync(join(worktree, 'node_modules')).isSymbolicLink(), false);
 });
