@@ -62,7 +62,7 @@ import {
 import { ARENA_BIG_NET_MEMORY_REASON, arenaBigNetPairingBlocked, arenaBigNetSeatBlocked } from './arenaMemoryGuard.ts';
 import { arenaMoveDelay, guardArenaUnload } from './arenaNavigation.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
-import { loadArenaResource } from './arenaResourceLoad.ts';
+import { loadRetirableResource } from './arenaResourceLoad.ts';
 import { arenaOpeningPairs, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { arenaSideTimeMs } from './arenaTiming.ts';
@@ -4718,27 +4718,20 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
   const hybrid = lc0HybridConfigLabel(runtime);
   el('message').textContent = 'Loading the Lc0 network…';
   showDownloadProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
-  let pendingDisposal: (() => Promise<void>) | undefined;
+  // Until lc0Cache owns the evaluator, cancellation publishes its release
+  // synchronously. Every Arena runtime's dispose() is idempotent.
+  let uninstalled: { dispose?: () => unknown } | undefined;
   const retireUninstalled = () => {
-    if (pendingDisposal) trackEngineRetirement(pendingDisposal());
+    if (uninstalled) trackEngineRetirement(Promise.resolve(uninstalled.dispose?.()));
+    uninstalled = undefined;
   };
   signal.addEventListener('abort', retireUninstalled, { once: true });
   try {
     await untilAborted(awaitEngineRetirements(), signal);
-    signal.throwIfAborted();
-    const owned = await loadArenaResource(async () => {
-      const evaluator = await createSelectedLc0Evaluator(signal);
-      let closing: Promise<void> | undefined;
-      const dispose = () => (closing ??= Promise.resolve().then(() => evaluator.dispose?.()));
-      pendingDisposal = dispose;
-      if (signal.aborted) retireUninstalled();
-      return { evaluator, dispose };
-    }, signal);
-    const evaluator = owned.evaluator;
+    const evaluator = await loadRetirableResource(async () => (uninstalled = await createSelectedLc0Evaluator(signal)), signal);
     const ortDiagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics({ probeAdapter: false }) : undefined;
     if (isStaleMount(mountSignal) || signal.aborted) {
-      await trackEngineRetirement(owned.dispose());
-      pendingDisposal = undefined;
+      retireUninstalled();
       return;
     }
     publishBrowserRuntimeAudit({
@@ -4769,7 +4762,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
     });
     signal.throwIfAborted();
     lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
-    pendingDisposal = undefined; // The cache now owns retirement; the load lease is fully handed off.
+    uninstalled = undefined; // The cache owns retirement now.
     void renderRuntimeBadge();
     lc0Searchers.clear();
     renderCacheInfo();

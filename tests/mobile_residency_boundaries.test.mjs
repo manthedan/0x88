@@ -279,7 +279,7 @@ for (const reason of ['navigation', 'seat cancellation', 'diagnostics failure'])
         hideDownloadProgress: () => {},
         awaitEngineRetirements,
         trackEngineRetirement,
-        loadArenaResource: loadRetirableResource,
+        loadRetirableResource,
         createSelectedLc0Evaluator: async () => evaluator,
         collectOrtRuntimeDiagnostics: () => {
           started.resolve();

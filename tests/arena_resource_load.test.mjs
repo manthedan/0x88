@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { loadArenaResource } from '../src/lc0/arenaResourceLoad.ts';
+import { loadRetirableResource } from '../src/lc0/arenaResourceLoad.ts';
 import { awaitEngineRetirements, hasEngineRetirements } from '../src/lc0/engineRetirement.ts';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -12,7 +12,7 @@ test('Arena resource loading returns a live resource without disposing it', asyn
       disposed = true;
     },
   };
-  assert.equal(await loadArenaResource(async () => resource, new AbortController().signal), resource);
+  assert.equal(await loadRetirableResource(async () => resource, new AbortController().signal), resource);
   assert.equal(disposed, false);
 });
 
@@ -20,7 +20,7 @@ test('Stop rejects immediately and disposes an evaluator that finishes loading l
   const controller = new AbortController();
   let finish;
   let disposed = 0;
-  const pending = loadArenaResource(
+  const pending = loadRetirableResource(
     () =>
       new Promise((resolve) => {
         finish = resolve;
@@ -43,7 +43,7 @@ test('a canceled native creation and its asynchronous release block the next mod
   const creation = Promise.withResolvers(),
     release = Promise.withResolvers(),
     controller = new AbortController();
-  const loading = loadArenaResource(() => creation.promise, controller.signal);
+  const loading = loadRetirableResource(() => creation.promise, controller.signal);
   await tick();
   controller.abort();
   await assert.rejects(loading, { name: 'AbortError' });
@@ -72,9 +72,9 @@ test('a canceled native creation and its asynchronous release block the next mod
 test('pre-aborted or immediately stopped initialization never starts a loader', async () => {
   const controller = new AbortController();
   controller.abort();
-  assert.throws(() => loadArenaResource(() => assert.fail(), controller.signal), { name: 'AbortError' });
+  assert.throws(() => loadRetirableResource(() => assert.fail(), controller.signal), { name: 'AbortError' });
   const another = new AbortController();
-  const pending = loadArenaResource(() => assert.fail('must not start after cancellation'), another.signal);
+  const pending = loadRetirableResource(() => assert.fail('must not start after cancellation'), another.signal);
   another.abort();
   await assert.rejects(pending, { name: 'AbortError' });
   await tick();
@@ -83,14 +83,14 @@ test('pre-aborted or immediately stopped initialization never starts a loader', 
 test('Arena initialization errors propagate without an unhandled late rejection', async () => {
   const failure = new Error('Model unavailable');
   await assert.rejects(
-    loadArenaResource(async () => {
+    loadRetirableResource(async () => {
       throw failure;
     }, new AbortController().signal),
     (error) => error === failure,
   );
   const controller = new AbortController();
   let fail;
-  const pending = loadArenaResource(
+  const pending = loadRetirableResource(
     () =>
       new Promise((_, reject) => {
         fail = reject;

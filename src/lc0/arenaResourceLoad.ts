@@ -43,5 +43,3 @@ export function loadRetirableResource<T extends { dispose?: () => unknown }>(cre
     if (signal.aborted) onAbort();
   });
 }
-
-export const loadArenaResource = loadRetirableResource;
