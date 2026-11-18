@@ -415,8 +415,12 @@ export class Bt4WorkerSearcher {
     );
   }
 
-  /** Create + init the worker on first call (fetches the large net, then cached). */
-  async init(options: { evalCacheEntries?: number } = {}): Promise<string> {
+  /**
+   * Create + init the worker on first call (fetches the large net, then cached).
+   * `noDownload`: a cache-hit approval; a load that needs network bytes fails with
+   * LC0_MODEL_DOWNLOAD_NOT_APPROVED instead. An init already in flight is shared as is.
+   */
+  async init(options: { evalCacheEntries?: number; noDownload?: boolean } = {}): Promise<string> {
     const evalCacheEntries = normalizedEvalCacheEntries(options.evalCacheEntries);
     const diagnostics = bigNetDiagnosticRequest(this.config);
     const diagnosticKey = JSON.stringify(diagnostics);
@@ -444,13 +448,16 @@ export class Bt4WorkerSearcher {
       const ep = requestedOrtExecutionProvider() === 'wasm' ? 'wasm' : 'auto';
       // Phones only: a cold net is fetched into Cache Storage by a throwaway worker
       // first, so this worker's load is a cached load (largeNetDownload.ts).
+      // A load that may not download has nothing to prefetch.
       const prefetchAbort = new AbortController();
-      const prefetching = this.coldPrefetch(this.config, {
-        signal: prefetchAbort.signal,
-        ep,
-        onProgress: (loaded, total) => this.onDownloadProgress?.(loaded, total),
-        load: { requestPersistentStorage: true, minimumFreeBytesAfterCache: BIG_NET_MODEL_CACHE_FREE_RESERVE_BYTES },
-      });
+      const prefetching = options.noDownload
+        ? undefined
+        : this.coldPrefetch(this.config, {
+            signal: prefetchAbort.signal,
+            ep,
+            onProgress: (loaded, total) => this.onDownloadProgress?.(loaded, total),
+            load: { requestPersistentStorage: true, minimumFreeBytesAfterCache: BIG_NET_MODEL_CACHE_FREE_RESERVE_BYTES },
+          });
       let prefetched: LargeNetPrefetchResult | undefined;
       if (prefetching) {
         this.prefetchAbort = prefetchAbort;
@@ -484,6 +491,7 @@ export class Bt4WorkerSearcher {
           reportDownloadProgress: this.config.streamDownloadProgress === true,
           requestPersistentModelStorage: true,
           minimumFreeBytesAfterModelCache: BIG_NET_MODEL_CACHE_FREE_RESERVE_BYTES,
+          ...(options.noDownload ? { noModelDownload: true } : {}),
           ...(prefetchedModel ? { prefetchedModel } : {}),
         },
         undefined,
@@ -548,9 +556,16 @@ export class Bt4WorkerSearcher {
   }
 
   async search(input: Lc0EvaluatorInput, options: Bt4SearchOptions): Promise<Bt4SearchResult> {
-    if (options.signal?.aborted) return { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
-    await this.init({ evalCacheEntries: options.evalCacheEntries });
-    if (options.signal?.aborted) return { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
+    const cancelled: Bt4SearchResult = { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
+    if (options.signal?.aborted) return cancelled;
+    try {
+      await this.init({ evalCacheEntries: options.evalCacheEntries });
+    } catch (error) {
+      // An owner that stopped may retire a net still loading (Arena Stop): that is a cancellation.
+      if (options.signal?.aborted) return cancelled;
+      throw error;
+    }
+    if (options.signal?.aborted) return cancelled;
     const workerInput = options.swapColors ? swapColorsInput(input) : input;
     let searchId: number | null = null;
     const onAbort = () => {

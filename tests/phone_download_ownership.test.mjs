@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
+import { LC0_MODEL_DOWNLOAD_NOT_APPROVED } from '../src/lc0/modelCache.ts';
 import { committedPlayOpponent, transitionPlayOpponent } from '../src/lc0/playOpponentState.ts';
 
 const source = Object.fromEntries(
@@ -357,7 +358,7 @@ test('Arena Start carries its consent to the load: a cache hit approves no downl
     el: () => ({}),
     acquireBigNetSearcherAsync: async () => {
       loaded = true;
-      return { loaded };
+      return { loaded, isInitializedFor: () => true, init: async () => 'mock' };
     },
   };
   const api = new Function(
@@ -409,6 +410,86 @@ test('Arena Start carries its consent to the load: a cache hit approves no downl
   loaded = false;
   await api.bigNetFor('bt4', signal);
   assert.deepEqual(prompts, []);
+});
+
+for (const answer of [false, 'download']) {
+  test(`Arena cache-hit consent loads cache-only and asks before downloading an evicted net (accepted=${!!answer})`, async () => {
+    const inits = [];
+    const prompts = [];
+    const searcher = {
+      loaded: false,
+      isInitializedFor: () => false,
+      async init(options) {
+        inits.push(options);
+        // The entry was evicted during the reclaim wait (or its body is unreadable).
+        throw new Error(`${LC0_MODEL_DOWNLOAD_NOT_APPROVED}: bt4.onnx`);
+      },
+    };
+    const deps = {
+      BIG_NETS,
+      LC0_MODEL_DOWNLOAD_NOT_APPROVED,
+      isMemoryConstrainedDevice: () => true,
+      arenaRunDownloads: new Set(),
+      arenaCacheEntries: () => 0,
+      peekBigNetSearcher: () => null,
+      inspectLargeNetDownload: async () => ({ url: 'bt4.onnx', cached: true, downloadBytes: 5 }),
+      requestLargeNetDownloadConsent: async (config, _signal, _desktopWarning, _notice, inspect) => {
+        prompts.push(inspect ? await inspect(config) : 'start');
+        return inspect ? answer : 'cached';
+      },
+      preparePhoneBigNet: () => undefined,
+      disposeArenaCpuEngines() {},
+      disposeBigNetSearcherNow() {},
+      el: () => ({}),
+      acquireBigNetSearcherAsync: async () => searcher,
+    };
+    const bigNetFor = new Function(
+      'deps',
+      `const { ${Object.keys(deps)} } = deps;\n${extract(source.arena, 'async function bigNetFor(', 'let runtimeIsolation')}\nreturn bigNetFor;`,
+    )(deps);
+    const loading = bigNetFor('bt4', new AbortController().signal);
+    if (answer) assert.equal((await loading).searcher, searcher);
+    else await assert.rejects(loading, /no longer cached and its download was not approved/);
+    assert.deepEqual(inits, [{ evalCacheEntries: 0, noDownload: true }], 'the cache-hit approval reaches the loader');
+    assert.deepEqual(prompts, ['start', { url: 'bt4.onnx', cached: false, downloadBytes: 5 }], 'the second prompt is a download prompt');
+    assert.equal(deps.arenaRunDownloads.has('bt4'), !!answer, 'only an accepted prompt approves the download');
+  });
+}
+
+test('Arena Stop landing as the pool hands over the searcher skips the cache-only init', async () => {
+  const controller = new AbortController();
+  let inits = 0;
+  const searcher = {
+    loaded: false,
+    isInitializedFor: () => false,
+    init: async () => {
+      inits++;
+    },
+  };
+  const deps = {
+    BIG_NETS,
+    LC0_MODEL_DOWNLOAD_NOT_APPROVED,
+    isMemoryConstrainedDevice: () => true,
+    arenaRunDownloads: new Set(),
+    arenaCacheEntries: () => 0,
+    peekBigNetSearcher: () => null,
+    inspectLargeNetDownload: async () => assert.fail('no prompt'),
+    requestLargeNetDownloadConsent: async () => 'cached',
+    preparePhoneBigNet: () => undefined,
+    disposeArenaCpuEngines() {},
+    disposeBigNetSearcherNow: () => assert.fail('nothing to retire: no listener was registered'),
+    el: () => ({}),
+    acquireBigNetSearcherAsync: async () => {
+      controller.abort(); // Stop between the pool's resolution and bigNetFor resuming
+      return searcher;
+    },
+  };
+  const bigNetFor = new Function(
+    'deps',
+    `const { ${Object.keys(deps)} } = deps;\n${extract(source.arena, 'async function bigNetFor(', 'let runtimeIsolation')}\nreturn bigNetFor;`,
+  )(deps);
+  await assert.rejects(bigNetFor('bt4', controller.signal), { name: 'AbortError' });
+  assert.equal(inits, 0, 'a stopped load must not initialize');
 });
 
 test('a saved Arena run with no games shows its own opening, not the replaced run', () => {

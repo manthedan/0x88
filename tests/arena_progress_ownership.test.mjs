@@ -81,3 +81,70 @@ for (const operation of ['warmup', 'move']) {
     });
   }
 }
+
+// A cold prefetch only watches its searcher's dispose(), and search() waits for init():
+// without retirement, Stop would wait out a stalled download and the worker would init after it.
+for (const operation of ['warmup', 'move']) {
+  test(`Arena Stop during a stalled cold prefetch retires the net and settles the ${operation}`, async (t) => {
+    const workers = [];
+    const previousWorker = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
+    globalThis.Worker = class extends EventTarget {
+      constructor() {
+        super();
+        workers.push(this);
+      }
+      postMessage() {}
+      terminate() {}
+    };
+    t.after(() => {
+      if (previousWorker) Object.defineProperty(globalThis, 'Worker', previousWorker);
+      else delete globalThis.Worker;
+    });
+    let prefetchSignal;
+    const searcher = new Bt4WorkerSearcher(LQO_NET, (_config, options) => {
+      prefetchSignal = options.signal;
+      // A download that never finishes; only an abort ends it.
+      return new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true }));
+    });
+    let pooled = searcher;
+    const deps = {
+      BIG_NETS: { bt4: LQO_NET },
+      isMemoryConstrainedDevice: () => false,
+      arenaRunDownloads: new Set(),
+      arenaCacheEntries: () => 2048,
+      peekBigNetSearcher: () => pooled,
+      disposeBigNetSearcherNow: () => {
+        pooled?.dispose();
+        pooled = null;
+      },
+      acquireBigNetSearcherAsync: async () => searcher,
+      warmupPositions: [parseFen(START_FEN)],
+      showDownloadProgress: () => {},
+      hideDownloadProgress: () => {},
+      engines: new Map(),
+      arenaBudgetMode: () => 'visits',
+      arenaMovetimeMs: () => 1000,
+      setArenaVisitProgress: () => {},
+      recordBt4SearchOutput: () => {},
+      clearArenaSearchProgress: () => {},
+    };
+    const slice = (from, to) => stripTypeScriptTypes(source.slice(source.indexOf(from), source.indexOf(to, source.indexOf(from))));
+    const name = operation === 'warmup' ? 'lc0BigNetWarmup' : 'lc0BigNetMove';
+    const closure = slice(`  const ${name} =`, operation === 'warmup' ? '  const centipawnWarmup =' : '  const centipawnMove =');
+    const factory = new Function(
+      'deps',
+      `const { ${Object.keys(deps)} } = deps;\n${slice('async function bigNetFor(', 'let runtimeIsolation')}\n${closure}\nreturn ${name};`,
+    )(deps);
+    const controller = new AbortController();
+    const pending =
+      operation === 'warmup' ? factory('bt4')(controller.signal) : factory('seat-1', { variant: 'bt4', strength: 1 })([parseFen(START_FEN)], controller.signal);
+    for (let i = 0; i < 50 && !prefetchSignal; i++) await new Promise(setImmediate);
+    assert.ok(prefetchSignal, 'the cold load is prefetching');
+    controller.abort();
+    const settled = await Promise.race([pending.then(() => 'settled'), new Promise((resolve) => setTimeout(resolve, 200, 'stuck'))]);
+    assert.equal(settled, 'settled', 'Stop does not wait for the stalled prefetch');
+    assert.equal(prefetchSignal.aborted, true, 'the prefetch is cancelled');
+    assert.equal(pooled, null, 'the cold searcher is retired from the pool');
+    assert.equal(workers.length, 0, 'no session worker initializes after Stop');
+  });
+}

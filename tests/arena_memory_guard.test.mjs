@@ -99,7 +99,7 @@ test('safe gauntlet warmup uses only each game on phones; desktop still warms th
   for (const constrained of [true, false]) {
     const calls = [];
     const pool = new BigNetSessionPool(
-      (config) => ({ config, dispose() {} }),
+      (config) => ({ config, dispose() {}, isInitializedFor: () => true }),
       undefined,
       undefined,
       () => constrained,
@@ -109,11 +109,13 @@ test('safe gauntlet warmup uses only each game on phones; desktop still warms th
       'BIG_NETS',
       'acquireBigNetSearcherAsync',
       'isMemoryConstrainedDevice',
+      'arenaCacheEntries',
       `${extract('async function bigNetFor(', '\nlet runtimeIsolation')}\nreturn bigNetFor;`,
     )(
       BIG_NETS,
       (key, exclusive) => pool.acquireAsync(key, exclusive),
       () => false,
+      () => 0,
     );
     const deps = {
       seatIds: ['sf:lite:8', 'lc0:bt4:100', 'lc0:t3:100'],
@@ -136,7 +138,7 @@ test('safe gauntlet warmup uses only each game on phones; desktop still warms th
         calls.push(ids);
         for (const id of ids) {
           if (!id.startsWith('lc0:')) continue;
-          await bigNetFor(id.split(':')[1]);
+          await bigNetFor(id.split(':')[1], new AbortController().signal);
           if (constrained) assert.equal(Object.keys(BIG_NETS).filter((key) => pool.has(key)).length, 1);
         }
       },

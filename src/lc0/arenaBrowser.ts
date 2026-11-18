@@ -158,9 +158,10 @@ import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent,
 import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
 import { requestLargeNetDownloadConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
+import { inspectLargeNetDownload } from './largeNetDownload.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
-import { untilAborted } from './modelCache.ts';
+import { LC0_MODEL_DOWNLOAD_NOT_APPROVED, untilAborted } from './modelCache.ts';
 import { rememberMoveFocus } from './moveListFocus.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, type Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import {
@@ -523,17 +524,21 @@ async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config
   // Storage can evict a model that was cached at Start (loading Lc0 Small into a
   // full cache is enough), so a load not covered by a download approval asks again.
   // Ask unless the warm session will be reused; preparePhoneBigNet retires one configured differently.
-  if (isMemoryConstrainedDevice() && !arenaRunDownloads.has(key) && !peekBigNetSearcher(key)?.isInitializedFor({ evalCacheEntries: arenaCacheEntries() })) {
+  const evalCacheEntries = arenaCacheEntries();
+  const notApproved = () => new Error(`Lc0 ${BIG_NETS[key].name} is no longer cached and its download was not approved.`);
+  let cacheOnly = false;
+  if (isMemoryConstrainedDevice() && !arenaRunDownloads.has(key) && !peekBigNetSearcher(key)?.isInitializedFor({ evalCacheEntries })) {
     const consent = await requestLargeNetDownloadConsent(BIG_NETS[key], signal);
     signal.throwIfAborted();
-    if (!consent) throw new Error(`Lc0 ${BIG_NETS[key].name} is no longer cached and its download was not approved.`);
+    if (!consent) throw notApproved();
     if (consent === 'download') arenaRunDownloads.add(key);
+    cacheOnly = consent === 'cached';
   }
   const reclaim =
     isMemoryConstrainedDevice() &&
     preparePhoneBigNet(
       key,
-      arenaCacheEntries(),
+      evalCacheEntries,
       signal,
       disposeArenaCpuEngines,
       () => {
@@ -542,7 +547,37 @@ async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config
       true,
     );
   if (reclaim) await reclaim;
-  return { config: BIG_NETS[key], searcher: await acquireBigNetSearcherAsync(key, true, signal) };
+  const searcher = await acquireBigNetSearcherAsync(key, true, signal);
+  // A Stop in the await's continuations would miss the listener below.
+  signal.throwIfAborted();
+  if (!searcher.isInitializedFor({ evalCacheEntries })) {
+    // init() does not watch the match signal, and a cold prefetch can stall:
+    // Stop retires a net that is still loading, as Analysis does.
+    signal.addEventListener(
+      'abort',
+      () => {
+        if (!searcher.loaded && peekBigNetSearcher(key) === searcher) disposeBigNetSearcherNow(key);
+      },
+      { once: true },
+    );
+  }
+  if (cacheOnly) {
+    // 'cached' approved no download, and the entry can be evicted or unreadable by now.
+    try {
+      await searcher.init({ evalCacheEntries, noDownload: true });
+    } catch (error) {
+      signal.throwIfAborted();
+      if (!(error instanceof Error && error.message.includes(LC0_MODEL_DOWNLOAD_NOT_APPROVED))) throw error;
+      // The cache key may still be there (unreadable body), so ask as for a download.
+      const uncached = (config: BigNetConfig, inspectSignal?: AbortSignal) =>
+        inspectLargeNetDownload(config, inspectSignal).then((state) => ({ ...state, cached: false }));
+      const consent = await requestLargeNetDownloadConsent(BIG_NETS[key], signal, true, undefined, uncached);
+      signal.throwIfAborted();
+      if (!consent) throw notApproved();
+      arenaRunDownloads.add(key);
+    }
+  }
+  return { config: BIG_NETS[key], searcher };
 }
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
 let runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';

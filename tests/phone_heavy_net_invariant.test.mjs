@@ -391,7 +391,8 @@ test('phone Arena seat swap waits for terminal disposal of a cancelled BT4 load 
   const arena = arenaOwner();
   const firstMatch = new AbortController();
   arena.seat('bt4');
-  const loading = assert.rejects(arena.warmup('bt4', firstMatch.signal), /disposed/);
+  // Stop retires the loading net (bigNetFor); its cache-only init then reports the Stop.
+  const loading = assert.rejects(arena.warmup('bt4', firstMatch.signal), { name: 'AbortError' });
   const bt4 = await native.get('bt4');
   firstMatch.abort();
   arena.seat('t3');
