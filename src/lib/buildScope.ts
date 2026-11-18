@@ -1,9 +1,12 @@
-import { error } from '@sveltejs/kit';
+import type { Reroute } from '@sveltejs/kit';
+
+// Same pattern as LAB_ROUTE_ID in svelte.config.js (tests/build_scope.test.mjs keeps them equal).
+export const LAB_PATH = /^\/(?:lab|single-engine)(?:\/|$)/;
 
 /**
  * Product builds do not prerender lab routes (svelte.config.js), but Kit still bundles them into the
- * client router, so a client-side navigation could mount one. Their layouts call this to 404 instead.
+ * client router. A throwing reroute makes Kit fall back to a full page load, which the server 404s.
  */
-export function refuseInProductBuild(scope: string | undefined): void {
-  if (scope === 'product') error(404, 'Not found');
-}
+export const refuseLabRoute: Reroute = ({ url }) => {
+  if (LAB_PATH.test(url.pathname)) throw new Error(`${url.pathname} is not in product builds`);
+};

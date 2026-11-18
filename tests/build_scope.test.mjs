@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readdirSync } from 'node:fs';
 import test from 'node:test';
-import { refuseInProductBuild } from '../src/lib/buildScope.ts';
+import { LAB_PATH } from '../src/lib/buildScope.ts';
 import { LAB_ROUTE_ID, PRODUCT_ROUTES, prerenderConfig } from '../svelte.config.js';
 
 const routeFiles = () => readdirSync(new URL('../src/routes', import.meta.url), { recursive: true }).map((file) => file.split('\\').join('/'));
@@ -54,13 +54,24 @@ test('dev and non-product builds keep the Kit default of prerendering every rout
   assert.equal(prerenderConfig(''), undefined);
 });
 
-// Product builds still bundle lab routes into the client router; their layouts must 404 there.
-test('lab route layouts refuse to load in product builds only', () => {
-  const files = routeFiles();
-  for (const layout of ['lab/+layout.ts', 'single-engine/+layout.ts']) assert.ok(files.includes(layout), `${layout} is missing`);
-  assert.throws(
-    () => refuseInProductBuild('product'),
-    (error) => error.status === 404,
-  );
-  for (const scope of [undefined, '', 'dev']) assert.doesNotThrow(() => refuseInProductBuild(scope));
+// Product builds still bundle lab routes into Kit's client router; the reroute hook must refuse them there.
+async function rerouteFor(scope) {
+  globalThis.__BUILD_SCOPE__ = scope;
+  try {
+    return (await import(`../src/hooks.ts?scope=${scope}`)).reroute;
+  } finally {
+    delete globalThis.__BUILD_SCOPE__;
+  }
+}
+
+test('product builds refuse client navigation to lab routes; other builds install no hook', async () => {
+  assert.equal(LAB_PATH.source, LAB_ROUTE_ID.source);
+  const reroute = await rerouteFor('product');
+  for (const pathname of ['/lab/mobile-soak/', '/lab/copy-prototypes/x/', '/single-engine/', '/single-engine']) {
+    assert.throws(() => reroute({ url: new URL(pathname, 'https://0x88.app') }), /not in product builds/);
+  }
+  for (const pathname of [...PRODUCT_ROUTES, '/labs/', '/single-engines/']) {
+    assert.equal(reroute({ url: new URL(pathname, 'https://0x88.app') }), undefined);
+  }
+  for (const scope of ['', 'dev']) assert.equal(await rerouteFor(scope), undefined);
 });
