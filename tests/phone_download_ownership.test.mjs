@@ -584,7 +584,7 @@ for (const answer of [false, 'download']) {
 }
 
 test('Analysis records only cache-hit row approvals as cache-only', async () => {
-  const consentFn = extract(source.analysis, 'const analysisCacheOnlyBigNets =', 'let ground: Ground | null');
+  const consentFn = extract(source.analysis, 'const analysisCacheOnlyBigNets =', '/** `signal` owns the download prompt');
   let answer;
   const api = new Function(
     'requestLargeNetDownloadConsent',

@@ -613,20 +613,6 @@ function syncBrokerParticipants(rows: EngineRow[]): void {
 }
 type AnalysisBigNetKey = Extract<BigNetKey, 'bt4' | 't3'>;
 const ANALYSIS_BIG_NET_KEYS: readonly AnalysisBigNetKey[] = ['bt4', 't3'];
-/**
- * Big nets approved on a phone because they were cached ('cached' consent). That approves no
- * download: loading Lc0 Small (or anything else) can evict the net before the run loads it, so
- * initBigNetsForRun loads these cache-only and asks again before downloading.
- */
-const analysisCacheOnlyBigNets = new Set<AnalysisBigNetKey>();
-/** Phone/desktop large-net consent for a row choice; records a cache-hit approval. */
-async function requestAnalysisBigNetConsent(config: BigNetConfig, signal: AbortSignal): Promise<boolean> {
-  const consent = await requestLargeNetDownloadConsent(config, signal);
-  const key = config.key as AnalysisBigNetKey;
-  if (consent === 'cached') analysisCacheOnlyBigNets.add(key);
-  else if (consent === 'download') analysisCacheOnlyBigNets.delete(key);
-  return consent !== false;
-}
 async function bigNetFor(variant: string, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher; cacheOnly: boolean }> {
   const key: AnalysisBigNetKey = variant === 't3' ? 't3' : 'bt4'; // keep in step with engineAnalysisCacheKey
   return { config: BIG_NETS[key], searcher: await acquireBigNetSearcherAsync(key, false, signal), cacheOnly: analysisCacheOnlyBigNets.has(key) };
@@ -2003,6 +1989,20 @@ function bigNetsAwaitingInit(rows: EngineRow[]): AnalysisBigNetKey[] {
   return [...keys];
 }
 
+/**
+ * Big nets approved on a phone because they were cached ('cached' consent). That approves no
+ * download: loading Lc0 Small (or anything else) can evict the net before the run loads it, so
+ * initBigNetsForRun loads these cache-only and asks again before downloading.
+ */
+const analysisCacheOnlyBigNets = new Set<AnalysisBigNetKey>();
+/** Phone/desktop large-net consent for a row choice; records a cache-hit approval. */
+async function requestAnalysisBigNetConsent(config: BigNetConfig, signal: AbortSignal): Promise<boolean> {
+  const consent = await requestLargeNetDownloadConsent(config, signal);
+  const key = config.key as AnalysisBigNetKey;
+  if (consent === 'cached') analysisCacheOnlyBigNets.add(key);
+  else if (consent === 'download') analysisCacheOnlyBigNets.delete(key);
+  return consent !== false;
+}
 /** `signal` owns the download prompt a cache-only approval may need (bigNetFor().cacheOnly). */
 async function initBigNetsForRun(keys: AnalysisBigNetKey[], cancelled: () => boolean, signal?: AbortSignal): Promise<Map<AnalysisBigNetKey, Error>> {
   const errors = new Map<AnalysisBigNetKey, Error>();
@@ -4610,11 +4610,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       analysisBigNetInit = { owner: controller, keys: uninitializedBigNets };
       let initErrors: Map<AnalysisBigNetKey, Error>;
       try {
-        initErrors = await initBigNetsForRun(
-          uninitializedBigNets,
-          () => controller.signal.aborted || mountAbort.signal.aborted,
-          AbortSignal.any([controller.signal, mountAbort.signal]),
-        );
+        const consentSignal = AbortSignal.any([controller.signal, mountAbort.signal]);
+        initErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted, consentSignal);
       } finally {
         if (analysisBigNetInit?.owner === controller) analysisBigNetInit = null;
       }
