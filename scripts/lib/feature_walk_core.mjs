@@ -134,6 +134,11 @@ export function boardMoveExpression(sideExpression, roll) {
   return `(${boardMove.toString()})(${sideExpression}, ${JSON.stringify(roll)})`;
 }
 
+/** Whether `href` is where the action declared it lands; actions without `navigatesTo` always pass. */
+export function landedOnDeclaredRoute(action, href, baseUrl) {
+  return !action.navigatesTo || locateRoute(href, baseUrl) === action.navigatesTo;
+}
+
 /** Route for a page URL, but only on the walk's own origin (another origin is never "in the app"). */
 export function locateRoute(href, baseUrl) {
   const url = new URL(href);
@@ -163,16 +168,6 @@ export function replayCommand(args, seed) {
   return `node scripts/feature_walk.mjs ${flags.join(' ')}`;
 }
 
-/**
- * Same-tab link destination of a clicked node (absolute href), or null when the click is not
- * a link or opens elsewhere. Self-contained so Playwright's locator.evaluate can run it as-is.
- */
-export function clickDestination(node) {
-  const link = node.closest?.('a[href]');
-  if (!link || (link.target && link.target !== '_self')) return null;
-  return link.href;
-}
-
 /** Resolve true once `check()` is truthy, false at the deadline; a throwing check (navigation mid-poll) retries. */
 export async function pollUntil(check, timeoutMs, intervalMs = 150) {
   const deadline = Date.now() + timeoutMs;
@@ -182,8 +177,10 @@ export async function pollUntil(check, timeoutMs, intervalMs = 150) {
     } catch {
       // Retry until the deadline.
     }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return false;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, remaining)));
     if (Date.now() >= deadline) return false;
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }
 

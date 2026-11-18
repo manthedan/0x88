@@ -13,11 +13,11 @@ import {
   chooseAction,
   chooseTargetIndex,
   chooseValue,
-  clickDestination,
   createCheckLog,
   createRng,
   eligibilityExpression,
   evaluateInvariants,
+  landedOnDeclaredRoute,
   locateRoute,
   parseSeed,
   pollUntil,
@@ -114,10 +114,8 @@ async function targetLocator(page, rng, step) {
 async function performStep(page, rng, step) {
   switch (step.do) {
     case 'click': {
-      const locator = await targetLocator(page, rng, step);
-      const href = await locator.evaluate(clickDestination);
-      await locator.click({ timeout: STEP_TIMEOUT_MS });
-      return href ? { target: step.target, href } : { target: step.target };
+      await (await targetLocator(page, rng, step)).click({ timeout: STEP_TIMEOUT_MS });
+      return { target: step.target };
     }
     case 'select': {
       const locator = await targetLocator(page, rng, step);
@@ -246,14 +244,14 @@ async function walk(args) {
       report.steps.push(record);
       try {
         for (const step of choice.action.steps) {
-          const result = await performStep(page, rng, step);
-          record.results.push(result);
-          // A same-tab link into the app must actually land there; checkRoute alone would pass on the old page.
-          const destination = result.href && locateRoute(result.href, args.baseUrl);
-          if (destination && !(await pollUntil(() => locateRoute(page.url(), args.baseUrl) === destination, args.readyTimeout)))
-            throw new Error(`navigation to ${destination} (${result.href}) never arrived; still at ${page.url()}`);
+          record.results.push(await performStep(page, rng, step));
           await delay(100);
         }
+        // Declared by the registry, not read from the rendered link, so a broken href or handler fails here;
+        // checkRoute alone would pass on the old page.
+        const { action } = choice;
+        if (!(await pollUntil(() => landedOnDeclaredRoute(action, page.url(), args.baseUrl), args.readyTimeout)))
+          throw new Error(`expected to land on ${action.navigatesTo}; still at ${page.url()}`);
       } catch (error) {
         report.failures.push({ step: index, route, action: label, invariant: 'actionCompleted', detail: error.message });
       }

@@ -9,11 +9,11 @@ import {
   chooseAction,
   chooseTargetIndex,
   chooseValue,
-  clickDestination,
   createCheckLog,
   createRng,
   eligibilityExpression,
   evaluateInvariants,
+  landedOnDeclaredRoute,
   locateRoute,
   parseSeed,
   pollUntil,
@@ -26,7 +26,7 @@ import {
   usableNodes,
   walkStoragePresets,
 } from '../scripts/lib/feature_walk_core.mjs';
-import { FEATURES, ROUTES } from '../src/features/registry.ts';
+import { FEATURES, ROUTES, routeForPath } from '../src/features/registry.ts';
 import { ARENA_SEAT_STORAGE_KEY, engineResourceProfile } from '../src/lc0/engineCatalog.ts';
 import { loadPlayPreferences, PLAY_PREFERENCES_STORAGE_KEY } from '../src/lc0/playPreferences.ts';
 
@@ -467,13 +467,27 @@ test('walk storage presets: Maia3 plays its deterministic top move; Arena seats 
   for (const family of pickSeat.steps[0].values) assert.equal(engineResourceProfile(family).resourceClass, 'cpu', family);
 });
 
-test('clickDestination: same-tab links only', () => {
-  const link = (attrs) => ({ href: 'http://127.0.0.1:5181/app/analysis', target: '', ...attrs });
-  const node = (closest) => ({ closest: () => closest });
-  assert.equal(clickDestination(node(link())), 'http://127.0.0.1:5181/app/analysis');
-  assert.equal(clickDestination(node(link({ target: '_self' }))), 'http://127.0.0.1:5181/app/analysis');
-  assert.equal(clickDestination(node(link({ target: '_blank' }))), null);
-  assert.equal(clickDestination(node(null)), null);
+test('navigation is judged against the registry-declared route, not the rendered link', () => {
+  const base = 'http://127.0.0.1:5181';
+  const toAnalysis = { navigatesTo: 'analysis' };
+  assert.equal(landedOnDeclaredRoute(toAnalysis, `${base}/app/analysis/?fen=x`, base), true);
+  // A regressed href="#" leaves the page where it was; that must not count as arriving.
+  assert.equal(landedOnDeclaredRoute(toAnalysis, `${base}/app/play/#`, base), false);
+  assert.equal(landedOnDeclaredRoute(toAnalysis, 'https://evil.example/app/analysis/', base), false);
+  assert.equal(landedOnDeclaredRoute({}, `${base}/app/play/#`, base), true);
+});
+
+test('every in-app link and navigating button action declares where it lands', () => {
+  for (const feature of FEATURES)
+    for (const action of feature.actions)
+      for (const step of action.steps) {
+        const href = step.target?.match(/\ba\b[^\s]*\[href="([^"]+)"\]/)?.[1];
+        if (href) assert.equal(action.navigatesTo, routeForPath(href), `${feature.id}/${action.name}`);
+      }
+  const declared = (route, name) => routeActions(route).find((candidate) => candidate.action.name === name).action.navigatesTo;
+  assert.equal(declared('play', 'analyzeGame'), 'analysis');
+  assert.equal(declared('analysis', 'playFromHere'), 'play');
+  for (const route of ['analysis', 'play', 'arena']) assert.equal(declared('home', `heroCta:${route}`), route);
 });
 
 test('Play analyzeGame is offered only as the same-tab link (mid-game it opens a new tab)', () => {
@@ -498,6 +512,22 @@ test('pollUntil resolves once the check passes, retries throws, and times out', 
   );
   assert.equal(calls, 3);
   assert.equal(await pollUntil(() => false, 20, 5), false);
+  // The last sleep stops at the deadline and nothing is evaluated after it.
+  let late = 0;
+  const started = Date.now();
+  assert.equal(
+    await pollUntil(
+      () => {
+        late++;
+        return false;
+      },
+      30,
+      5_000,
+    ),
+    false,
+  );
+  assert.ok(Date.now() - started < 1_000);
+  assert.equal(late, 1);
 });
 
 test('check logs hand every entry to exactly one check, including ones logged between steps', () => {
