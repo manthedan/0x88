@@ -9,6 +9,7 @@ import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
 import { uciLineToSan, uciToSan } from '../chess/san.ts';
+import { el, inputEl, maybeEl, selectEl } from '../features/arenaDom.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import type { Evaluator } from '../nn/evaluator.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
@@ -81,7 +82,7 @@ import {
 } from './berserkVariants.ts';
 import { acquireBigNetSearcherAsync, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
 import { boardCheck } from './boardUx.ts';
-import { el, htmlEscape, inputEl, maybeEl, selectEl } from './browserDom.ts';
+import { htmlEscape } from './browserDom.ts';
 import {
   type BrowserLc0Runtime,
   boundedIntValue,

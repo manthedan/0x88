@@ -8,6 +8,7 @@ import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { sanToMove } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
+import { buttonEl, el, maybeEl, selectEl } from '../features/playDom.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
 import {
@@ -24,7 +25,7 @@ import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { acquireBigNetSearcherAsync, type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
-import { buttonEl, el, htmlEscape, maybeEl, selectEl } from './browserDom.ts';
+import { htmlEscape } from './browserDom.ts';
 import {
   BIG_NETS,
   type Bt4SearchOptions,

@@ -100,6 +100,7 @@ import {
 
 type PgnDatabaseSearchResult = Awaited<ReturnType<typeof searchPgnCollectionsByPosition>>[number];
 
+import { el, inputEl, selectEl } from '../features/analysisDom.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import {
   analysisAgreementHeadline,
@@ -153,7 +154,7 @@ import {
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
 import { acquireBigNetSearcherAsync, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
-import { el, htmlEscape, inputEl, selectEl } from './browserDom.ts';
+import { htmlEscape } from './browserDom.ts';
 import {
   type BrowserLc0Runtime,
   lc0EncoderLayers as browserLc0EncoderLayers,
