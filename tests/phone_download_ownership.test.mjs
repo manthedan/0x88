@@ -283,7 +283,13 @@ for (const phase of [
     if (replacement) {
       assert.deepEqual(api.state(), { running: false, startPending: true, abort: replacement, checkpoint: { runId: 'replacement' } });
       assert.deepEqual(api.token(), { runId: 'replacement', revision: 99 });
-    } else assert.deepEqual(api.state(), { running: false, startPending: false, abort: null, checkpoint: null });
+    } else {
+      // A save that lands before the cancellation is observed already replaced the
+      // stored slot: the page must name that checkpoint by both token and value.
+      const saved = phase === 'save' || phase === 'save-with-approval' ? { runId: 'test', revision: 1 } : null;
+      assert.deepEqual(api.state(), { running: false, startPending: false, abort: null, checkpoint: saved });
+      assert.deepEqual(api.token(), saved);
+    }
     assert.equal(admitted, 0);
     assert.doesNotMatch(el('message').textContent, /failed/);
   });

@@ -4391,7 +4391,10 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   try {
     await saveArenaCheckpoint(runCheckpoint, checkpointToken);
     if (abort !== matchAbort || isStaleMount(mountSignal)) return;
+    // The slot now holds this run even if startup is cancelled below, so the
+    // token and the checkpoint it names commit together and Resume/Discard match it.
     checkpointToken = { runId: runCheckpoint.runId, revision: runCheckpoint.revision };
+    checkpoint = runCheckpoint;
     checkpointProblem = '';
   } catch (error) {
     if (abort !== matchAbort || isStaleMount(mountSignal)) return;
