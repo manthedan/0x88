@@ -6,6 +6,7 @@ import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
 import { deviceMemoryClass, shouldAutoAnalyzePosition } from '../src/lc0/deviceMemoryClass.ts';
 import { awaitEngineRetirements, trackEngineRetirement } from '../src/lc0/engineRetirement.ts';
 import { untilAborted } from '../src/lc0/modelCache.ts';
+import { testAnalysisEngines } from './lib/analysis_engines.mjs';
 
 const source = (name) => readFileSync(new URL(`../src/lc0/${name}.ts`, import.meta.url), 'utf8');
 function extract(text, start, end) {
@@ -212,18 +213,12 @@ test('Analysis retires Small only after its last row is removed (eval bar is cac
       {
         events,
         trackEngineRetirement,
-        ANALYSIS_BIG_NET_KEYS: [],
-        disposeUnusedCentipawnEvaluators: () => {},
+        engines: testAnalysisEngines({ activeRows: () => active }),
+        engineRows: active,
         activeEngineRows: () => active,
-        isLc0BigNetVariant: (v) => ['bt4', 't3', 'lqo'].includes(v),
+        isLc0BigNetVariant: (v) => ['bt4', 't3'].includes(v),
         resetSearchWorker: () => events.push('worker'),
         reviewAbort: null,
-        disposeStockfish: () => {},
-        recklessEngines: { retain() {} },
-        viridithasEngines: { retain() {} },
-        berserkEngines: { retain() {} },
-        plentyChessEngines: { retain() {} },
-        stormphraxEngines: { retain() {} },
         renderRecklessRuntimeInfo: () => {},
       },
     );

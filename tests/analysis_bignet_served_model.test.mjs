@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
+import { ANALYSIS_BIG_NET_KEYS, ANALYSIS_BIG_NET_SESSION, createAnalysisEngines } from '../src/lc0/analysis/analysisEngines.ts';
 import { analysisRunBroker, analysisRunRowKey, captureAnalysisRun } from '../src/lc0/analysisRunSnapshot.ts';
 import {
   analysisCanPrepare,
@@ -38,11 +39,12 @@ function slice(start, end) {
   return source.slice(from, to);
 }
 const keyFunctions = slice('function engineAnalysisCacheKey(', 'function activeEngineRows()');
-const bigNetFunctions = slice('/**\n * The big-net session options of an Analysis search', '// Lc0 big nets use hosted ONNX assets');
+// The controller's own createAnalysisEngines call: port, row source and config.
+const engineHost = slice('const engines = createAnalysisEngines({', '\nlet analysisRunState');
 const analyzeFunction = slice('async function performAnalysisMaintenance(', 'let analysisGameTree = tree;');
 const schedulerFunctions = slice('function hasActiveAnalysisRun(', 'function hiddenTabActive(');
 const cancelFunctions = slice('function cancelActiveAnalysisRun(', 'function scheduleAnalyzeCurrent(');
-const scheduleFunction = slice('function scheduleAnalyzeCurrent(', 'async function withCpuLease');
+const scheduleFunction = slice('function scheduleAnalyzeCurrent(', 'function assetFileLabel(');
 const invalidateFunction = slice('const ANALYSIS_REFRESH_PENDING_MESSAGE', 'function deferAnalysisSettingsRefresh(');
 const backendFunction = slice('async function loadLc0Backend(', 'async function loadLc0BackendOwned(');
 const reloadFunction = slice('async function reloadLc0Backend(', 'async function init(');
@@ -52,11 +54,26 @@ const navigationFunction = slice(
   'let analysisGameTree = tree;',
   '// ---------------------------------------------------------------------------\n// Human moves',
 );
-const centipawnAvailability = slice('async function refreshCentipawnHybridManifestStatus(', 'function centipawnModel(');
-const centipawnPins = slice('function retireAnalysisRunCentipawnKeys(', 'function centipawnEvaluator(');
+const centipawnAvailability = slice('async function refreshCentipawnHybridManifestStatus(', 'function centipawnHistoryFens(');
 
 const T3_ORIGINAL = T3_NET.modelUrl;
 const T3_SPLITK = lc0SplitKUrl(T3_ORIGINAL);
+
+// The host formats big-net lines with the real lc0AnalysisLines, whose detail is
+// "<visits> visits". The fake worker's result visits encode the session's served
+// URL and the searched MultiPV, so a published line still names both.
+const servedUrls = [''];
+function resultVisits(servedUrl = '', multiPv) {
+  if (!servedUrls.includes(servedUrl)) servedUrls.push(servedUrl);
+  return servedUrls.indexOf(servedUrl) * 1000 + multiPv;
+}
+function decodedVisits(line) {
+  const match = /^(\d+) visits$/.exec(line.detail);
+  return match ? Number(match[1]) : null;
+}
+/** The served URL a big-net line was searched on; other engines' detail as is. */
+const detailOf = (line) => (decodedVisits(line) === null ? line.detail : servedUrls[Math.floor(decodedVisits(line) / 1000)]);
+const searchedMultiPvOf = (line) => (decodedVisits(line) === null ? line.searchedMultiPv : decodedVisits(line) % 1000);
 
 /**
  * The real Bt4WorkerSearcher runs against this scripted worker, so init reuse,
@@ -114,7 +131,7 @@ class FakeWorker {
           {
             type: 'searchResult',
             id: message.id,
-            result: { cancelled: false, move: 'e2e4', visits: message.visits, multiPv: message.multiPv, served: this.servedModelUrl },
+            result: { cancelled: false, value: 0, pv: ['e2e4'], children: [], visits: resultVisits(this.servedModelUrl, message.multiPv) },
           },
           this.outcome.searchTicks ?? 1,
         );
@@ -151,8 +168,50 @@ function element() {
   };
 }
 
+/**
+ * The page's Centipawn evaluator cache, reporting by row variant: the variants
+ * whose evaluator was requested (holdCentipawn holds the next load), and the
+ * variants each retain kept alive (the run pins plus the visible rows).
+ */
+function centipawnFixture() {
+  const fixture = { centipawnVariants: [], pinRetentions: [], engines: null, held: null };
+  const variantOf = (key) => ['bt4-custom', 'bt4-auto', 'bt4-ort'].find((variant) => fixture.engines.centipawnEvaluatorCacheKey(variant) === key) ?? key;
+  fixture.variantOf = variantOf;
+  fixture.holdCentipawn = () => {
+    let release;
+    const promise = new Promise((resolve) => {
+      release = resolve;
+    });
+    fixture.held = { promise, release };
+    return release;
+  };
+  fixture.cache = {
+    has: () => true,
+    async get(key) {
+      fixture.centipawnVariants.push(variantOf(key));
+      const held = fixture.held;
+      fixture.held = null;
+      if (held) await held.promise;
+      return {};
+    },
+    retain: (keys) => fixture.pinRetentions.push([...keys].map(variantOf)),
+    clear() {},
+  };
+  return fixture;
+}
+
 function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet = async (key) => searchers.get(key) }) {
   const admissions = [];
+  const centipawn = centipawnFixture();
+  // The real host, on the test's searchers and Centipawn cache.
+  const hostFactory = (deps) => {
+    centipawn.engines = createAnalysisEngines({
+      ...deps,
+      bigNets: { acquire: (key) => acquireBigNet(key), peek: (key) => searchers.get(key), release() {}, disposeNow() {} },
+      centipawnCache: centipawn.cache,
+    });
+    return centipawn.engines;
+  };
   const observeTransition = (state, event) => {
     const result = transitionAnalysis(state, event);
     for (const effect of result.effects) if (effect.type === 'search') admissions.push(effect.snapshot);
@@ -166,14 +225,14 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     const { cancelHiddenTabWork, classifyHiddenReload, hiddenAnalysisStopEnabled, initialHiddenTabPause, requestHiddenTabWork, transitionHiddenTab } = hiddenHelpers;
     let analysisBackendGeneration = 1;
     let analysisAbort = null, activeAnalysisRunId = 0;
-    let activeAnalysisSelectionKey = '', analysisRunCentipawnKeys = new Set();
+    let activeAnalysisSelectionKey = '';
     let hiddenTab = initialHiddenTabPause(false), analysisReloadAbort = null;
     const maia3PanelTimer = null, maia3PanelEvaluating = false, workspaceAutosave = null, maia3PanelTask = null;
     const analysisAssetPrefetchControllers = new Map();
     const cancelAllAnalysisAssetPrefetches = () => {}, scheduleMaia3Panel = () => {}, prefetchAnalysisAssetsForAddedRow = () => {};
     let analysisRunState = initialAnalysisRunState(), nextAnalysisOperationId = 0;
     const analysisOperations = new Map(), analysisTimers = new Map();
-    const activeWorkerSearchId = null, searchWorker = null, ANALYSIS_BIG_NET_KEYS = ['bt4', 't3'];
+    const activeWorkerSearchId = null, searchWorker = null;
     const reviewAbort = null, retry = false, searcher = null;
     let criticalBusy = false;
     const criticalPanel = { isBusy: () => criticalBusy, invalidate() {} };
@@ -197,28 +256,18 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     const selectEl = el, inputEl = el, maybeEl = el;
     const document = { getElementById: el };
     const BIG_NETS = { bt4: BT4_NET, t3: T3_NET };
-    const bigNetFor = async (variant) => {
-      const key = variant === 't3' ? 't3' : 'bt4';
-      return { config: BIG_NETS[key], searcher: await acquireBigNet(key) };
-    };
     const peekBigNetSearcher = (key) => searchers.get(key);
     let engineRows = rows;
     const activeEngineRows = () => engineRows.map((row) => ({ ...row }));
     let currentMultiPv = 1;
     const multiPv = () => currentMultiPv, selectedLc0Runtime = () => currentRuntime;
-    let dial = 'balanced';
-    const resourceBroker = { snapshot: () => ({ dial, cpuBudget: 1 }) };
-    const engineResourceProfile = () => ({ resourceClass: 'gpu' });
     const legalMoves = () => ['e2e4'];
     const analysisGamePosition = () => ({ fen: START_FEN, moves: cpuHistory });
-    const centipawnEvaluatorKeysForRows = (rows) => new Set(rows.filter((row) => row.family === 'centipawn').map((row) => row.variant));
     const analysisEngineName = (label) => label, rowLabel = (row) => row.variant;
     const criticalAnalysisRefresh = new stateHelpers.CriticalAnalysisRefresh();
     const pvPreview = null, mainEvaluator = null, saveAnalysisWorkspace = () => {}, clearStalePgnDatabaseSearchResults = () => {}, clearReviewIfMainlineChanged = () => {}, renderAll = () => {};
     const stopGameReview = () => {}, clearReviewState = () => {};
-    const pinRetentions = [];
-    const disposeUnusedCentipawnEvaluators = () => { pinRetentions.push([...activeCentipawnEvaluatorKeys()]); };
-    const disposeUnusedEngines = disposeUnusedCentipawnEvaluators;
+    const disposeUnusedEngines = () => engines.disposeUnusedCentipawnEvaluators();
     const disposeRuntimeResources = () => {};
     let heldBackend = null;
     const backendCompletions = [];
@@ -256,37 +305,30 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     // the shipped s4fix model is ORT-only and skips the manifest probe.
     const LEGACY_CENTIPAWN_OVERRIDE = true;
     const CENTIPAWN_HYBRID_MANIFEST_URL = 'fake-manifest', resolvePublicAssetUrl = (url) => url;
+    const CENTIPAWN_MODEL_URL = 'fake-model', CENTIPAWN_META_URL = 'fake-meta';
+    const LEGACY_CENTIPAWN_RESOLVED_MODEL_URL = 'fake-legacy-model', LEGACY_CENTIPAWN_RESOLVED_META_URL = 'fake-legacy-meta';
     const fetch = async () => ({ ok: false }), renderEngineList = () => {};
-    const centipawnVariants = [], centipawnCache = { has: () => true };
-    const centipawnEngineLabel = (variant) => variant, centipawnEvaluatorCacheKey = (variant) => variant;
-    let heldCentipawn = null;
-    const holdCentipawn = () => {
-      let release;
-      const promise = new Promise((resolve) => { release = resolve; });
-      heldCentipawn = { promise, release };
-      return release;
-    };
-    const centipawnEvaluator = async (variant) => {
-      centipawnVariants.push(variant);
-      const held = heldCentipawn;
-      heldCentipawn = null;
-      if (held) await held.promise;
-      return {};
-    };
+    const centipawnEngineLabel = (variant) => variant;
+    const initialPerformanceDial = () => 'balanced', createBrowserSquareformerRuntimeEvaluator = () => { throw new Error('unused'); };
+    const recklessVariantForKey = () => ({}), viridithasVariantForKey = () => ({}), berserkVariantForKey = () => ({});
+    const plentyChessVariantForKey = () => ({}), stormphraxVariantForKey = () => ({});
+    const preloadAnalysisAssets = async () => {};
+    const showLoadingProgressItem = (id) => { if (id === 'model') modelProgressVisible = true; };
+    const hideLoadingProgressItem = (id) => { if (id === 'model') modelProgressVisible = false; };
     const chooseMove = async () => ({}), centipawnSearchOptions = {}, centipawnHistoryFens = () => [];
     const centipawnPuctAnalysisLines = (_result, _fen, label) => [{ engine: label, pvUci: ['e2e4'], multipv: 1, scoreText: '+0.10' }];
     const params = new URLSearchParams();
-    const clearAnalysisSearchProgress = () => {}, syncBrokerParticipants = () => {}, clearEngineSearchProgress = () => {};
+    const clearAnalysisSearchProgress = () => {}, clearEngineSearchProgress = () => {};
     const showIndeterminateSearchProgress = () => {}, showAnalysisProgress = () => {};
     let modelProgressVisible = false;
     const showModelProgress = () => { modelProgressVisible = true; }, hideModelProgress = () => { modelProgressVisible = false; };
     const renderLines = () => published.push(lineCache.get(tree.current.fen));
     const renderEvalBar = () => {}, setShapes = () => {}, bestShapes = () => [], renderEngineComparison = () => {};
     const cacheEngineLines = (key, lines) => engineLineCache.set(key, lines);
-    const lc0AnalysisLines = (result, _fen, engine) => [{ engine, pvUci: [result.move], multipv: 1, scoreText: '+0.20', detail: result.served ?? '', pvSan: '', searchedMultiPv: result.multiPv }];
     const analysisConsensus = () => 'consensus';
+    ${engineHost}
+    const { centipawnVariants, holdCentipawn, pinRetentions, variantOf } = centipawn;
     ${keyFunctions}
-    ${bigNetFunctions}
     ${schedulerFunctions}
     ${hiddenFunctions}
     ${invalidateFunction}
@@ -294,7 +336,6 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     ${scheduleFunction}
     ${backendFunction}
     ${centipawnAvailability}
-    ${centipawnPins}
     ${reloadFunction}
     ${analyzeFunction}
     ${navigationFunction}
@@ -307,7 +348,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
       backendCompletions,
       navigateAutoOff: (replaceTree = false) => { inputEl('autoAnalyze').checked = false; if (replaceTree) tree = { ...tree, current: { ...tree.current } }; afterNavigation(); },
       refreshCentipawn: refreshCentipawnHybridManifestStatus, centipawnVariants, holdCentipawn, pinRetentions,
-      snapshotPins: () => [...analysisRunCentipawnKeys],
+      snapshotPins: () => engines.analysisRunCentipawnKeys().map(variantOf),
       enterCritical: () => { criticalBusy = true; criticalCallbacks.pauseAnalysis(); },
       settleCritical: () => { criticalBusy = false; criticalCallbacks.settled(); },
       enterMode: (mode) => dispatchAnalysis({ type: 'MODE_ENTER', mode }),
@@ -342,7 +383,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
       show: () => applyHiddenTab(false),
       state: () => analysisRunState,
       setStrength: (strength) => { engineRows = engineRows.map((row) => ({ ...row, strength })); settingsChanged(); },
-      setDial: (value) => { dial = value; settingsChanged(); },
+      setDial: (value) => { engines.broker.setDial(value); settingsChanged(); },
       navigateHistory: (boards, moves) => { history = boards; cpuHistory = moves; return analyzeCurrent(); },
       normalizeRows: (next) => { engineRows = next; invalidateAnalysisSettings(); },
       engineAnalysisCacheKey: (row) => engineAnalysisCacheKey(tree.current.fen, row),
@@ -365,6 +406,10 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     'stateHelpers',
     'smallLc0Runtime',
     'hiddenHelpers',
+    'createAnalysisEngines',
+    'centipawn',
+    'ANALYSIS_BIG_NET_KEYS',
+    'ANALYSIS_BIG_NET_SESSION',
     code,
   )(
     START_FEN,
@@ -388,6 +433,10 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     },
     smallLc0Runtime,
     { cancelHiddenTabWork, classifyHiddenReload, hiddenAnalysisStopEnabled, initialHiddenTabPause, requestHiddenTabWork, transitionHiddenTab },
+    hostFactory,
+    centipawn,
+    ANALYSIS_BIG_NET_KEYS,
+    ANALYSIS_BIG_NET_SESSION,
   );
 }
 
@@ -418,8 +467,8 @@ test('post-capture controls cannot relabel search arguments, cached rows or comp
       assert.deepEqual(messages[0].input.positions.map(boardToFen), [START_FEN]);
       assert.deepEqual([...page.engineLineCache.keys()], [originalKey, nextKey]);
       assert.deepEqual([...page.completeAnalysisKeys], [originalKey, nextKey]);
-      assert.equal(page.engineLineCache.get(originalKey)[0].searchedMultiPv, 1);
-      assert.equal(page.lineCache.get(START_FEN)[0].searchedMultiPv, 3, 'only the current selection publishes');
+      assert.equal(searchedMultiPvOf(page.engineLineCache.get(originalKey)[0]), 1);
+      assert.equal(searchedMultiPvOf(page.lineCache.get(START_FEN)[0]), 3, 'only the current selection publishes');
     } finally {
       t3.dispose();
     }
@@ -455,7 +504,7 @@ const urlPattern = (url) => new RegExp(url.replaceAll('.', '\\.'));
 function assertPublishedUnder(page, row, servedUrl) {
   const lines = page.lineCache.get(START_FEN);
   assert.equal(lines?.[0]?.pvUci?.[0], 'e2e4', 'completed lines were published');
-  assert.equal(lines[0].detail, servedUrl, 'the search ran on the session serving this URL');
+  assert.equal(detailOf(lines[0]), servedUrl, 'the search ran on the session serving this URL');
   assert.ok(page.published.length > 0);
   const key = page.engineAnalysisCacheKey(row);
   assert.match(key, urlPattern(servedUrl));
@@ -563,7 +612,7 @@ test('a MultiPV change during a pending big-net init: the search, the key and th
     // 3 lines, the only entry is the 3-line key, and the queued run reused it.
     assert.deepEqual(FakeWorker.searchLog, [{ model: T3_ORIGINAL, multiPv: 3 }]);
     assert.deepEqual([...page.engineLineCache.keys()], [page.engineAnalysisCacheKey(t3Row)]);
-    assert.equal(page.lineCache.get(START_FEN)[0].searchedMultiPv, 3);
+    assert.equal(searchedMultiPvOf(page.lineCache.get(START_FEN)[0]), 3);
     assert.deepEqual([...page.completeAnalysisKeys], [page.analysisSelectionCacheKey()]);
     t3.dispose();
   }));
@@ -591,10 +640,7 @@ test('an engine selection change during a pending big-net init restarts the run 
       [T3_ORIGINAL, BT4_NET.modelUrl],
     );
     const lines = page.lineCache.get(START_FEN);
-    assert.deepEqual(
-      lines.map((line) => line.detail),
-      [T3_SPLITK, BT4_NET.modelUrl],
-    );
+    assert.deepEqual(lines.map(detailOf), [T3_SPLITK, BT4_NET.modelUrl]);
     assert.deepEqual([...page.engineLineCache.keys()].sort(), [page.engineAnalysisCacheKey(t3Row), page.engineAnalysisCacheKey(bt4Row)].sort());
     assert.deepEqual([...page.completeAnalysisKeys], [page.analysisSelectionCacheKey()]);
     t3.dispose();
@@ -618,12 +664,9 @@ test('an Lc0 Small runtime change during a pending big-net init: no old-backend 
     // The run in flight was abandoned before searching; the queued reload loaded
     // the new runtime and the follow-up run searched on it.
     assert.deepEqual(page.smallSearchLog, ['hybrid-b']);
-    assert.equal(page.engineLineCache.get(newKey)[0].detail, 'hybrid-b');
+    assert.equal(detailOf(page.engineLineCache.get(newKey)[0]), 'hybrid-b');
     assert.equal(page.engineLineCache.has(oldKey), false);
-    assert.deepEqual(
-      page.lineCache.get(START_FEN).map((line) => line.detail),
-      ['hybrid-b', T3_SPLITK],
-    );
+    assert.deepEqual(page.lineCache.get(START_FEN).map(detailOf), ['hybrid-b', T3_SPLITK]);
     assert.deepEqual(FakeWorker.searchLog, [{ model: T3_ORIGINAL, multiPv: 1 }]);
     assert.deepEqual([...page.completeAnalysisKeys], [page.analysisSelectionCacheKey()]);
     t3.dispose();
@@ -649,7 +692,7 @@ test('a big-net worker crash mid-search shows its error row and still publishes 
       const lines = page.lineCache.get(START_FEN);
       assert.equal(lines.length, 2);
       assert.equal(lines[0].pvUci[0], 'e2e4');
-      assert.equal(lines[0].detail, T3_SPLITK);
+      assert.equal(detailOf(lines[0]), T3_SPLITK);
       assert.match(lines[1].error, /injected GPU crash/);
       assert.deepEqual([...page.engineLineCache.keys()], [page.engineAnalysisCacheKey(t3Row)]);
       // As before this branch: a run with a failed engine finishes, reports it, and is not marked complete.
