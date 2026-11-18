@@ -35,7 +35,7 @@ test('warm Centipawn analysis skips its evaluator preparation indicator', async 
 test('a Small-to-BT4 settings change retires the old run’s displayed progress before the new run starts', async () => {
   const source = await readFile(analysisSourceUrl, 'utf8');
   const progress = source.slice(source.indexOf('function clearAnalysisSearchProgress('), source.indexOf('async function workerLc0Lines('));
-  const invalidate = source.slice(source.indexOf('function invalidateAnalysisSettings('), source.indexOf('function deferAnalysisSettingsRefresh('));
+  const invalidate = source.slice(source.indexOf('const ANALYSIS_REFRESH_PENDING_MESSAGE'), source.indexOf('function deferAnalysisSettingsRefresh('));
   const message = { textContent: '' };
   const searchProgressByEngine = new Map();
   const wireProgress = new Function(

@@ -4112,6 +4112,7 @@ function removeHiddenTabPause(): void {
 }
 
 let analysisReclaimOwner: AbortController | null = null;
+const ANALYSIS_REFRESH_PENDING_MESSAGE = 'Finishing previous search before updating analysis…';
 
 function invalidateAnalysisSettings(
   maintenance: Maintenance = { reloadLc0: false, disposeUnused: false },
@@ -4122,7 +4123,7 @@ function invalidateAnalysisSettings(
   void dispatchAnalysis({ type: 'SETTINGS_CHANGED', revision: analysisRunState.revision + 1, intent: analysisIntent(), maintenance, request });
   if (analysisRunState.execution.tag === 'running') {
     clearAnalysisSearchProgress();
-    el('message').textContent = request ? 'Finishing previous search before updating analysis…' : 'Engine settings changed.';
+    el('message').textContent = request ? ANALYSIS_REFRESH_PENDING_MESSAGE : 'Engine settings changed.';
     renderEngineComparison(lineCache.get(tree.current.fen) ?? []);
   }
   // The scheduler has queued the new intent. No native init has begun, so
@@ -4146,6 +4147,9 @@ function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnu
 
 function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolean } = {}): void {
   void dispatchAnalysis({ type: 'STOP', preserveMaintenance: options.preserveDeferredMaintenance === true });
+  // Stop drops the queued refresh. Keep any more specific message written by cancellation.
+  const message = maybeEl('message');
+  if (message?.textContent === ANALYSIS_REFRESH_PENDING_MESSAGE) message.textContent = 'Analysis stopped.';
 }
 
 function cancelAnalysisOperation(operationId: number): void {

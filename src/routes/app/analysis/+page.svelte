@@ -746,9 +746,9 @@ onMount(() => {
   :global(.wdlbar .d){background:#b9b3a4}
   :global(.wdlbar .b){background:#3a3a3a}
   /* ── Right column, Lichess-shaped: header → engine strip → top lines → tabs → move list (fills the rest). ── */
-  .analysis-overview{display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; min-height:52px; padding:6px 10px 6px 14px; background:var(--panel-inset); border-bottom:1px solid var(--rule)}
+  .analysis-overview{display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-height:52px; padding:6px 10px 6px 14px; background:var(--panel-inset); border-bottom:1px solid var(--rule)}
   #autosaveNotice:empty{display:none}
-  .position-status{display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0}
+  .position-status{display:flex; align-items:center; justify-content:space-between; gap:8px; flex:1 0 max-content; min-width:0; max-inline-size:100%}
   /* Quiet, neutral run state: text + glyph, no pill competing with the primary action. */
   .analysis-status{display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--muted); font:500 12.5px/1.3 var(--sans); white-space:nowrap}
   .analysis-status::before{display:inline-block; margin-right:5px; vertical-align:middle}
@@ -758,7 +758,7 @@ onMount(() => {
   :global(.analysis-status[data-state=running])::before{width:8px; height:8px; border:2px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color:var(--accent); background:transparent; opacity:1; animation:analysis-spin .8s linear infinite}
   :global(.analysis-status[data-state=done])::before{content:'✓'; width:auto; height:auto; background:none; opacity:1; font-size:12px; font-weight:800}
   @keyframes -global-analysis-spin{to{transform:rotate(360deg)}}
-  .analyze-actions{display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; min-width:0}
+  .analyze-actions{display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; min-width:0; margin-inline-start:auto}
   .analysis-overview button{display:inline-flex; align-items:center; justify-content:center; gap:6px; height:38px; max-width:100%; padding:0 9px; border-radius:8px; font-size:13px; white-space:nowrap}
   .manage-engines{background:transparent; color:var(--ink); border-color:var(--border-input)}
   .engine-count{display:inline-grid; place-items:center; min-width:20px; height:20px; padding:0 5px; border-radius:10px; background:var(--panel-2); font:700 12px/1 var(--sans); font-variant-numeric:tabular-nums}
@@ -1026,7 +1026,6 @@ onMount(() => {
   :global(.movelist .mv.current .mv-eval){color:inherit; opacity:.85}
   /* Container rules keep headers deliberate even when height-capped boards change the column split. */
   @container (max-width:450px){
-    .analysis-overview{grid-template-columns:minmax(0,1fr); gap:4px}
     :global(.engine-summary-text){display:grid; gap:2px}
     :global(.engine-summary-name){min-height:44px}
   }
@@ -1055,7 +1054,7 @@ onMount(() => {
     .analysis-workspace .app-sidebar>*{grid-column:1 / -1}
     .board-toolbar{height:44px}
     /* Let the toolbar wrap within its own grid row, without moving the sticky tabs. */
-    .analysis-overview{grid-row:calc(1 + var(--restore-row)); grid-template-columns:minmax(0,1fr) auto auto auto; gap:4px 5px; padding:4px 5px 4px 7px}
+    .analysis-overview{display:grid; grid-row:calc(1 + var(--restore-row)); grid-template-columns:minmax(0,1fr) auto auto auto; gap:4px 5px; padding:4px 5px 4px 7px}
     .analyze-actions, .position-status, .analysis-workspace .app-sidebar>.analysis-content{display:contents}
     .analysis-workspace .engine-strip{display:none; grid-column:1 / -1; grid-row:calc(3 + var(--restore-row))}
     .analysis-workspace :global(.analysis-content[data-view=engines] > .engine-strip){display:flex}
@@ -1065,7 +1064,8 @@ onMount(() => {
     .manage-label, .manage-engines .engine-count{display:none}
     .run-action{grid-column:4; justify-self:end}
     .add-engine-inline{grid-column:3}
-    @container (max-width:350px){
+    /* Budget about 316px for the controls and spacing, plus 101px for the spinner and status. */
+    @container (max-width:420px){
       .analysis-overview{grid-template-columns:minmax(0,1fr) auto auto}
       .run-action{grid-column:2 / -1}
       .analysis-overview :is(.manage-engines, .add-engine-inline){grid-row:2}
