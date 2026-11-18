@@ -6576,13 +6576,16 @@ async function init(mountSignal: AbortSignal) {
   void refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
   void refreshBt4Availability();
   if (!isV0DeployProfile()) void refreshCentipawnHybridManifestStatus();
-  if (!automaticAnalysisAllowed()) {
+  const smallLc0 = activeEngineRows().some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant));
+  // Read Auto-analyze only now: it may have been turned off during the startup asset checks.
+  // A Small backend still loads; loadLc0Backend applies the checkbox itself.
+  if (!automaticAnalysisAllowed() || (!smallLc0 && !inputEl('autoAnalyze').checked)) {
     el('analyze').toggleAttribute('disabled', false);
     selectEl('lc0RuntimeSelect').disabled = false;
     el('message').textContent = 'Play a move, load a game/FEN, or tap Analyze to start.';
     return;
   }
-  if (activeEngineRows().some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant))) await loadLc0Backend(true, mountSignal);
+  if (smallLc0) await loadLc0Backend(true, mountSignal);
   else await analyzeCurrent();
 }
 
