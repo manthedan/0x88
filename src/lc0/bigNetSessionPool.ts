@@ -195,11 +195,10 @@ export function preparePhoneBigNet(
   if (existing?.loaded) defaultPool.disposeNow(key);
   const settings = phoneReclaimSettings();
   if (settings.retireCpu) retireCpu();
+  // Releases registered after this point are not ours to wait for (see awaitEngineRetirements).
   return (async () => {
-    do {
-      if (hasEngineRetirements()) await untilAborted(awaitEngineRetirements(), signal);
-      await awaitWorkerReclaim(settings.reclaimGapMs, signal, onWait);
-    } while (hasEngineRetirements());
+    if (hasEngineRetirements()) await untilAborted(awaitEngineRetirements(), signal);
+    await awaitWorkerReclaim(settings.reclaimGapMs, signal, onWait);
   })();
 }
 
