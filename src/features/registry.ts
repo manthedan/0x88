@@ -725,7 +725,22 @@ export const FEATURES = [
   {
     id: 'arena.scoreboard',
     routes: ['arena'],
-    ids: ['editSetup', 'stop', 'matchScore', 'pairing', 'openingPairsSection', 'pairMatchup', 'openingPairs', 'gameChips', 'crosstableSection', 'crosstable', 'scoreboardTitle', 'engineOutputsSection', 'engineRaw', 'movesBlock'],
+    ids: [
+      'editSetup',
+      'stop',
+      'matchScore',
+      'pairing',
+      'openingPairsSection',
+      'pairMatchup',
+      'openingPairs',
+      'gameChips',
+      'crosstableSection',
+      'crosstable',
+      'scoreboardTitle',
+      'engineOutputsSection',
+      'engineRaw',
+      'movesBlock',
+    ],
     actions: [
       { name: 'stop', when: '#stop', steps: [{ do: 'click', target: '#stop' }], weight: 0.5 },
       { name: 'editSetup', when: '#editSetup', steps: [{ do: 'click', target: '#editSetup' }] },
