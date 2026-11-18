@@ -25,7 +25,8 @@
 // with new code under its old version; a new prefix still gives it a fresh
 // cache, and activate drops the old one. '0x88-app-' caches hold pages that
 // link the pre-Vite global stylesheets (/app-shell.css etc.), which this
-// worker no longer serves.
+// worker neither routes nor precaches. Those files stay in public/ until
+// 2026-12-18 for pages an older worker still serves.
 const CACHE_PREFIX = '0x88-app2-';
 const LEGACY_CACHE_PREFIXES = ['0x88-app-', 'lc0-app-shell-'];
 const APP_SHELL_FALLBACK = '/app/play/';

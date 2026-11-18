@@ -112,13 +112,20 @@ test('retired tokens stay retired', async () => {
   assert.deepEqual(failures, [], failures.join('\n'));
 });
 
+// Pre-Vite copies, unchanged, kept only for pages an older service worker still serves from
+// its cache; nothing new links them. Delete after 2026-12-18 (scratchpad followups).
+const LEGACY_PUBLIC_CSS = ['app-shell.css', 'chessground.base.css', 'chessground.brown.css', 'chessground.cburnett.css'];
+
 // public/ files are served under stable names, so the CDN/browser can pair new HTML with
 // hours-old CSS after a deploy. Imported styles ship content-hashed under /_app/immutable/.
 test('global stylesheets are Vite imports in cascade order, never public/ files', async () => {
   const template = await readFile(join(ROOT, 'src', 'app.html'), 'utf8');
   assert.doesNotMatch(template, /rel="stylesheet"/);
   const publicCss = (await readdir(join(ROOT, 'public'))).filter((name) => name.endsWith('.css'));
-  assert.deepEqual(publicCss, []);
+  assert.deepEqual(publicCss.sort(), LEGACY_PUBLIC_CSS, 'only the legacy transition copies may live in public/');
+  const linksLegacy = new RegExp(`["'(/]/(${LEGACY_PUBLIC_CSS.join('|').replaceAll('.', '\\.')})`);
+  const appSources = await collectFiles(join(ROOT, 'src'), new Set(['.svelte', '.ts', '.html', '.css']));
+  for (const file of appSources) assert.doesNotMatch(await readFile(file, 'utf8'), linksLegacy, `${file} links a legacy public stylesheet`);
   const layout = await readFile(join(ROOT, 'src', 'routes', '+layout.svelte'), 'utf8');
   const imports = [...layout.matchAll(/^import '([^']+\.css)';$/gm)].map((match) => match[1]);
   assert.deepEqual(imports, [
