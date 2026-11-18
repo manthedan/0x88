@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { readdirSync } from 'node:fs';
 import test from 'node:test';
+import { refuseInProductBuild } from '../src/lib/buildScope.ts';
 import { LAB_ROUTE_ID, PRODUCT_ROUTES, prerenderConfig } from '../svelte.config.js';
+
+const routeFiles = () => readdirSync(new URL('../src/routes', import.meta.url), { recursive: true }).map((file) => file.split('\\').join('/'));
 
 // Route ids (`/app/play`) of every +page.svelte under src/routes.
 function pageRouteIds() {
-  return readdirSync(new URL('../src/routes', import.meta.url), { recursive: true })
-    .map((file) => file.split('\\').join('/'))
+  return routeFiles()
     .filter((file) => file === '+page.svelte' || file.endsWith('/+page.svelte'))
     .map((file) => `/${file.slice(0, -'+page.svelte'.length)}`.replace(/(.)\/$/, '$1'))
     .sort();
@@ -41,7 +43,24 @@ test('a product build fails when a non-lab route goes unprerendered', () => {
   assert.throws(() => handleUnseenRoutes({ routes: ['/lab/mobile-soak', '/app/new'], message: 'unseen' }), /unseen/);
 });
 
-test('dev and non-product builds keep the Kit default of prerendering every route', () => {
-  assert.equal(prerenderConfig(undefined), undefined);
+test('dev and non-product builds keep the Kit default of prerendering every route', (t) => {
+  const saved = process.env.BUILD_SCOPE;
+  t.after(() => {
+    if (saved === undefined) delete process.env.BUILD_SCOPE;
+    else process.env.BUILD_SCOPE = saved;
+  });
+  delete process.env.BUILD_SCOPE;
+  assert.equal(prerenderConfig(), undefined);
   assert.equal(prerenderConfig(''), undefined);
+});
+
+// Product builds still bundle lab routes into the client router; their layouts must 404 there.
+test('lab route layouts refuse to load in product builds only', () => {
+  const files = routeFiles();
+  for (const layout of ['lab/+layout.ts', 'single-engine/+layout.ts']) assert.ok(files.includes(layout), `${layout} is missing`);
+  assert.throws(
+    () => refuseInProductBuild('product'),
+    (error) => error.status === 404,
+  );
+  for (const scope of [undefined, '', 'dev']) assert.doesNotThrow(() => refuseInProductBuild(scope));
 });
