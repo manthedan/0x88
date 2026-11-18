@@ -1995,16 +1995,27 @@ function bigNetsAwaitingInit(rows: EngineRow[]): AnalysisBigNetKey[] {
  * initBigNetsForRun loads these cache-only and asks again before downloading.
  */
 const analysisCacheOnlyBigNets = new Set<AnalysisBigNetKey>();
+/** Cache-only nets whose download the user declined: automatic runs fail them without asking again. */
+const analysisDeclinedBigNetDownloads = new Set<AnalysisBigNetKey>();
 /** Phone/desktop large-net consent for a row choice; records a cache-hit approval. */
 async function requestAnalysisBigNetConsent(config: BigNetConfig, signal: AbortSignal): Promise<boolean> {
   const consent = await requestLargeNetDownloadConsent(config, signal);
   const key = config.key as AnalysisBigNetKey;
   if (consent === 'cached') analysisCacheOnlyBigNets.add(key);
   else if (consent === 'download') analysisCacheOnlyBigNets.delete(key);
+  // Choosing the net again is the explicit retry of a declined download.
+  if (consent) analysisDeclinedBigNetDownloads.delete(key);
   return consent !== false;
 }
-/** `signal` owns the download prompt a cache-only approval may need (bigNetFor().cacheOnly). */
-async function initBigNetsForRun(keys: AnalysisBigNetKey[], cancelled: () => boolean, signal?: AbortSignal): Promise<Map<AnalysisBigNetKey, Error>> {
+/**
+ * `prompt` owns the download prompt a cache-only approval may need (bigNetFor().cacheOnly);
+ * `current` is false once the run is superseded, so a removed row is never asked about.
+ */
+async function initBigNetsForRun(
+  keys: AnalysisBigNetKey[],
+  cancelled: () => boolean,
+  prompt?: { signal: AbortSignal; current: () => boolean },
+): Promise<Map<AnalysisBigNetKey, Error>> {
   const errors = new Map<AnalysisBigNetKey, Error>();
   await Promise.all(
     keys.map(async (key) => {
@@ -2036,10 +2047,17 @@ async function initBigNetsForRun(keys: AnalysisBigNetKey[], cancelled: () => boo
             await load({ ...ANALYSIS_BIG_NET_SESSION, noDownload: true });
           } catch (error) {
             if (cancelled() || !(error instanceof Error && error.message.includes(LC0_MODEL_DOWNLOAD_NOT_APPROVED))) throw error;
-            const consent = await requestLargeNetRedownloadConsent(config, signal);
+            const notApproved = () => new Error(`Lc0 ${config.name} is no longer cached and its download was not approved.`);
+            if (!prompt || analysisDeclinedBigNetDownloads.has(key)) throw notApproved();
+            if (!prompt.current()) return;
+            const consent = await requestLargeNetRedownloadConsent(config, prompt.signal);
             if (cancelled()) return;
-            if (consent !== 'download') throw new Error(`Lc0 ${config.name} is no longer cached and its download was not approved.`);
+            if (consent !== 'download') {
+              analysisDeclinedBigNetDownloads.add(key);
+              throw notApproved();
+            }
             analysisCacheOnlyBigNets.delete(key);
+            if (!prompt.current()) return;
             await load(ANALYSIS_BIG_NET_SESSION);
           }
         } finally {
@@ -4610,8 +4628,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       analysisBigNetInit = { owner: controller, keys: uninitializedBigNets };
       let initErrors: Map<AnalysisBigNetKey, Error>;
       try {
-        const consentSignal = AbortSignal.any([controller.signal, mountAbort.signal]);
-        initErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted, consentSignal);
+        const prompt = { signal: AbortSignal.any([controller.signal, mountAbort.signal]), current: () => analysisCanPrepare(analysisRunState, owner) };
+        initErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted, prompt);
       } finally {
         if (analysisBigNetInit?.owner === controller) analysisBigNetInit = null;
       }
