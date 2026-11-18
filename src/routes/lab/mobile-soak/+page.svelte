@@ -1,9 +1,9 @@
 <script lang="ts">
 import { onMount } from 'svelte';
-import PhoneLargeNetPreference from '../../../lib/components/PhoneLargeNetPreference.svelte';
 import { writeClipboard } from '../../../lc0/clipboard.ts';
 import { buildSoakSteps, type SoakReport, soakRuntimeSummary } from '../../../lc0/mobileSoak.ts';
 import type { MobileSoakApi } from '../../../lc0/mobileSoakBrowser.ts';
+import PhoneLargeNetPreference from '../../../lib/components/PhoneLargeNetPreference.svelte';
 
 let report: SoakReport | null = null;
 let api: MobileSoakApi | undefined;

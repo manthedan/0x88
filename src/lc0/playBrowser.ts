@@ -23,13 +23,10 @@ import { acknowledgeInputTransfer, takePlayHandoff, writeAnalysisHandoff } from 
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { acquireBigNetSearcherAsync, type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
-import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
-import { PHONE_LARGE_NET_CHANGE_EVENT, phoneLargeNetsBlocked, phoneSafeEngineVariant } from './phoneLargeNetPolicy.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { buttonEl, el, htmlEscape, maybeEl, selectEl } from './browserDom.ts';
 import {
   BIG_NETS,
-  phoneBlockedBigNetModelUrl,
   type Bt4SearchOptions,
   bigNetAssetStatusSync,
   bigNetMemoryCaution,
@@ -37,6 +34,7 @@ import {
   bt4SupportedSync,
   checkBigNetAsset,
   LQO_NET,
+  phoneBlockedBigNetModelUrl,
   probeBt4Support,
   T3_NET,
 } from './bt4Engine.ts';
@@ -45,6 +43,7 @@ import { inactiveCpuEnginesToEvict, PendingCpuNewGames } from './cpuEngineReside
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
+import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
@@ -63,6 +62,7 @@ import {
 import { CachedLc0Evaluator } from './onnxEvaluator.ts';
 import { type OpeningNameIndex, openingPositionKey } from './openingNames.ts';
 import { type PendingInput, type PendingInputEvent, transitionPendingInput } from './pendingInput.ts';
+import { PHONE_LARGE_NET_CHANGE_EVENT, phoneLargeNetsBlocked, phoneSafeEngineVariant } from './phoneLargeNetPolicy.ts';
 import { playMaterial } from './playMaterial.ts';
 import { committedPlayOpponent, type PlayOpponentState, transitionPlayOpponent } from './playOpponentState.ts';
 import { type PlayPosition, playGameToPgn, playMoveLabel, playMoveRows, playTakebackPly, replayPlayPosition } from './playPosition.ts';

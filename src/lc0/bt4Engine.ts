@@ -22,11 +22,11 @@ import {
   requestedOrtRuntimeDiagnosticOptions,
 } from '../nn/ortRuntime.ts';
 import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
-import { disposeOrtWorker } from './disposeOrtWorker.ts';
-import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
+import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import { lc0SplitKUrl } from './lc0SmallModelSelection.ts';
-import { phoneBigNetBlocked, PHONE_LARGE_NET_SUFFIX } from './phoneLargeNetPolicy.ts';
+import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import { PHONE_LARGE_NET_SUFFIX, phoneBigNetBlocked } from './phoneLargeNetPolicy.ts';
 
 export interface BigNetConfig {
   key: 'bt4' | 't3' | 'lqo';

@@ -80,15 +80,6 @@ import {
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
 import { acquireBigNetSearcherAsync, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
-import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
-import {
-  PHONE_LARGE_NET_CHANGE_EVENT,
-  PHONE_LARGE_NET_REASON,
-  PHONE_LARGE_NET_SUFFIX,
-  phoneBigNetBlocked,
-  phoneLargeNetsBlocked,
-  phoneSafeEngineVariant,
-} from './phoneLargeNetPolicy.ts';
 import { boardCheck } from './boardUx.ts';
 import { el, htmlEscape, inputEl, maybeEl, selectEl } from './browserDom.ts';
 import {
@@ -108,13 +99,13 @@ import type { BrowserUciEngine } from './browserUciEngine.ts';
 import { browserVariantOption, createBrowserVariantSelector } from './browserVariantOption.ts';
 import {
   BIG_NETS,
-  phoneBlockedBigNetModelUrl,
   type BigNetConfig,
   type Bt4SearchResult,
   type Bt4WorkerSearcher,
   bigNetAssetStatusSync,
   bt4SupportedSync,
   checkBigNetAsset,
+  phoneBlockedBigNetModelUrl,
   probeBt4Support,
 } from './bt4Engine.ts';
 import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
@@ -158,10 +149,19 @@ import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
+import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { rememberMoveFocus } from './moveListFocus.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, type Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import {
+  PHONE_LARGE_NET_CHANGE_EVENT,
+  PHONE_LARGE_NET_REASON,
+  PHONE_LARGE_NET_SUFFIX,
+  phoneBigNetBlocked,
+  phoneLargeNetsBlocked,
+  phoneSafeEngineVariant,
+} from './phoneLargeNetPolicy.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import {
   checkPlentyChessVariantAsset,
@@ -5014,11 +5014,7 @@ function revokeArenaPhoneLargeNets(): void {
 }
 
 function wireEvents() {
-  window.addEventListener(
-    PHONE_LARGE_NET_CHANGE_EVENT,
-    revokeArenaPhoneLargeNets,
-    { signal: mountAbort.signal },
-  );
+  window.addEventListener(PHONE_LARGE_NET_CHANGE_EVENT, revokeArenaPhoneLargeNets, { signal: mountAbort.signal });
   el('start').addEventListener('click', () => {
     void startMatch();
   });

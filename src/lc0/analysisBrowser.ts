@@ -153,8 +153,6 @@ import {
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
 import { acquireBigNetSearcherAsync, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
-import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
-import { PHONE_LARGE_NET_CHANGE_EVENT, PHONE_LARGE_NET_REASON, phoneBigNetBlocked, phoneLargeNetsBlocked, phoneSafeEngineVariant } from './phoneLargeNetPolicy.ts';
 import { el, htmlEscape, inputEl, selectEl } from './browserDom.ts';
 import {
   type BrowserLc0Runtime,
@@ -171,13 +169,13 @@ import type { BrowserUciAnalysisOptions, BrowserUciEngine } from './browserUciEn
 import { browserVariantOption, createBrowserVariantSelector } from './browserVariantOption.ts';
 import {
   BIG_NETS,
-  phoneBlockedBigNetModelUrl,
   type BigNetConfig,
   type Bt4WorkerSearcher,
   bigNetAssetStatusSync,
   bigNetOptionState,
   bt4SupportedSync,
   checkBigNetAsset,
+  phoneBlockedBigNetModelUrl,
   probeBt4Support,
 } from './bt4Engine.ts';
 import { DisposableVariantPool } from './disposableVariantPool.ts';
@@ -234,10 +232,18 @@ import {
   requestHiddenTabWork,
   transitionHiddenTab,
 } from './hiddenTabPause.ts';
+import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationProvider } from './onnxEvaluator.ts';
 import { type OpeningNameIndex, openingNameAt } from './openingNames.ts';
+import {
+  PHONE_LARGE_NET_CHANGE_EVENT,
+  PHONE_LARGE_NET_REASON,
+  phoneBigNetBlocked,
+  phoneLargeNetsBlocked,
+  phoneSafeEngineVariant,
+} from './phoneLargeNetPolicy.ts';
 import {
   checkPlentyChessVariantAsset,
   hasExplicitPlentyChessVariant,
@@ -1378,7 +1384,11 @@ async function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean, sig
     if (next.family === 'lc0' && isLc0BigNetVariant(next.variant)) {
       // Read metadata only: declining a saved setup must not acquire a runtime/session.
       const config = BIG_NETS[next.variant];
-      const allowed = !phoneBigNetBlocked(config.key) && bigNetSelectableSync(config) && allowBt4Prompt && (await requestLargeNetConsent(config, signal ?? mountAbort.signal));
+      const allowed =
+        !phoneBigNetBlocked(config.key) &&
+        bigNetSelectableSync(config) &&
+        allowBt4Prompt &&
+        (await requestLargeNetConsent(config, signal ?? mountAbort.signal));
       if (signal?.aborted) return [];
       if (!allowed) next.variant = 'small';
     }
@@ -5653,11 +5663,7 @@ function wireEvents() {
     // the suspended search has to disable it here; that finally will not run again.
     document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
   });
-  window.addEventListener(
-    PHONE_LARGE_NET_CHANGE_EVENT,
-    revokeAnalysisPhoneLargeNets,
-    { signal: mountAbort.signal },
-  );
+  window.addEventListener(PHONE_LARGE_NET_CHANGE_EVENT, revokeAnalysisPhoneLargeNets, { signal: mountAbort.signal });
   el('engineList').addEventListener('change', async (event) => {
     abortEngineSelectionConsent();
     const target = event.target as HTMLInputElement | HTMLSelectElement;

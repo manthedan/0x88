@@ -1,16 +1,18 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { isMemoryConstrainedDevice } from '../../lc0/deviceMemoryClass.ts';
-  import { PHONE_LARGE_NET_REASON, phoneLargeNetPreference } from '../../lc0/phoneLargeNetPolicy.ts';
+import { onMount } from 'svelte';
+import { isMemoryConstrainedDevice } from '../../lc0/deviceMemoryClass.ts';
+import { PHONE_LARGE_NET_REASON, phoneLargeNetPreference } from '../../lc0/phoneLargeNetPolicy.ts';
 
-  let { showHint = true }: { showHint?: boolean } = $props();
-  let constrained = $state(false);
-  let enabled = $state(false);
-  onMount(() => {
-    constrained = isMemoryConstrainedDevice();
+let { showHint = true }: { showHint?: boolean } = $props();
+let constrained = $state(false);
+let enabled = $state(false);
+onMount(() => {
+  constrained = isMemoryConstrainedDevice();
+  enabled = phoneLargeNetPreference.enabled();
+  return phoneLargeNetPreference.subscribe(() => {
     enabled = phoneLargeNetPreference.enabled();
-    return phoneLargeNetPreference.subscribe(() => { enabled = phoneLargeNetPreference.enabled(); });
   });
+});
 </script>
 
 <p id="phoneLargeNetFallback" class="phone-large-net-preference" role="status" hidden>{PHONE_LARGE_NET_REASON}</p>
