@@ -235,8 +235,11 @@ function analysisOwner(native) {
     `
     const mountAbort=new AbortController();
     let explorerMaia=null, activeAnalysisSelectionKey='';
-    const analysisRunState={},owner={},analysisOperations=new Map();
+    const analysisRunState={revision:0},owner={},analysisOperations=new Map();
+    const activeAnalysisRunId=1,hiddenTab={hidden:false};
+    const automaticAnalysisAllowed=()=>true,analysisIntent=()=>({});
     let analysisAbort=null, criticalDeferredMaia=false,stockfishLite=null,stockfishFull=null;
+    ${slice(analysis, 'let analysisReclaimOwner:', 'function deferAnalysisSettingsRefresh(')}
     const analysisReloadAbort=null,activeWorkerSearchId=null,searchWorker=null;
     ${slice(analysis, 'function cancelAnalysisOperation(', 'function scheduleAnalyzeCurrent(')}
     const tree={current:{fen:''}},preparedCpuEngineKeys=new Set(),cpu={disposeAll(){}};
@@ -261,7 +264,7 @@ function analysisOwner(native) {
         analysisAbort=null;
       }
     }
-    return {prepare,cancel:()=>cancelAnalysisOperation(1),enableMaia3Panel,unloadMaia3Panel,...criticalCallbacks,getStockfish,message,disposeAnalysisCpuEngines};`,
+    return {prepare,cancel:()=>cancelAnalysisOperation(1),changeRows:()=>invalidateAnalysisSettings({disposeUnused:true},true),enableMaia3Panel,unloadMaia3Panel,...criticalCallbacks,getStockfish,message,disposeAnalysisCpuEngines};`,
     {
       ANALYSIS_BIG_NET_KEYS: keys,
       message,
@@ -508,6 +511,21 @@ test('cancelling Analysis during reclaim does not start a model or restart a ret
     native.trace.map(({ name, phase }) => `${name}:${phase}`),
     ['sf-lite:init', 'sf-lite:terminated'],
   );
+});
+
+test('removing the large row cancels reclaim so CPU-only Analysis can restart without the timer', async (t) => {
+  const native = nativeModels(t, { gap: 20000 });
+  fakeTime(t);
+  const owner = analysisOwner(native);
+  t.after(owner.disposeAnalysisCpuEngines);
+  const cpu = { family: 'sf', variant: 'lite', strength: 12 };
+  await owner.prepare([cpu]);
+  const obsolete = assert.rejects(owner.prepare([cpu, row('bt4')]), { name: 'AbortError' });
+  assert.equal(owner.message.textContent, 'Freeing memory…');
+  owner.changeRows();
+  await obsolete;
+  await owner.prepare([cpu]);
+  assert.deepEqual(native.initializing(), ['sf-lite', 'sf-lite']);
 });
 
 for (const retireCpu of [true, false]) {

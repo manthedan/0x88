@@ -798,6 +798,19 @@ async function ctxPreloadLqoAfterBookMove(ctx: PlayContext, signal: AbortSignal)
   return true;
 }
 
+function ctxPreloadLqoInBackground(ctx: PlayContext, signal: AbortSignal): boolean {
+  if (peekBigNetSearcher('lqo')?.isInitializedFor({ evalCacheEntries: 2048 })) return false;
+  // The book has already supplied the answer; reclaim and init need not hold the move.
+  void Promise.resolve()
+    .then(() => {
+      if (!signal.aborted && !ctxIsDisposed(ctx)) return ctxPreloadLqoAfterBookMove(ctx, signal);
+    })
+    .catch((error: Error) => {
+      if (!signal.aborted && !ctxIsDisposed(ctx) && !ctx.engineThinking) ctxSetEngineNote(`LQO background load failed: ${error.message}`, true);
+    });
+  return true;
+}
+
 async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Promise<string | null> {
   const option = ctxSelectedEngine(ctx);
   await retireUnusedPlayNeuralEngines(option);
@@ -810,7 +823,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     if (ctx.humanColor === 'w') {
       const bookMove = lqoBlackBookMove(ctx.board, ctx.moves.length, historyUcis);
       if (bookMove) {
-        const preloading = await ctxPreloadLqoAfterBookMove(ctx, signal);
+        const preloading = isMemoryConstrainedDevice() ? ctxPreloadLqoInBackground(ctx, signal) : await ctxPreloadLqoAfterBookMove(ctx, signal);
         ctxSetEngineNote(`LQO opening book: ${bookMove}${preloading ? ' · loading model in background' : ''}`);
         return bookMove;
       }
@@ -841,7 +854,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     } else {
       const bookMove = lqoWhiteBookMove(ctx.board, ctx.moves.length, historyUcis);
       if (bookMove) {
-        const preloading = await ctxPreloadLqoAfterBookMove(ctx, signal);
+        const preloading = isMemoryConstrainedDevice() ? ctxPreloadLqoInBackground(ctx, signal) : await ctxPreloadLqoAfterBookMove(ctx, signal);
         ctxSetEngineNote(`LQO opening book: ${bookMove}${preloading ? ' · loading model in background' : ''}`);
         return bookMove;
       }

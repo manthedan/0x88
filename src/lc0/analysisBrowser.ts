@@ -4096,6 +4096,8 @@ function removeHiddenTabPause(): void {
   hiddenTabListener = null;
 }
 
+let analysisReclaimOwner: AbortController | null = null;
+
 function invalidateAnalysisSettings(
   maintenance: Maintenance = { reloadLc0: false, disposeUnused: false },
   request = analysisIsAnalyzing(analysisRunState) || analysisRunState.wanted !== null,
@@ -4103,6 +4105,9 @@ function invalidateAnalysisSettings(
   request = request && automaticAnalysisAllowed();
   if (request && hiddenTab.hidden) deferHiddenTabWork('analysis');
   void dispatchAnalysis({ type: 'SETTINGS_CHANGED', revision: analysisRunState.revision + 1, intent: analysisIntent(), maintenance, request });
+  // The scheduler has queued the new intent. No native init has begun, so
+  // settle the obsolete reclaim wait now instead of holding up the new rows.
+  if (isMemoryConstrainedDevice() && analysisReclaimOwner && analysisReclaimOwner === analysisAbort) cancelAnalysisOperation(activeAnalysisRunId);
 }
 
 function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnusedEngines?: boolean } = {}): void {
@@ -4513,7 +4518,12 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
           el('message').textContent = 'Freeing memory…';
         });
       if (reclaim) {
-        await reclaim;
+        analysisReclaimOwner = controller;
+        try {
+          await reclaim;
+        } finally {
+          if (analysisReclaimOwner === controller) analysisReclaimOwner = null;
+        }
         if (controller.signal.aborted || mountAbort.signal.aborted || !analysisCanPrepare(analysisRunState, owner)) return;
       }
       el('message').textContent = `Loading ${uninitializedBigNets.map((key) => `Lc0 ${BIG_NETS[key].name}`).join(' + ')}…`;

@@ -7,6 +7,47 @@ import test from 'node:test';
 // browser, network or model assets. UI writes record what the next mount sees.
 const source = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
 const requestSource = source.slice(source.indexOf('async function ctxRequestEngineMove('), source.indexOf('async function ctxVerifySelectedEngineReady('));
+const preloadSource = source.slice(source.indexOf('async function ctxPreloadLqoAfterBookMove('), source.indexOf('async function ctxRequestEngineMove('));
+
+test('a phone plays the known LQO book reply before its background reclaim wait resolves', async () => {
+  const reclaim = Promise.withResolvers();
+  let starts = 0;
+  const acquire = Promise.withResolvers();
+  const ctx = { opponent: { active: { level: 0 } }, humanColor: 'w', moves: ['e2e4'] };
+  const deps = {
+    retireUnusedPlayNeuralEngines: async () => {},
+    ctxSelectedEngine: () => ({ family: 'lc0', variant: 'lqo' }),
+    ctxStrengthFor: () => 1,
+    isMemoryConstrainedDevice: () => true,
+    peekBigNetSearcher: () => null,
+    ctxAcquireBigNet: () => {
+      acquire.resolve();
+      return reclaim.promise;
+    },
+    ctxSetEngineNote: () => {},
+    ctxShowDownloadProgress: () => {},
+    ctxHideDownloadProgress: () => {},
+    ctxIsDisposed: () => false,
+    moveToUci: (move) => move,
+    lqoBlackBookMove: () => 'e7e5',
+  };
+  const request = new Function(...Object.keys(deps), `${stripTypeScriptTypes(preloadSource + requestSource)}; return ctxRequestEngineMove;`)(
+    ...Object.values(deps),
+  );
+  const moved = request(ctx, new AbortController().signal);
+  await acquire.promise;
+  assert.equal(await Promise.race([moved, new Promise(setImmediate)]), 'e7e5');
+  const searcher = {
+    loaded: false,
+    config: { name: 'LQO' },
+    init: async () => {
+      starts++;
+    },
+  };
+  reclaim.resolve(searcher);
+  await new Promise(setImmediate);
+  assert.equal(starts, 1);
+});
 for (const lifecycle of ['current', 'cancelled', 'disposed']) {
   for (const rejected of [false, true]) {
     test(`LQO policy progress belongs to its live turn (${lifecycle}, rejected=${rejected})`, async () => {
