@@ -22,7 +22,7 @@ import { chooseMove } from '../search/puct.ts';
 import { acknowledgeInputTransfer, takePlayHandoff, writeAnalysisHandoff } from './analysisHandoff.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { acquireBigNetSearcherAsync, type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
+import { acquireBigNetSearcherAsync, type BigNetKey, peekBigNetSearcher, preparePhoneBigNet, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { createBrowserDom, htmlEscape } from './browserDom.ts';
 import {
@@ -41,6 +41,7 @@ import {
 import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
 import { writeClipboard } from './clipboard.ts';
 import { inactiveCpuEnginesToEvict, PendingCpuNewGames } from './cpuEngineResidency.ts';
+import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryClass.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
@@ -600,6 +601,15 @@ function retireUnusedPlayNeuralEngines(option?: PlayEngineOption): Promise<void>
   return awaitEngineRetirements();
 }
 
+function disposePlayCpuEngines(): void {
+  for (const id of cpuEnginePromises.keys()) disposeCachedCpuEngine(id, true);
+}
+
+function ctxAcquireBigNet(key: BigNetKey, signal: AbortSignal) {
+  const reclaim = preparePhoneBigNet(key, 2048, signal, disposePlayCpuEngines, () => ctxSetEngineNote('Freeing memory…'));
+  return reclaim ? reclaim.then(() => acquireBigNetSearcherAsync(key, false, signal)) : acquireBigNetSearcherAsync(key, false, signal);
+}
+
 function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
   if (lc0Searcher) return Promise.resolve(lc0Searcher);
   if (!lc0LoadPromise) {
@@ -753,16 +763,18 @@ function evictInactiveCpuEngines(activeId: string): void {
   for (const evictId of inactiveCpuEnginesToEvict([...cpuEnginePromises.keys()], activeId)) disposeCachedCpuEngine(evictId);
 }
 
-function disposeCachedCpuEngine(id: string): void {
+function disposeCachedCpuEngine(id: string, track = false): void {
   const pending = cpuEnginePromises.get(id);
   if (!pending) return;
   cpuEnginePromises.delete(id);
   pendingCpuNewGames.forget(id);
-  void pending.then((engine) => engine.dispose?.()).catch(() => undefined);
+  const disposal = pending.then((engine) => engine.dispose?.());
+  if (track) trackEngineRetirement(disposal);
+  else void disposal.catch(() => undefined);
 }
 
 async function ctxPreloadLqoAfterBookMove(ctx: PlayContext, signal: AbortSignal): Promise<boolean> {
-  const searcher = await acquireBigNetSearcherAsync('lqo', false, signal);
+  const searcher = await ctxAcquireBigNet('lqo', signal);
   if (searcher.loaded) return false;
   const label = `Lc0 ${searcher.config.name}`;
   ctxShowDownloadProgress(label, undefined, undefined, 'Loading in background');
@@ -803,7 +815,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
         return bookMove;
       }
     } else if (ctx.moves.length === 0) {
-      const searcher = await acquireBigNetSearcherAsync('lqo', false, signal);
+      const searcher = await ctxAcquireBigNet('lqo', signal);
       let progressShown = false;
       if (!searcher.loaded) {
         ctxSetEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
@@ -906,7 +918,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     }
   }
   if (option.family === 'lc0') {
-    const searcher = await acquireBigNetSearcherAsync(option.variant as BigNetKey, false, signal);
+    const searcher = await ctxAcquireBigNet(option.variant as BigNetKey, signal);
     if (!searcher.loaded && !signal.aborted && !ctxIsDisposed(ctx)) {
       ctxSetEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
       ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, undefined, undefined, 'Preparing');
@@ -999,7 +1011,7 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
       if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration || option.id !== ctxSelectedEngine(ctx).id) return;
       searcher.resetTree();
     } else if (option.family === 'lc0') {
-      const searcher = await acquireBigNetSearcherAsync(option.variant as BigNetKey, false, signal);
+      const searcher = await ctxAcquireBigNet(option.variant as BigNetKey, signal);
       const lqoOptions = option.variant === 'lqo' ? ctxLqoSearchOptions(ctx) : null;
       await searcher.search(
         { positions: ctx.positions },
@@ -2452,7 +2464,8 @@ export function mountPlayBrowser(): () => void {
       playRuntimeFallbackAudits.clear();
       // Stormphrax reserves a 512 MiB WASM heap, so unlike the smaller CPU
       // engines it must not remain cached after this Play route is gone.
-      disposeCachedCpuEngine('stormphrax');
+      if (isMemoryConstrainedDevice() && phoneReclaimSettings().retireCpu) disposePlayCpuEngines();
+      else disposeCachedCpuEngine('stormphrax');
       if (ctx.resignArmTimer) {
         clearTimeout(ctx.resignArmTimer);
         ctx.resignArmTimer = null;

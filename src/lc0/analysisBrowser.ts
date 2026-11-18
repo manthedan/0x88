@@ -43,7 +43,7 @@ import { CriticalAnalysisRefresh } from './criticalMoments.ts';
 import { mountCriticalMomentsPanel } from './criticalMomentsPanel.ts';
 import { criticalPositionLines } from './criticalMomentsPresentation.ts';
 import { deviceMemoryClass, isMemoryConstrainedDevice, shouldAutoAnalyzePosition } from './deviceMemoryClass.ts';
-import { awaitEngineRetirements, hasEngineRetirements, trackEngineRetirement } from './engineRetirement.ts';
+import { awaitEngineRetirements, hasEngineRetirements, terminateEngineWorker, trackEngineRetirement } from './engineRetirement.ts';
 import { withEngineTimeout } from './engineTimeout.ts';
 import { evalDetailsMarkup, evalEngineTag, evalMarkerMarkup } from './evalBarPresentation.ts';
 import { compactEvalSpread, compareEvals, evalPercent } from './evalCompare.ts';
@@ -155,7 +155,14 @@ import {
   normalizeBerserkVariant,
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
-import { acquireBigNetSearcherAsync, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
+import {
+  acquireBigNetSearcherAsync,
+  type BigNetKey,
+  disposeBigNetSearcherNow,
+  peekBigNetSearcher,
+  preparePhoneBigNet,
+  releaseBigNetSearcher,
+} from './bigNetSessionPool.ts';
 import { createBrowserDom, htmlEscape } from './browserDom.ts';
 import {
   type BrowserLc0Runtime,
@@ -920,7 +927,7 @@ function resetSearchWorker(reason: string | Error): void {
   searchWorker = null;
   if (retired) {
     if (reason instanceof Error)
-      retired.terminate(); // A broken transport cannot acknowledge release.
+      terminateEngineWorker(retired); // A broken transport cannot acknowledge release.
     else trackEngineRetirement(disposeOrtWorker(retired));
   }
   workerReady = false;
@@ -2188,6 +2195,17 @@ function getStormphraxFor(variantKey: string) {
   const unsupportedReason = stormphraxVariantUnsupportedReason(variant);
   if (unsupportedReason) throw new Error(`${variant.label} ${unsupportedReason}.`);
   return stormphraxEngines.getOrCreate(variant);
+}
+
+function disposeAnalysisCpuEngines(): void {
+  preparedCpuEngineKeys.clear();
+  disposeStockfish('lite');
+  disposeStockfish('full');
+  recklessEngines.disposeAll();
+  viridithasEngines.disposeAll();
+  berserkEngines.disposeAll();
+  plentyChessEngines.disposeAll();
+  stormphraxEngines.disposeAll();
 }
 
 function disposeUnusedEngines(): void {
@@ -4484,6 +4502,19 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     const uninitializedBigNets = bigNetsAwaitingInit(rows).filter((key) => !bigNetInitErrors.has(key));
     if (uninitializedBigNets.length) {
       activeAnalysisSelectionKey = ''; // no keys yet: navigation during init cancels this run
+      const reclaim = preparePhoneBigNet(
+        uninitializedBigNets[0],
+        ANALYSIS_BIG_NET_SESSION.evalCacheEntries,
+        controller.signal,
+        disposeAnalysisCpuEngines,
+        () => {
+          el('message').textContent = 'Freeing memory…';
+        },
+      );
+      if (reclaim) {
+        await reclaim;
+        if (controller.signal.aborted || mountAbort.signal.aborted || !analysisCanPrepare(analysisRunState, owner)) return;
+      }
       el('message').textContent = `Loading ${uninitializedBigNets.map((key) => `Lc0 ${BIG_NETS[key].name}`).join(' + ')}…`;
       const initErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted);
       for (const [key, error] of initErrors) bigNetInitErrors.set(key, error);
@@ -5755,7 +5786,7 @@ function wireEvents() {
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'prefetch');
     cancelAllAnalysisAssetPrefetches();
     cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
-    if (hiddenTab.hidden) el('message').textContent = 'Analysis stopped.';
+    if (hiddenTab.hidden || el('message').textContent === 'Freeing memory…') el('message').textContent = 'Analysis stopped.';
     // The paused run's finally already ran and left Stop enabled. Cancelling
     // the suspended search has to disable it here; that finally will not run again.
     maybeEl('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
@@ -6208,14 +6239,8 @@ function disposeRuntimeResources(): void {
     peekBigNetSearcher(key)?.cancel();
     releaseBigNetSearcher(key, 0);
   }
-  disposeStockfish('lite');
-  disposeStockfish('full');
   disposeCentipawnEvaluators();
-  recklessEngines.disposeAll();
-  viridithasEngines.disposeAll();
-  berserkEngines.disposeAll();
-  plentyChessEngines.disposeAll();
-  stormphraxEngines.disposeAll();
+  disposeAnalysisCpuEngines();
   const retiredMain = mainEvaluator;
   mainEvaluator = null;
   if (retiredMain) trackEngineRetirement(Promise.resolve(retiredMain.dispose?.()));

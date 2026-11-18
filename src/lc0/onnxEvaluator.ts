@@ -8,7 +8,7 @@ import { encodeLc0Classical112, type Lc0EncoderInput, type Lc0HistoryFill, type 
 import { trackEngineRetirement } from './engineRetirement.ts';
 import { untilAborted } from './modelCache.ts';
 import { applyOnnxFreeDimensionOverrides, type OnnxModelIo, readOnnxModelIo } from './onnxModelIo.ts';
-import { isOnnxModelParseError } from './onnxModelRecovery.ts';
+import { isOnnxModelParseError, OrtSessionFallbackError, ortErrorMessage } from './onnxModelRecovery.ts';
 import { type OrtPhysicalBatchMode, resolveOrtPhysicalBatchSize } from './ortPhysicalBatch.ts';
 import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from './policyMap.ts';
 
@@ -622,16 +622,15 @@ function gpuIoModelSpecs(modelPath: string | Uint8Array | ArrayBuffer, mode: str
 }
 
 /**
- * A WebGPU session with GPU-resident IO, or null (with a console warning) when
- * the placement is not WebGPU, the model has dynamic shapes, or ORT rejects the
- * session; the caller then builds the ordinary session.
+ * Try GPU-resident IO. Preserve the failure for the caller's ordinary session
+ * fallback, in case that also fails.
  */
 async function createLc0GpuIoSession(
   takeModel: () => string | Uint8Array | ArrayBuffer,
   mode: 'gpu' | 'gpu-capture',
   options: Lc0OnnxEvaluatorOptions,
   declared: Lc0FixedGpuIo,
-): Promise<{ session: ort.InferenceSession; binding: OrtGpuIoBinding } | null> {
+): Promise<{ session: ort.InferenceSession; binding: OrtGpuIoBinding } | { error: unknown }> {
   let modelPath = takeModel();
   let session: ort.InferenceSession | undefined;
   let binding: OrtGpuIoBinding | undefined;
@@ -689,8 +688,8 @@ async function createLc0GpuIoSession(
     options.signal?.throwIfAborted();
     const rejectParse = typeof options.rejectModelParseErrors === 'function' ? options.rejectModelParseErrors() : options.rejectModelParseErrors;
     if (rejectParse && isOnnxModelParseError(error)) throw error;
-    console.warn(`Lc0: GPU-resident ORT IO (${mode}) unavailable, using CPU IO. ${error instanceof Error ? error.message : String(error)}`);
-    return null;
+    console.warn(`Lc0: GPU-resident ORT IO (${mode}) unavailable, using CPU IO. ${ortErrorMessage(error)}`);
+    return { error };
   }
 }
 
@@ -726,6 +725,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   private static async createFromSource(takeModel: () => string | Uint8Array | ArrayBuffer, options: Lc0OnnxEvaluatorOptions): Promise<Lc0OnnxEvaluator> {
     options.signal?.throwIfAborted();
     let modelPath = takeModel();
+    let gpuIoFailure: { error: unknown } | undefined;
     const declared = options.ioMode === 'gpu' || options.ioMode === 'gpu-capture' ? gpuIoModelSpecs(modelPath, options.ioMode, options) : null;
     if ((options.ioMode === 'gpu' || options.ioMode === 'gpu-capture') && declared) {
       const placement = await untilAborted(ort.resolveOrtSessionPlacement(), options.signal);
@@ -736,18 +736,25 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
         // can reacquire them only if the actual GPU attempt fails.
         if (options.reloadModel) modelPath = undefined as never;
         const gpu = await creating;
-        if (gpu) return new Lc0OnnxEvaluator(gpu.session, options, { binding: gpu.binding, mode: options.ioMode });
-        if (options.reloadModel) modelPath = await untilAborted(options.reloadModel(), options.signal);
+        if ('session' in gpu) return new Lc0OnnxEvaluator(gpu.session, options, { binding: gpu.binding, mode: options.ioMode });
+        gpuIoFailure = gpu;
       }
     }
-    const creating = ort.createOrtSession(modelPath, {
-      signal: options.signal,
-      wasmFallbackModel: options.wasmFallbackModel,
-      reloadModel: options.reloadModel,
-      rejectModelParseErrors: options.rejectModelParseErrors,
-    });
-    modelPath = undefined as never;
-    return new Lc0OnnxEvaluator(await creating, options);
+    try {
+      if (gpuIoFailure && options.reloadModel) modelPath = await untilAborted(options.reloadModel(), options.signal);
+      const creating = ort.createOrtSession(modelPath, {
+        signal: options.signal,
+        wasmFallbackModel: options.wasmFallbackModel,
+        reloadModel: options.reloadModel,
+        rejectModelParseErrors: options.rejectModelParseErrors,
+      });
+      modelPath = undefined as never;
+      return new Lc0OnnxEvaluator(await creating, options);
+    } catch (error) {
+      if (!gpuIoFailure) throw error;
+      options.signal?.throwIfAborted();
+      throw new OrtSessionFallbackError(ortErrorMessage(gpuIoFailure.error), error);
+    }
   }
 
   dispose(): Promise<void> {

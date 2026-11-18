@@ -78,6 +78,7 @@ test('Analysis runtime teardown publishes main-thread fallback release to the re
     let mainEvaluator={dispose:()=>release},searcher={},lc0ServedModelUrl='small';
     const preparedCpuEngineKeys=new Set(),cpu={disposeAll(){}};
     const recklessEngines=cpu,viridithasEngines=cpu,berserkEngines=cpu,plentyChessEngines=cpu,stormphraxEngines=cpu;
+    ${extract(source('analysisBrowser'), 'function disposeAnalysisCpuEngines():', 'function disposeUnusedEngines():')}
     ${extract(source('analysisBrowser'), 'function disposeRuntimeResources():', 'function disposePageResources():')}
     return disposeRuntimeResources;
   `,

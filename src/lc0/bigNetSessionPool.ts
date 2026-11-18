@@ -1,7 +1,8 @@
 import { BIG_NETS, type BigNetConfig, Bt4WorkerSearcher } from './bt4Engine.ts';
-import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
-import { trackEngineRetirement } from './engineRetirement.ts';
+import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryClass.ts';
+import { awaitEngineRetirements, awaitWorkerReclaim, hasEngineRetirements, trackEngineRetirement } from './engineRetirement.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
+import { untilAborted } from './modelCache.ts';
 import { PHONE_LARGE_NET_REASON, phoneBigNetBlocked } from './phoneLargeNetPolicy.ts';
 
 export type BigNetKey = BigNetConfig['key'];
@@ -173,6 +174,33 @@ export async function acquireBigNetSearcherAsync(key: BigNetKey, exclusive = fal
     throw new Error(PHONE_LARGE_NET_REASON);
   }
   return searcher;
+}
+
+/** Cold phone loads only; callers must not add an await on the desktop/warm path. */
+export function preparePhoneBigNet(
+  key: BigNetKey,
+  evalCacheEntries: number,
+  signal: AbortSignal,
+  retireCpu: () => void,
+  onWait: () => void,
+  exclusive = false,
+): Promise<void> | undefined {
+  if (!isMemoryConstrainedDevice() || phoneBigNetBlocked(key)) return;
+  signal.throwIfAborted();
+  if (exclusive) defaultPool.releaseUnused([key], 0);
+  const existing = defaultPool.peek(key);
+  if (existing?.isInitializedFor({ evalCacheEntries })) return;
+  // A differently configured warm session would otherwise retire inside init(),
+  // after the reclaim gate. Leave same-owner in-flight cold loads alone.
+  if (existing?.loaded) defaultPool.disposeNow(key);
+  const settings = phoneReclaimSettings();
+  if (settings.retireCpu) retireCpu();
+  return (async () => {
+    do {
+      if (hasEngineRetirements()) await untilAborted(awaitEngineRetirements(), signal);
+      await awaitWorkerReclaim(settings.reclaimGapMs, signal, onWait);
+    } while (hasEngineRetirements());
+  })();
 }
 
 export function releaseBigNetSearcher(key: BigNetKey, idleTtlMs = BIG_NET_SESSION_IDLE_TTL_MS): void {

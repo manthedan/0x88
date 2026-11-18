@@ -25,6 +25,32 @@ export function isMemoryConstrainedDevice(
   return typeof memory !== 'number' || !Number.isFinite(memory) || memory <= 4;
 }
 
+const RECLAIM_GAP_KEY = '0x88-reclaim-gap-ms';
+const RETIRE_CPU_KEY = '0x88-retire-cpu';
+
+export function phoneReclaimSettings(): { reclaimGapMs: number; retireCpu: boolean } {
+  const search = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
+  const setting = (key: string, valid: (value: string) => boolean): string | null => {
+    const raw = search.get(key);
+    if (raw !== null && valid(raw)) {
+      try {
+        globalThis.localStorage?.setItem(key, raw);
+      } catch {
+        // The URL still works when persistent storage is unavailable.
+      }
+      return raw;
+    }
+    try {
+      const stored = globalThis.localStorage?.getItem(key);
+      return stored != null && valid(stored) ? stored : null;
+    } catch {
+      return null;
+    }
+  };
+  const gap = setting(RECLAIM_GAP_KEY, (value) => value.trim() !== '' && Number.isFinite(Number(value)) && Number(value) >= 0);
+  return { reclaimGapMs: gap === null ? 20_000 : Number(gap), retireCpu: setting(RETIRE_CPU_KEY, (value) => value === '0' || value === '1') !== '0' };
+}
+
 export type DeviceMemoryClass = 'phone' | 'tablet' | 'desktop';
 
 /** Safari exposes no RAM size; use conservative device classes, with a diagnostic override. */

@@ -7,7 +7,7 @@ import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { type CriticalLane, type CriticalMoment, type CriticalProvenance, type CriticalResult } from './criticalMoments.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { cpuEngineHashMbForSurface } from './engineProvision.ts';
-import { awaitEngineRetirements, trackEngineRetirement } from './engineRetirement.ts';
+import { awaitEngineRetirements, terminateEngineWorker, trackEngineRetirement } from './engineRetirement.ts';
 import { withEngineTimeout } from './engineTimeout.ts';
 import { LC0_SMALL_BATCH1_QDQ8_PATH } from './lc0SmallModelSelection.ts';
 import { MAIA3_DEFAULT_MODEL_URL, Maia3BrowserEvaluator } from './maia3.ts';
@@ -35,7 +35,7 @@ export function createCriticalEngines(
   // Reserve CPU capacity even for neural providers: ORT may fall back to WASM.
   for (const id of ids) broker.register(id, { resourceClass: 'cpu', maxThreads: 1 });
   const stopWorker = () => {
-    worker?.terminate();
+    terminateEngineWorker(worker);
     worker = undefined;
     for (const request of pending.values()) request.reject(new DOMException('Report worker stopped', 'AbortError'));
     pending.clear();

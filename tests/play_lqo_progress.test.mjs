@@ -25,7 +25,7 @@ for (const lifecycle of ['current', 'cancelled', 'disposed']) {
         retireUnusedPlayNeuralEngines: async () => {},
         ctxSelectedEngine: () => ({ family: 'lc0', variant: 'lqo' }),
         ctxStrengthFor: () => 1,
-        acquireBigNetSearcherAsync: async () => searcher,
+        ctxAcquireBigNet: async () => searcher,
         ctxSetEngineNote: (...args) => writes.push(['note', ...args]),
         ctxShowDownloadProgress: (...args) => writes.push(['show', ...args]),
         ctxHideDownloadProgress: () => writes.push(['hide']),

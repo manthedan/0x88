@@ -5,6 +5,7 @@ import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { type OrtSessionDiagnostics, ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
+import { terminateEngineWorker } from './engineRetirement.ts';
 import { MAIA3_ORT_DEFAULTS } from './maia3RuntimeConfig.ts';
 import { clearLc0ModelCacheEntry, type Lc0ModelLoadInfo, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
 import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
@@ -557,7 +558,7 @@ export class Maia3BrowserEvaluator {
     this.worker.removeEventListener('error', this.errorListener);
     this.worker.removeEventListener('messageerror', this.messageErrorListener);
     if (!alreadyTerminated && !this.disposing) {
-      if (crashed) this.worker.terminate();
+      if (crashed) terminateEngineWorker(this.worker);
       else {
         this.closing = disposeOrtWorker(this.worker);
         void this.closing.catch(() => undefined);

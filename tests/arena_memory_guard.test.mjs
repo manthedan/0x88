@@ -108,8 +108,13 @@ test('safe gauntlet warmup uses only each game on phones; desktop still warms th
     const bigNetFor = new Function(
       'BIG_NETS',
       'acquireBigNetSearcherAsync',
+      'isMemoryConstrainedDevice',
       `${extract('async function bigNetFor(', '\nlet runtimeIsolation')}\nreturn bigNetFor;`,
-    )(BIG_NETS, (key, exclusive) => pool.acquireAsync(key, exclusive));
+    )(
+      BIG_NETS,
+      (key, exclusive) => pool.acquireAsync(key, exclusive),
+      () => false,
+    );
     const deps = {
       seatIds: ['sf:lite:8', 'lc0:bt4:100', 'lc0:t3:100'],
       matchAbort: new AbortController(),

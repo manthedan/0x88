@@ -24,6 +24,7 @@ import {
 import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
+import { terminateEngineWorker } from './engineRetirement.ts';
 import { lc0SplitKUrl } from './lc0SmallModelSelection.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { PHONE_LARGE_NET_SUFFIX, phoneBigNetBlocked } from './phoneLargeNetPolicy.ts';
@@ -573,7 +574,7 @@ export class Bt4WorkerSearcher {
 
   private invalidate(worker: Worker | null, error: Error, terminate = true): void {
     if (this.worker !== worker) return;
-    if (terminate) worker?.terminate();
+    if (terminate) terminateEngineWorker(worker);
     this.worker = null;
     this.ready = false;
     this.initPromise = null;

@@ -5,7 +5,7 @@ export * from 'onnxruntime-web/webgpu';
 import * as ort from 'onnxruntime-web/webgpu';
 import { trackEngineRetirement } from '../lc0/engineRetirement.ts';
 import { untilAborted } from '../lc0/modelCache.ts';
-import { isOnnxModelParseError } from '../lc0/onnxModelRecovery.ts';
+import { isOnnxModelParseError, OrtSessionFallbackError, ortErrorMessage } from '../lc0/onnxModelRecovery.ts';
 import { supportsWasmRelaxedSimdIntegerDot } from '../lc0/wasmFeatures.ts';
 import { foldOnnxDequantizeLinear } from './onnxDequantFold.ts';
 
@@ -1559,6 +1559,7 @@ async function createOrtSessionFromSource(takeModel: () => OrtModelInput, option
   const wasmFallback = !options.webgpuOnly && shouldFallbackToWasmAfterOrtFailure(requestedOrtExecutionProvider(), providers);
   const attempts = planOrtSessionAttempts(prepared, providers, wasmFallback, options);
   prepared = undefined;
+  let firstMessage: string | undefined;
   let lastMessage: string | null = null;
   for (let i = 0; i < attempts.length; i++) {
     const attempt = attempts[i];
@@ -1588,12 +1589,14 @@ async function createOrtSessionFromSource(takeModel: () => OrtModelInput, option
     } catch (err) {
       options.signal?.throwIfAborted();
       const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
-      lastMessage = err instanceof Error ? err.message : String(err);
+      lastMessage = ortErrorMessage(err);
       recordSessionAttempt(attempt.providers, false, t1 - t0, lastMessage);
       const rejectParse = typeof options.rejectModelParseErrors === 'function' ? options.rejectModelParseErrors() : options.rejectModelParseErrors;
-      if (rejectParse && isOnnxModelParseError(err)) throw err;
       const next = attempts[i + 1];
-      if (!next) throw err;
+      if (!next || (rejectParse && isOnnxModelParseError(err))) {
+        throw firstMessage === undefined ? err : new OrtSessionFallbackError(firstMessage, err);
+      }
+      firstMessage ??= lastMessage;
       if (next.kind !== 'wasm-fallback') {
         discardDequantFold(lastMessage);
         console.warn(`Centipawn: ORT session failed on the dequantize-folded model; retrying with the original bytes. ${lastMessage}`);

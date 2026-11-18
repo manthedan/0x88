@@ -1,5 +1,6 @@
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { type BrowserUciAnalysisOptions, type BrowserUciEngine, type BrowserUciSearchOptions, uciPositionCommand } from './browserUciEngine.ts';
+import { terminateEngineWorker } from './engineRetirement.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import type { RecklessOptions } from './recklessEngine.ts';
 import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './stockfishEngine.ts';
@@ -227,7 +228,7 @@ export class ViridithasEngine implements BrowserUciEngine {
 
   private disposeWorker(): void {
     if (this.sharedInput) closeSharedInput(this.sharedInput);
-    this.worker?.terminate();
+    terminateEngineWorker(this.worker);
     this.worker = null;
     this.workerMode = null;
     this.sharedInput = null;

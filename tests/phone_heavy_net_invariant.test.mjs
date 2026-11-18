@@ -5,7 +5,7 @@ import test from 'node:test';
 import * as pool from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
 import { createCriticalEngines } from '../src/lc0/criticalMomentsEngines.ts';
-import { isMemoryConstrainedDevice } from '../src/lc0/deviceMemoryClass.ts';
+import { isMemoryConstrainedDevice, phoneReclaimSettings } from '../src/lc0/deviceMemoryClass.ts';
 import { disposeOrtWorker } from '../src/lc0/disposeOrtWorker.ts';
 import { isLc0BigNetVariant } from '../src/lc0/engineCatalog.ts';
 import * as retirement from '../src/lc0/engineRetirement.ts';
@@ -43,6 +43,7 @@ function link(code, deps = {}) {
     ...retirement,
     BIG_NETS,
     isMemoryConstrainedDevice,
+    phoneReclaimSettings,
     isLc0BigNetVariant,
     untilAborted,
     el: node,
@@ -51,7 +52,7 @@ function link(code, deps = {}) {
   return new Function(...Object.keys(bindings), `return ${stripTypeScriptTypes(`(function run(){\n${code}\n})()`)}`)(...Object.values(bindings));
 }
 
-function nativeModels(t, { phone = true } = {}) {
+function nativeModels(t, { phone = true, gap = 0, retireCpu = true } = {}) {
   const trace = [];
   const models = [];
   const active = new Set();
@@ -109,7 +110,8 @@ function nativeModels(t, { phone = true } = {}) {
   }
   const previousLocation = globalThis.location;
   const previousWorker = globalThis.Worker;
-  globalThis.location = new URL(`https://test.invalid/?memoryClass=${phone ? 'phone' : 'desktop'}`);
+  // The original residency cases isolate terminal disposal from the optional time gap.
+  globalThis.location = new URL(`https://test.invalid/?memoryClass=${phone ? 'phone' : 'desktop'}&0x88-reclaim-gap-ms=${gap}&0x88-retire-cpu=${+retireCpu}`);
   globalThis.Worker = Worker;
   phoneLargeNetPreference.setEnabled(true); // Consent has been granted; phone residency must still apply.
   t.after(async () => {
@@ -125,6 +127,23 @@ function nativeModels(t, { phone = true } = {}) {
   assert.equal(isMemoryConstrainedDevice(), phone);
   assert.equal(phoneBigNetBlocked('bt4'), false);
   return {
+    trace,
+    StockfishEngine: class {
+      constructor(options, url) {
+        this.options = options;
+        this.url = url;
+      }
+      analyze(depth) {
+        if (!this.worker) {
+          this.worker = new Worker();
+          this.worker.start('sf-lite');
+        }
+        this.depth = depth;
+      }
+      dispose() {
+        retirement.terminateEngineWorker(this.worker);
+      }
+    },
     createMaia({ signal }) {
       const model = new Worker();
       model.signal = signal;
@@ -158,7 +177,7 @@ function playOwner(native) {
       board:{turn:'w'},humanColor:'w',positions:[],moves:[],listeners:[],opponent:{active:{maiaElo:1500}}};
     let option=maia;
     let maia3Promise=null,maia3Status=null,maia3Abort=null,lc0LoadPromise=null;
-    const playCentipawn={clear(){}};
+    const playCentipawn={clear(){}},cpuEnginePromises=new Map();
     const ctxSelectedEngine=()=>option;
     const hook=()=>{},releaseDom=()=>{};
     ${slice(play, 'function retireUnusedPlayNeuralEngines(', 'function ctxEnsureLc0Small(')}
@@ -202,30 +221,39 @@ function playOwner(native) {
 }
 
 function analysisOwner(native) {
+  const message = {};
   return link(
     `
     const mountAbort=new AbortController();
     let explorerMaia=null, activeAnalysisSelectionKey='';
     const analysisRunState={},owner={};
-    let analysisAbort=null, criticalDeferredMaia=false;
-    const tree={current:{fen:''}};
+    let analysisAbort=null, criticalDeferredMaia=false,stockfishLite=null,stockfishFull=null;
+    const tree={current:{fen:''}},preparedCpuEngineKeys=new Set(),cpu={disposeAll(){}};
+    const recklessEngines=cpu,viridithasEngines=cpu,berserkEngines=cpu,plentyChessEngines=cpu,stormphraxEngines=cpu;
+    ${slice(analysis, 'function threadedStockfishAvailable()', 'const ANALYSIS_CPU_ENGINE_OPTIONS')}
+    ${slice(analysis, 'function disposeAnalysisCpuEngines()', 'function disposeUnusedEngines()')}
     const criticalCallbacks={${slice(analysis, '    pauseAnalysis: (maiaOwner) => {', '    updateView: (moment, lines) => {')}};
     ${slice(analysis, 'async function bigNetFor(', '\n}', analysis.indexOf('async function bigNetFor('))}}
     ${slice(analysis, 'const ANALYSIS_BIG_NET_SESSION', '/** After initBigNetsForRun')}
     ${slice(analysis, 'const MAIA3_PANEL_RATINGS', 'function scheduleMaia3Panel()')}
-    async function prepare(rows){
-      const controller=new AbortController();
+    async function prepare(rows, controller = new AbortController()){
       try {
         ${slice(analysis, '    const bigNetInitErrors =', '    snapshotBigNetServedModels(rows);')}
+        for (const row of rows) if (row.family === 'sf') getStockfish('lite').analyze(row.strength);
         return bigNetInitErrors;
       } finally {
         ${slice(analysis, '    if (maia3PanelBlockedByRun === controller)', '\n    }', analysis.indexOf('async function performAnalysis(owner:'))}
         }
       }
     }
-    return {prepare,enableMaia3Panel,unloadMaia3Panel,...criticalCallbacks};`,
+    return {prepare,enableMaia3Panel,unloadMaia3Panel,...criticalCallbacks,getStockfish,message,disposeAnalysisCpuEngines};`,
     {
       ANALYSIS_BIG_NET_KEYS: keys,
+      message,
+      el: (id) => (id === 'message' ? message : node()),
+      StockfishEngine: native.StockfishEngine,
+      stockfishFlavorUrl: (flavor) => flavor,
+      cpuEngineHashMbForSurface: () => 128,
       analysisCanPrepare: () => true,
       maybeEl: node,
       dispatchAnalysis: nop,
@@ -246,7 +274,7 @@ function analysisOwner(native) {
   );
 }
 
-function arenaOwner() {
+function arenaOwner(disposeArenaCpuEngines = nop) {
   return link(
     `
     let seats=[],running=false,startPending=false,lc0Cache=null,loadingLc0=false;
@@ -257,12 +285,15 @@ function arenaOwner() {
     ${slice(arena, 'async function warmUpSelectedEngines(', 'function legalFromUci(')}
     const activeSeatRows=()=>seats;
     return {
-      seat:(key)=>{seats=[row(key)];reconcileArenaNeuralSessions();engines.set(key,{warmup:lc0BigNetWarmup(key)});},
+      seat:(key)=>{seats=[row(key)];reconcileArenaNeuralSessions();engines.set(key,{bigNet:true,warmup:lc0BigNetWarmup(key)});},
+      addCpu:(warmup)=>engines.set('cpu',{warmup}),
       warmup:(key,signal)=>warmUpSelectedEngines([key],signal,0),
+      warmupPair:(key,signal)=>warmUpSelectedEngines(['cpu',key],signal,0),
     };`,
     {
       row,
       ARENA_BIG_NET_KEYS: keys,
+      disposeArenaCpuEngines,
       arenaCacheEntries: () => 2048,
       showDownloadProgress: nop,
       hideDownloadProgress: nop,
@@ -392,6 +423,124 @@ test('phone critical-moment Maia3 replaces BT4 and retires before the next net',
   (await native.get('t3')).finishInit();
   assert.equal((await replacement).size, 0);
   native.assertPeak();
+});
+
+let fakeEpoch = 0;
+function fakeTime(t) {
+  fakeEpoch += 1_000_000;
+  let now = fakeEpoch;
+  t.mock.method(performance, 'now', () => now);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  return async (ms) => {
+    now += ms;
+    t.mock.timers.tick(ms);
+    await tick();
+  };
+}
+
+for (const [name, phone, gap, elapsed, remaining] of [
+  ['recent', true, 20000, 6000, 14000],
+  ['old', true, 20000, 21000, 0],
+  ['disabled', true, 0, 1, 0],
+  ['desktop', false, 20000, 1, 0],
+]) {
+  test(`${name}: Analysis counts reclaim time from the Play worker termination`, async (t) => {
+    const native = nativeModels(t, { phone, gap });
+    const advance = fakeTime(t);
+    const play = playOwner(native);
+    const loading = play.prepare();
+    const maia = await native.get('maia3');
+    maia.finishInit();
+    await loading;
+    assert.equal(play.analyzeThisGame(), '1. e4 *');
+    await tick();
+    maia.finishDispose();
+    await awaitEngineRetirements();
+    await advance(elapsed);
+    const analysis = analysisOwner(native);
+    const run = analysis.prepare([row('bt4')]);
+    if (!phone) assert.equal(analysis.message.textContent, `Loading Lc0 ${BIG_NETS.bt4.name}…`, 'desktop reaches model init without an added yield');
+    if (remaining) {
+      assert.equal(analysis.message.textContent, 'Freeing memory…');
+      await advance(remaining - 1);
+      assert.deepEqual(native.initializing(), ['maia3']);
+      await advance(1);
+    }
+    (await native.get('bt4')).finishInit();
+    assert.equal((await run).size, 0);
+    native.assertPeak();
+  });
+}
+
+test('cancelling Analysis during reclaim does not start a model or restart a retired CPU row', async (t) => {
+  const native = nativeModels(t, { gap: 20000 });
+  const advance = fakeTime(t);
+  const owner = analysisOwner(native);
+  const cpu = { family: 'sf', variant: 'lite', strength: 12 };
+  await owner.prepare([cpu]);
+  const controller = new AbortController();
+  const run = assert.rejects(owner.prepare([cpu, row('bt4')], controller), { name: 'AbortError' });
+  assert.equal(owner.message.textContent, 'Freeing memory…');
+  controller.abort();
+  await run;
+  await advance(20000);
+  assert.deepEqual(
+    native.trace.map(({ name, phase }) => `${name}:${phase}`),
+    ['sf-lite:init', 'sf-lite:terminated'],
+  );
+});
+
+for (const retireCpu of [true, false]) {
+  test(`Analysis CPU reclaim override=${+retireCpu}: the selected SF Lite row resumes at the same settings`, async (t) => {
+    const native = nativeModels(t, { gap: 20000, retireCpu });
+    const advance = fakeTime(t);
+    const owner = analysisOwner(native);
+    t.after(owner.disposeAnalysisCpuEngines);
+    const cpu = { family: 'sf', variant: 'lite', strength: 12 };
+    await owner.prepare([cpu]);
+    const previous = owner.getStockfish('lite');
+    const run = owner.prepare([cpu, row('bt4')]);
+    if (retireCpu) {
+      assert.equal(native.trace.at(-1).phase, 'terminated');
+      await advance(19999);
+      assert.deepEqual(native.initializing(), ['sf-lite']);
+      await advance(1);
+    }
+    (await native.get('bt4')).finishInit();
+    await run;
+    const current = owner.getStockfish('lite');
+    assert.equal(current === previous, !retireCpu);
+    assert.equal(current.depth, cpu.strength);
+    assert.equal(current.url, previous.url);
+    assert.deepEqual(current.options, previous.options);
+    if (retireCpu)
+      assert.deepEqual(
+        native.trace.slice(-2).map(({ name, phase }) => `${name}:${phase}`),
+        ['bt4:ready', 'sf-lite:init'],
+      );
+  });
+}
+
+test('Arena warms the large net before restarting its retired CPU opponent, even with the CPU seat first', async (t) => {
+  const native = nativeModels(t, { gap: 20000 });
+  const advance = fakeTime(t);
+  const cpu = new native.StockfishEngine({}, 'lite');
+  cpu.analyze(1);
+  const arena = arenaOwner(() => cpu.dispose());
+  arena.seat('bt4');
+  const restarted = new native.StockfishEngine({}, 'lite');
+  arena.addCpu(() => restarted.analyze(1));
+  const run = arena.warmupPair('bt4', new AbortController().signal);
+  await tick();
+  assert.equal(native.trace.at(-1).phase, 'terminated');
+  await advance(20000);
+  (await native.get('bt4')).finishInit();
+  await run;
+  assert.deepEqual(
+    native.trace.slice(-2).map(({ name, phase }) => `${name}:${phase}`),
+    ['bt4:ready', 'sf-lite:init'],
+  );
+  restarted.dispose();
 });
 
 for (const phone of [true, false]) {

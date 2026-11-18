@@ -6,7 +6,7 @@ import { BIG_NET_SESSION_IDLE_TTL_MS, BigNetSessionPool } from '../src/lc0/bigNe
 
 // Execute the actual page disposal functions, not a duplicate policy helper.
 const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
-const unused = source.slice(source.indexOf('function disposeUnusedEngines()'), source.indexOf('function bestShapes()'));
+const unused = source.slice(source.indexOf('function disposeAnalysisCpuEngines()'), source.indexOf('function bestShapes()'));
 const runtime = source.slice(source.indexOf('function disposeRuntimeResources()'), source.indexOf('function disposePageResources()'));
 function controller(activeKeys = []) {
   const events = [],

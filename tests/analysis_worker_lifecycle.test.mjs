@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 import { disposeOrtWorker } from '../src/lc0/disposeOrtWorker.ts';
+import { terminateEngineWorker } from '../src/lc0/engineRetirement.ts';
 
 // Exercise the actual controller functions with only browser/transport effects
 // stubbed. Importing the page would mount its DOM and load model assets.
@@ -53,7 +54,7 @@ function controller() {
   `,
     { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
   );
-  return { ...new Function('Worker', 'disposeOrtWorker', code)(Worker, disposeOrtWorker), workers };
+  return { ...new Function('Worker', 'disposeOrtWorker', 'terminateEngineWorker', code)(Worker, disposeOrtWorker, terminateEngineWorker), workers };
 }
 
 for (const type of ['error', 'messageerror']) {

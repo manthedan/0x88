@@ -22,6 +22,7 @@ import { el, htmlEscape, inputEl, selectEl } from './browserDom.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { isV0DeployProfile } from './engineCatalog.ts';
 import { cpuEngineHashMbForSurface } from './engineProvision.ts';
+import { terminateEngineWorker } from './engineRetirement.ts';
 import { buildBoardHistoryFromMoves } from './history.ts';
 import { FenInputFixtureListSchema, HistoryInputFixtureListSchema } from './inputFixtureSchema.ts';
 import { createLc0OnnxEvaluatorFromUrl } from './lc0SmallModelSelection.ts';
@@ -1439,7 +1440,7 @@ function ensureSearchWorkerInstance(): void {
 function replaceSearchWorkerForOrtFallback(): void {
   for (const pending of workerPending.values()) pending.reject(new Error('LC0 search worker restarting with fixed SIMD ORT'));
   workerPending.clear();
-  searchWorker?.terminate();
+  terminateEngineWorker(searchWorker);
   searchWorker = null;
   searchWorkerReady = false;
   ensureSearchWorkerInstance();
@@ -4368,9 +4369,8 @@ async function ensureBattleWorker(): Promise<boolean> {
     try {
       await initSearchWorker();
     } catch (error) {
-      // initSearchWorker may have created the worker before failing; cast past
-      // the narrowing of the module-level binding to tear it down.
-      (searchWorker as Worker | null)?.terminate();
+      // initSearchWorker may have created the worker before failing.
+      terminateEngineWorker(searchWorker);
       searchWorker = null;
       searchWorkerReady = false;
       console.warn('LC0 battle worker unavailable; using main-thread search.', error);
@@ -4631,9 +4631,9 @@ function disposeRuntimeResources(): void {
   battleAbort?.abort();
   if (activeWorkerSearchId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
   activeWorkerSearchId = null;
-  searchWorker?.terminate();
+  terminateEngineWorker(searchWorker);
   searchWorker = null;
-  searchLabWorker?.terminate();
+  terminateEngineWorker(searchLabWorker);
   searchLabWorker = null;
   searchWorkerReady = false;
   searchWorkerOrtWasm = undefined;
@@ -4796,7 +4796,7 @@ async function init(mountSignal: AbortSignal) {
         try {
           await initSearchWorker();
         } catch (error) {
-          searchWorker?.terminate();
+          terminateEngineWorker(searchWorker);
           searchWorker = null;
           searchWorkerReady = false;
           useSearchWorker = false;

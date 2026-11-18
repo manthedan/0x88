@@ -79,7 +79,14 @@ import {
   normalizeBerserkVariant,
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
-import { acquireBigNetSearcherAsync, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
+import {
+  acquireBigNetSearcherAsync,
+  type BigNetKey,
+  disposeBigNetSearcherNow,
+  peekBigNetSearcher,
+  preparePhoneBigNet,
+  releaseBigNetSearcher,
+} from './bigNetSessionPool.ts';
 import { boardCheck } from './boardUx.ts';
 import { createBrowserDom, htmlEscape } from './browserDom.ts';
 import {
@@ -110,7 +117,7 @@ import {
 } from './bt4Engine.ts';
 import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
 import { type ChartSeries, hBarChartSvg, lineChartSvg } from './charts.ts';
-import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
+import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryClass.ts';
 import { DisposableVariantPool } from './disposableVariantPool.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import {
@@ -235,6 +242,7 @@ interface ArenaEngine {
   move(positions: BoardState[], signal: AbortSignal): Promise<string | null>;
   warmup?(signal: AbortSignal): Promise<void>;
   warmupStatus?: ArenaWarmupStatus;
+  bigNet?: true;
 }
 interface GameRecord {
   pgn: string;
@@ -508,8 +516,21 @@ function abortArenaPickerConsent(): void {
   arenaPickerConsentAbort?.abort();
   arenaPickerConsentAbort = null;
 }
-async function bigNetFor(variant: string, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
+async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
   const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
+  const reclaim =
+    isMemoryConstrainedDevice() &&
+    preparePhoneBigNet(
+      key,
+      arenaCacheEntries(),
+      signal,
+      disposeArenaCpuEngines,
+      () => {
+        el('message').textContent = 'Freeing memory…';
+      },
+      true,
+    );
+  if (reclaim) await reclaim;
   return { config: BIG_NETS[key], searcher: await acquireBigNetSearcherAsync(key, true, signal) };
 }
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
@@ -3295,6 +3316,27 @@ function buildEngines() {
     await engine.newGame(signal);
     renderStormphraxRuntimeInfo();
   };
+  function bindCpuSeat<T>(
+    id: string,
+    name: string,
+    row: EngineRow,
+    get: (variant: string) => T,
+    move: (id: string, row: EngineRow, engine: T) => ArenaEngine['move'],
+    warmup: (engine: T) => NonNullable<ArenaEngine['warmup']>,
+  ): void {
+    if (isMemoryConstrainedDevice()) {
+      // A gauntlet may retire these workers between games; do not capture one.
+      engines.set(id, {
+        id,
+        name,
+        move: (...args) => move(id, row, get(row.variant))(...args),
+        warmup: (signal) => warmup(get(row.variant))(signal),
+      });
+    } else {
+      const engine = get(row.variant);
+      engines.set(id, { id, name, move: move(id, row, engine), warmup: warmup(engine) });
+    }
+  }
   for (const row of activeSeatRows()) {
     const id = engineIdForRow(row);
     if (engines.has(id)) continue;
@@ -3303,7 +3345,7 @@ function buildEngines() {
     const suffix = fixedBudget ? ` ${row.strength}${meta.unit}` : '';
     const name = `${rowLabel(row)}${suffix}`;
     if (row.family === 'lc0') {
-      if (isLc0BigNetVariant(row.variant)) engines.set(id, { id, name, move: lc0BigNetMove(id, row), warmup: lc0BigNetWarmup(row.variant) });
+      if (isLc0BigNetVariant(row.variant)) engines.set(id, { id, name, bigNet: true, move: lc0BigNetMove(id, row), warmup: lc0BigNetWarmup(row.variant) });
       else engines.set(id, { id, name, move: lc0Search(id, row), warmup: lc0SearchWarmup(id) });
     } else if (row.family === 'centipawn') {
       engines.set(id, { id, name, move: centipawnMove(id, row), warmup: centipawnWarmup(row) });
@@ -3322,14 +3364,11 @@ function buildEngines() {
         });
         continue;
       }
-      const engine = getRecklessFor(row.variant);
-      engines.set(id, { id, name, move: recklessMove(id, row, engine), warmup: recklessWarmup(engine) });
+      bindCpuSeat(id, name, row, getRecklessFor, recklessMove, recklessWarmup);
     } else if (row.family === 'viridithas') {
-      const engine = getViridithasFor(row.variant);
-      engines.set(id, { id, name, move: viridithasMove(id, row, engine), warmup: viridithasWarmup(engine) });
+      bindCpuSeat(id, name, row, getViridithasFor, viridithasMove, viridithasWarmup);
     } else if (row.family === 'berserk') {
-      const engine = getBerserkFor(row.variant);
-      engines.set(id, { id, name, move: berserkMove(id, row, engine), warmup: berserkWarmup(engine) });
+      bindCpuSeat(id, name, row, getBerserkFor, berserkMove, berserkWarmup);
     } else if (row.family === 'plentychess') {
       const variant = plentyChessVariantForKey(row.variant);
       const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
@@ -3343,8 +3382,7 @@ function buildEngines() {
         });
         continue;
       }
-      const engine = getPlentyChessFor(row.variant);
-      engines.set(id, { id, name, move: plentyChessMove(id, row, engine), warmup: plentyChessWarmup(engine) });
+      bindCpuSeat(id, name, row, getPlentyChessFor, plentyChessMove, plentyChessWarmup);
     } else {
       const variant = stormphraxVariantForKey(row.variant);
       const unsupportedReason = stormphraxVariantUnsupportedReason(variant);
@@ -3358,8 +3396,7 @@ function buildEngines() {
         });
         continue;
       }
-      const engine = getStormphraxFor(row.variant);
-      engines.set(id, { id, name, move: stormphraxMove(id, row, engine), warmup: stormphraxWarmup(engine) });
+      bindCpuSeat(id, name, row, getStormphraxFor, stormphraxMove, stormphraxWarmup);
     }
   }
   renderRecklessRuntimeInfo();
@@ -3601,6 +3638,10 @@ async function warmUpSelectedEngines(ids: string[], signal: AbortSignal, minimum
     pending.push(engine);
   }
   if (!pending.length) return;
+  // Warm the large net before (re)creating its CPU opponent.
+  if (pending.some((engine) => engine.bigNet) && isMemoryConstrainedDevice() && phoneReclaimSettings().retireCpu) {
+    pending.sort((a, b) => Number(!!b.bigNet) - Number(!!a.bigNet));
+  }
   el('message').textContent = 'Preparing engines…';
   const visibleSince = performance.now();
   try {
@@ -4634,15 +4675,7 @@ function disposeLc0Resources(): void {
   activeEngineIds = [];
 }
 
-function disposeRuntimeResources(): void {
-  abortArenaPickerConsent();
-  arenaDownloadApprovals.clear();
-  abort?.abort();
-  abort = null;
-  arenaSearchProgress.clear();
-  hideDownloadProgress();
-  disposeLc0Resources();
-  centipawnCache.clear();
+function disposeArenaCpuEngines(): void {
   disposeStockfish();
   for (const engine of isolatedCpuEngines) engine.dispose();
   isolatedCpuEngines.clear();
@@ -4652,6 +4685,18 @@ function disposeRuntimeResources(): void {
   berserkEngines.disposeAll();
   plentyChessEngines.disposeAll();
   stormphraxEngines.disposeAll();
+}
+
+function disposeRuntimeResources(): void {
+  abortArenaPickerConsent();
+  arenaDownloadApprovals.clear();
+  abort?.abort();
+  abort = null;
+  arenaSearchProgress.clear();
+  hideDownloadProgress();
+  disposeLc0Resources();
+  centipawnCache.clear();
+  disposeArenaCpuEngines();
   for (const key of ARENA_BIG_NET_KEYS) {
     peekBigNetSearcher(key)?.cancel();
     releaseBigNetSearcher(key, 0);

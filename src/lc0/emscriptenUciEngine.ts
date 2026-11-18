@@ -9,6 +9,7 @@ import {
 } from './browserUciEngine.ts';
 import { resolveEmscriptenAssetUrl } from './emscriptenLocateFile.ts';
 import { engineArtifactWorkerScript } from './engineArtifacts.ts';
+import { terminateEngineWorker } from './engineRetirement.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import { parseBestMove, parseStockfishInfo } from './stockfishEngine.ts';
 import { uciHistoryFromLastIrreversibleMove } from './uciGameHistory.ts';
@@ -422,7 +423,7 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
   }
 
   private terminateWorker(): void {
-    this.worker?.terminate();
+    terminateEngineWorker(this.worker);
     this.worker = null;
     if (this.workerObjectUrl) URL.revokeObjectURL(this.workerObjectUrl);
     this.workerObjectUrl = null;

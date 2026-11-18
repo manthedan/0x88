@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { isMemoryConstrainedDevice } from '../src/lc0/deviceMemoryClass.ts';
+import { isMemoryConstrainedDevice, phoneReclaimSettings } from '../src/lc0/deviceMemoryClass.ts';
 
 const cases = [
   [
@@ -33,4 +33,25 @@ test('memoryClass overrides are explicit, shared lab controls; unknown values us
   assert.equal(isMemoryConstrainedDevice(desktop, '?memoryClass=unknown'), false);
   assert.equal(isMemoryConstrainedDevice(phone, '?memoryClass=unknown'), true);
   assert.equal(isMemoryConstrainedDevice(desktop, '?memoryClass=PHONE'), false);
+});
+
+test('phone reclaim diagnostic overrides survive client navigation and ignore invalid values', (t) => {
+  const store = new Map();
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: { getItem: (key) => store.get(key) ?? null, setItem: (key, value) => store.set(key, value) },
+  });
+  t.after(() => {
+    if (originalStorage) Object.defineProperty(globalThis, 'localStorage', originalStorage);
+    else delete globalThis.localStorage;
+    delete globalThis.location;
+  });
+  assert.deepEqual(phoneReclaimSettings(), { reclaimGapMs: 20000, retireCpu: true });
+  globalThis.location = new URL('https://test.invalid/play?0x88-reclaim-gap-ms=0&0x88-retire-cpu=0');
+  assert.deepEqual(phoneReclaimSettings(), { reclaimGapMs: 0, retireCpu: false });
+  globalThis.location = new URL('https://test.invalid/analysis');
+  assert.deepEqual(phoneReclaimSettings(), { reclaimGapMs: 0, retireCpu: false });
+  globalThis.location = new URL('https://test.invalid/analysis?0x88-reclaim-gap-ms=-1&0x88-retire-cpu=no');
+  assert.deepEqual(phoneReclaimSettings(), { reclaimGapMs: 0, retireCpu: false });
 });

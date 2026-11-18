@@ -2,6 +2,7 @@
 import { onMount } from 'svelte';
 import { measureSimulMemory, simulHelps4, simulMemoryPending, subscribeSimulMemory } from '../../../lc0/arenaSimulGate.ts';
 import type { runSimulTrial } from '../../../lc0/arenaSimulRunner.ts';
+import { terminateEngineWorker } from '../../../lc0/engineRetirement.ts';
 
 type Row = Awaited<ReturnType<typeof runSimulTrial>> & {
   index: number;
@@ -34,7 +35,7 @@ function start(count = n, options: { visits?: number; maxPlies?: number; pairs?:
   const effectiveVisits = options.visits ?? visits;
   const effectivePlies = options.maxPlies ?? maxPlies;
   if (count === 8 && !helps4(effectiveVisits, effectivePlies)) throw new Error('N=8 stays parked unless N=4 improves median throughput by 10%');
-  worker?.terminate();
+  terminateEngineWorker(worker);
   worker = new Worker(new URL('../../../lc0/arenaSimulWorker.ts', import.meta.url), { type: 'module', name: 'arena-simul-lab' });
   rows = [];
   generation = '';
@@ -77,7 +78,8 @@ function start(count = n, options: { visits?: number; maxPlies?: number; pairs?:
     busy = false;
     error = event.message;
     status = 'Worker failed.';
-    worker?.terminate();
+    terminateEngineWorker(worker);
+    worker = undefined;
   };
   worker.postMessage({
     type: 'start',
@@ -114,7 +116,7 @@ onMount(() => {
   Object.assign(window, { __arenaSimul: api });
   return () => {
     unsubscribeMemory();
-    worker?.terminate();
+    terminateEngineWorker(worker);
     delete (window as unknown as Record<string, unknown>).__arenaSimul;
   };
 });
