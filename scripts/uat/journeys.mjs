@@ -17,15 +17,23 @@ const SAN_COUNT = `document.querySelectorAll('#moveList .san').length`;
 const MANAGER_OPEN = `!!document.querySelector('#engineManager')?.open`;
 const STOP_ENABLED = `!!document.querySelector('#stop') && !document.querySelector('#stop').disabled`;
 const ANALYZE_ENABLED = `!!document.querySelector('#analyze') && !document.querySelector('#analyze').disabled`;
-// Either backend's progress (worker or main-thread fallback) shows as a searching card or a result line.
-const SEARCH_VISIBLE = `window.__analysisSchedulingState().workerProgressMessages > 0 || !!document.querySelector('#engineSummaries .engine-card.searching, #engineSummaries .result-line[data-pv]')`;
+// One entry per engine card: a principal variation from either backend (worker or main-thread fallback), or its error line.
+const ENGINE_RESULTS = `[...document.querySelectorAll('#engineSummaries .engine-card')].map(c => ({ name: c.getAttribute('aria-label') ?? '', error: c.querySelector('.line-error')?.textContent ?? null, pv: [...c.querySelectorAll('.result-line[data-pv]')].some(r => !!r.dataset.pv) }))`;
 const VISIBLE = (selector) => `(() => { const e = document.querySelector('${selector}'); return !!e && e.getBoundingClientRect().width > 0; })()`;
 // BT4's card: a principal variation for the position on the board, or the engine's error line.
 const BT4_CARD = `[...document.querySelectorAll('#engineSummaries .engine-card')].find(c => /BT4/.test(c.getAttribute('aria-label') ?? ''))`;
 const BT4_RESULT = `(() => { const card = ${BT4_CARD}; if (!card) return null; const error = card.querySelector('.line-error'); if (error) return { error: error.textContent }; const fen = window.__analysisSchedulingState().fen; return [...card.querySelectorAll('.result-line[data-pv]')].some(r => r.dataset.pv && r.dataset.pvFen === fen) ? { pv: true } : null; })()`;
 
-/** Click the visible header link, or the phone menu's link when the header nav is collapsed. */
-async function navigateVia(ctx, href, ready) {
+/**
+ * Click the visible header link, or the phone menu's link when the header nav is collapsed.
+ * `query` (the entry's ?memoryClass override) is put on the link first: the bare link would drop the
+ * memory policy, and Analysis reloads when it remounts at a different URL.
+ */
+async function navigateVia(ctx, href, ready, query = '') {
+  const follow = async (selector) => {
+    if (query) await ctx.evaluate(`(document.querySelector('${selector}[href="${href}"]').setAttribute('href', ${JSON.stringify(href + query)}), true)`);
+    await ctx.click(`${selector}[href="${href + query}"]`);
+  };
   const documentId = await ctx.evaluate('window.__uat?.documentId');
   const menu = await ctx.evaluate(
     `(() => { const b = document.querySelector('.site-header .menu-toggle'); return !!b && getComputedStyle(b).display !== 'none' && b.getBoundingClientRect().width > 0; })()`,
@@ -34,8 +42,8 @@ async function navigateVia(ctx, href, ready) {
     await ctx.click('.site-header .menu-toggle');
     await waitFor(ctx.evaluate, `!!document.querySelector('.mobile-nav-menu a[href="${href}"]')`, 10000);
     await ctx.pause(400); // let the reviewer see the open menu
-    await ctx.click(`.mobile-nav-menu a[href="${href}"]`);
-  } else await ctx.click(`.site-header nav.primary a[href="${href}"]`);
+    await follow('.mobile-nav-menu a');
+  } else await follow('.site-header nav.primary a');
   await waitFor(ctx.evaluate, ready, 60000);
   if ((await ctx.evaluate('window.__uat?.documentId')) !== documentId)
     ctx.note('warning', `Navigation to ${href} reloaded the document (expected client-side routing)`);
@@ -146,6 +154,17 @@ async function ensureActiveSearch(ctx) {
   await waitFor(ctx.evaluate, STOP_ENABLED, 30000);
 }
 
+/** Every engine card has a line or an error; any error fails the step with that engine's message. */
+async function waitForEveryEngine(ctx, count, timeoutMs) {
+  await waitFor(
+    ctx.evaluate,
+    `(() => { const cards = ${ENGINE_RESULTS}; return cards.length >= ${count} && cards.every(c => c.pv || c.error); })()`,
+    timeoutMs,
+  );
+  const failed = (await ctx.evaluate(ENGINE_RESULTS)).filter((c) => c.error);
+  if (failed.length) throw Error(failed.map((c) => `${c.name}: ${c.error}`).join('; '));
+}
+
 async function analysisEngines(ctx) {
   await ctx.step('two engines streaming', async () => {
     await waitFor(ctx.evaluate, `${ANALYSIS_READY} && document.querySelectorAll('#engineList .engine-row').length >= 2`, 120000);
@@ -156,7 +175,7 @@ async function analysisEngines(ctx) {
     // Analyze stays disabled while the first backend loads; auto-analysis may start on its own.
     await waitFor(ctx.evaluate, `window.__analysisSchedulingState().analyzing || ${ANALYZE_ENABLED}`, 180000);
     if (!(await ctx.evaluate(`window.__analysisSchedulingState().analyzing`))) await ctx.click('#analyze');
-    await waitFor(ctx.evaluate, SEARCH_VISIBLE, 180000);
+    await waitForEveryEngine(ctx, 2, 180000);
     await ctx.pause(5000);
   });
   await ctx.step('open engine manager', () => openManager(ctx));
@@ -169,7 +188,8 @@ async function analysisEngines(ctx) {
   });
   await ctx.step('close manager, three engines streaming', async () => {
     await closeManager(ctx);
-    await ctx.pause(6000);
+    await waitForEveryEngine(ctx, 3, 180000);
+    await ctx.pause(3000);
   });
   await ctx.step('switch Lc0 Small to BT4 (consent dialog)', async () => {
     await openManager(ctx);
@@ -281,8 +301,10 @@ async function arenaMatch(ctx) {
 }
 
 async function routeTour(ctx) {
+  let query = '';
   await ctx.step('Analysis ready', async () => {
     await waitFor(ctx.evaluate, ANALYSIS_READY, 120000);
+    query = await ctx.evaluate('location.search');
     await ctx.pause(3000);
   });
   for (const [label, href, ready] of [
@@ -292,7 +314,7 @@ async function routeTour(ctx) {
     ['Analysis', '/app/analysis/', ANALYSIS_READY],
   ]) {
     await ctx.step(`navigate to ${label}`, async () => {
-      await navigateVia(ctx, href, ready);
+      await navigateVia(ctx, href, ready, query);
       await ctx.pause(2500);
     });
   }
