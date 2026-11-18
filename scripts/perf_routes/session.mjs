@@ -5,9 +5,9 @@ import { hostname, loadavg, platform, release } from 'node:os';
 import { median } from '../lib/perf_canary_stats.mjs';
 import { pgrep, readFootprint, sleep, WORKER_READY_SCRIPT } from '../perf_matrix/common.mjs';
 import { startCountingProxy } from '../perf_matrix/proxy.mjs';
-import { footprintSum, jsBytesByRoute, naturalVisibilityValid, peakFootprint, requestFailures, safariWebContentPid } from './gate.mjs';
+import { chromeFootprint, footprintSum, jsBytesByRoute, naturalVisibilityValid, peakFootprint, requestFailures, safariWebContentPid } from './gate.mjs';
 import { DOCS_READY, MIDGAME, routeFor, runJourney, waitFor } from './journeys.mjs';
-import { cleanupMarker, shutdownDelay, waitForCleanup, watchShutdown } from './lifecycle.mjs';
+import { cleanupMarker, safariCreationRefused, shutdownDelay, waitForCleanup, watchShutdown } from './lifecycle.mjs';
 
 const [specFile, outFile] = process.argv.slice(2);
 const spec = JSON.parse(readFileSync(specFile, 'utf8'));
@@ -56,6 +56,7 @@ async function bounded(promise, label, ms = 15000) {
 async function wd(method, path, body) {
   const r = await fetch(spec.driver + path, {
     method,
+    redirect: 'error',
     headers: { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(120000),
@@ -69,21 +70,21 @@ async function wd(method, path, body) {
   return data.value;
 }
 const quantile = (xs, q) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.ceil(xs.length * q) - 1] : 0);
+async function chromePids() {
+  const { processInfo } = await bounded(cdp.send('SystemInfo.getProcessInfo'), 'Chrome process discovery');
+  return {
+    rendererPids: processInfo.filter((p) => p.type === 'renderer').map((p) => p.id),
+    gpuPids: processInfo.filter((p) => ['GPU', 'gpu-process'].includes(p.type)).map((p) => p.id),
+  };
+}
 async function sample() {
   if (busy) return;
   busy = true;
   const sampledPhase = phase;
   try {
-    let rendererPids = [safariPid],
-      gpuPids = [];
-    if (cdp) {
-      const procs = (await bounded(cdp.send('SystemInfo.getProcessInfo'), 'Chrome process discovery')).processInfo;
-      rendererPids = procs.filter((p) => p.type === 'renderer').map((p) => p.id);
-      gpuPids = procs.filter((p) => ['GPU', 'gpu-process'].includes(p.type)).map((p) => p.id);
-    }
-    const fp = readFootprint([...rendererPids, ...gpuPids], { reset: true });
-    const render = footprintSum(rendererPids, fp, 'renderer');
-    const gpu = cdp ? footprintSum(gpuPids, fp, 'Chrome GPU') : null;
+    const { render, gpu } = cdp
+      ? await chromeFootprint(chromePids, readFootprint)
+      : { render: footprintSum([safariPid], readFootprint([safariPid], { reset: true }), 'Safari WebContent'), gpu: null };
     result.samples.push({
       ms: Date.now() - t0,
       phase: sampledPhase,
@@ -163,8 +164,8 @@ try {
     signal.throwIfAborted();
     markBrowserStarting();
     const session = await wd('POST', '/session', { capabilities: { alwaysMatch: { browserName: 'safari' } } }).catch((error) => {
-      // A protocol-level refusal creates no session. A lost reply may hide an owned session.
-      if (error.webDriverError) unlinkSync(pendingCleanup);
+      // A refusal creates no session. A lost reply may hide an owned session.
+      if (safariCreationRefused(error)) unlinkSync(pendingCleanup);
       throw error;
     });
     sid = session?.sessionId;

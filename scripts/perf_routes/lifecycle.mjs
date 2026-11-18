@@ -60,6 +60,13 @@ export async function acquireLock(dir, signal) {
 
 export const cleanupMarker = (resultFile) => `${resultFile}.cleanup-pending`;
 
+function refusedConnect(error) {
+  if (error?.code === 'ECONNREFUSED' && error.syscall === 'connect') return true;
+  return error instanceof AggregateError && error.errors.length > 0 && error.errors.every(refusedConnect);
+}
+
+export const safariCreationRefused = (error) => !!error.webDriverError || refusedConnect(error.cause);
+
 export function releaseAfterSession(resultFile, release) {
   if (existsSync(cleanupMarker(resultFile))) return false;
   release();

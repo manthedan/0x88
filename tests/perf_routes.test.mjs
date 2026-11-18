@@ -9,6 +9,7 @@ import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { startCountingProxy } from '../scripts/perf_matrix/proxy.mjs';
 import {
+  chromeFootprint,
   compareRuns,
   footprintSum,
   JOURNEYS,
@@ -25,7 +26,7 @@ import {
 } from '../scripts/perf_routes/gate.mjs';
 import { chooseHumanMove, playHumanTurn } from '../scripts/perf_routes/human.mjs';
 import { arenaGameFailed, DOCS_READY, observeMovePvs, requireAnalysisForMove } from '../scripts/perf_routes/journeys.mjs';
-import { acquireLock, claimOutput, cleanupMarker, releaseAfterSession, waitForCleanup } from '../scripts/perf_routes/lifecycle.mjs';
+import { acquireLock, claimOutput, cleanupMarker, releaseAfterSession, safariCreationRefused, waitForCleanup } from '../scripts/perf_routes/lifecycle.mjs';
 
 const args = (...extra) => parseArgs(['--baseline', 'main', '--candidate', 'HEAD', '--dry-run', ...extra]);
 
@@ -203,10 +204,11 @@ test('proxy records upstream failure before headers, truncated bodies and downst
   const brokenProbe = { ...bigNetProbe, complete: false, failure: 'disconnected' };
   const missingModel = { ...bigNetProbe, method: 'GET' };
   const queenOdds = { ...bigNetProbe, path: '/models/lc0/lqo_v2.f16.qdq8.onnx' };
+  const logos = ['/engine-logos/stockfish.png', '/engine-logos/berserk.jpg'].map((path) => ({ ...bigNetProbe, path }));
   const recklessCancel = { ...late, method: 'GET', path: '/reckless/engine.wasm', clientAborted: true };
   const recklessBroken = { ...recklessCancel, clientAborted: false, failure: 'upstream truncated' };
-  assert.deepEqual(requestFailures([bigNetProbe, queenOdds, recklessCancel, brokenProbe, missingModel, late, recklessBroken]), {
-    optional: [bigNetProbe, queenOdds, recklessCancel],
+  assert.deepEqual(requestFailures([bigNetProbe, queenOdds, ...logos, recklessCancel, brokenProbe, missingModel, late, recklessBroken]), {
+    optional: [bigNetProbe, queenOdds, ...logos, recklessCancel],
     unexpected: [brokenProbe, missingModel, late, recklessBroken],
   });
 });
@@ -419,6 +421,27 @@ test('Chrome GPU and renderer sums reject missing or invalid reads instead of re
   assert.deepEqual(footprintSum([100, 101], readings, 'Chrome GPU'), { cur: 8, life: 17, interval: 12 });
 });
 
+test('Chrome retries only a verified renderer exit, without losing interval peaks or accepting a missing GPU', async () => {
+  const old = { rendererPids: [1, 2], gpuPids: [3] };
+  const fresh = { rendererPids: [2, 4], gpuPids: [3] };
+  const first = new Map([
+    [2, { cur: 4, life: 12, interval: 12 }],
+    [3, { cur: 2, life: 10, interval: 10 }],
+  ]);
+  const second = new Map([
+    [2, { cur: 3, life: 12, interval: 5 }],
+    [3, { cur: 3, life: 10, interval: 4 }],
+    [4, { cur: 2, life: 3, interval: 3 }],
+  ]);
+  const discover = (states) => async () => states.shift();
+  const read = (reads) => () => reads.shift();
+  const sample = await chromeFootprint(discover([old, fresh]), read([first, second]));
+  assert.deepEqual(sample.render, { cur: 5, life: 15, interval: 15 });
+  assert.deepEqual(sample.gpu, { cur: 3, life: 10, interval: 10 });
+  await assert.rejects(chromeFootprint(discover([old, old]), read([first])), /renderer footprint for PID 1/);
+  await assert.rejects(chromeFootprint(discover([old]), read([new Map()])), /Chrome GPU footprint for PID 3/);
+});
+
 test('Safari requires exactly one new WebContent PID without ranking by footprint', () => {
   const before = new Set([10, 12]);
   assert.throws(() => safariWebContentPid(before, [10, 12]), /found 0/);
@@ -511,6 +534,17 @@ test('interrupted mutex wait and release cannot remove another owner', async (t)
   controller.abort(Error('test interrupt'));
   await assert.rejects(waiting, /test interrupt/);
   assert.equal(readFileSync(owner, 'utf8'), 'replacement owner\n');
+});
+
+test('Safari releases after a refused connect, but not when the result of POST /session could have been lost', () => {
+  const wrapped = (cause) => new TypeError('fetch failed', { cause });
+  const refused = Object.assign(Error('port closed'), { code: 'ECONNREFUSED', syscall: 'connect' });
+  const reset = Object.assign(Error('peer reset'), { code: 'ECONNRESET', syscall: 'read' });
+  assert.equal(safariCreationRefused(wrapped(refused)), true);
+  assert.equal(safariCreationRefused(wrapped(new AggregateError([refused, refused]))), true);
+  assert.equal(safariCreationRefused(wrapped(new AggregateError([refused, reset]))), false);
+  assert.equal(safariCreationRefused(wrapped(reset)), false);
+  assert.equal(safariCreationRefused(Object.assign(Error('already paired'), { webDriverError: 'session not created' })), true);
 });
 
 test('unconfirmed owned browser cleanup retains the mutex', async (t) => {

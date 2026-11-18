@@ -131,17 +131,36 @@ export function safariWebContentPid(before, after) {
   return fresh[0];
 }
 
+const validFootprint = (row) => row && [row.cur, row.life, row.interval].every((n) => Number.isFinite(n) && n > 0);
+
 export function footprintSum(pids, readings, label) {
   if (!pids.length) throw Error(`No ${label} PID`);
   return pids.reduce(
     (sum, pid) => {
       const row = readings.get(pid);
-      if (!row || ![row.cur, row.life, row.interval].every((n) => Number.isFinite(n) && n > 0))
-        throw Error(`Missing/invalid ${label} footprint for PID ${pid}`);
+      if (!validFootprint(row)) throw Error(`Missing/invalid ${label} footprint for PID ${pid}`);
       return { cur: sum.cur + row.cur, life: sum.life + row.life, interval: sum.interval + row.interval };
     },
     { cur: 0, life: 0, interval: 0 },
   );
+}
+
+export async function chromeFootprint(discover, read) {
+  const first = await discover();
+  const initial = read([...first.rendererPids, ...first.gpuPids], { reset: true });
+  const gpu = footprintSum(first.gpuPids, initial, 'Chrome GPU');
+  const unreadable = first.rendererPids.filter((pid) => !validFootprint(initial.get(pid)));
+  if (!unreadable.length) return { render: footprintSum(first.rendererPids, initial, 'renderer'), gpu };
+
+  const current = await discover();
+  if (unreadable.some((pid) => current.rendererPids.includes(pid))) footprintSum(first.rendererPids, initial, 'renderer');
+  const refreshed = read([...current.rendererPids, ...current.gpuPids], { reset: true });
+  // The first read reset live counters. Carry those high-water marks into the retried sample.
+  for (const [pid, row] of refreshed) {
+    const previous = initial.get(pid);
+    if (validFootprint(row) && validFootprint(previous)) refreshed.set(pid, { ...row, interval: Math.max(row.interval, previous.interval) });
+  }
+  return { render: footprintSum(current.rendererPids, refreshed, 'renderer'), gpu: footprintSum(current.gpuPids, refreshed, 'Chrome GPU') };
 }
 
 export function requestFailures(requests) {
@@ -149,7 +168,8 @@ export function requestFailures(requests) {
     unexpected = [];
   for (const r of requests) {
     if (r.complete && !r.failure && r.status < 400) continue;
-    const probe = r.method === 'HEAD' && /^\/(?:models\/lc0\/(?:(?:BT4-|t3-)[^/?]+|lqo_v2\.f16\.qdq8)\.onnx|engine-logos\/[^/?]+\.svg)(?:\?|$)/i.test(r.path);
+    const probe =
+      r.method === 'HEAD' && /^\/(?:models\/lc0\/(?:(?:BT4-|t3-)[^/?]+|lqo_v2\.f16\.qdq8)\.onnx|engine-logos\/[^/?]+\.(?:svg|png|jpe?g))(?:\?|$)/i.test(r.path);
     const speculative = ['GET', 'HEAD'].includes(r.method) && r.path.startsWith('/reckless/');
     const absent = r.complete && !r.failure && [404, 410].includes(r.status);
     if ((probe && absent) || (speculative && (absent || r.clientAborted))) optional.push(r);
