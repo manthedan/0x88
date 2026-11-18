@@ -70,19 +70,15 @@ async function createHybridEvaluator(
   manifestUrl: string | undefined,
   kernelBase: string | undefined,
   fixtureRoot: string | undefined,
-  signal?: AbortSignal,
 ): Promise<Evaluator> {
-  signal?.throwIfAborted();
   const gpu = (navigator as NavigatorGpu).gpu;
   if (!gpu) throw new Error('WebGPU is unavailable for custom WebGPU runtime');
   const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
-  signal?.throwIfAborted();
   if (!adapter) throw new Error('WebGPU adapter unavailable for custom WebGPU runtime');
   const device = await adapter.requestDevice();
   try {
     // On success the evaluator owns the device and destroys it in destroy().
-    signal?.throwIfAborted();
-    return await SquareformerTvmHybridEvaluator.create(device as never, meta, { manifestUrl, kernelBase, fixtureRoot, signal });
+    return await SquareformerTvmHybridEvaluator.create(device as never, meta, { manifestUrl, kernelBase, fixtureRoot });
   } catch (error) {
     device.destroy();
     throw error;
@@ -198,7 +194,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
 
   if (customRequested) {
     try {
-      const primary = await createHybridEvaluator(meta, manifestUrl, kernelBase, fixtureRoot, options.signal);
+      const primary = await createHybridEvaluator(meta, manifestUrl, kernelBase, fixtureRoot);
       const evaluator = fallback ? new RuntimeFallbackEvaluator(primary, createOrtEvaluator, auditBase, 'custom-webgpu-fallback-ort') : primary;
       const result = {
         evaluator,
@@ -213,7 +209,6 @@ export async function createBrowserSquareformerRuntimeEvaluator(
       return result;
     } catch (err) {
       options.signal?.throwIfAborted();
-      if (err instanceof Error && err.name === 'AbortError') throw err;
       if (!fallback) throw err;
       const fallbackReason = err instanceof Error ? err.message : String(err);
       console.warn('Custom WebGPU runtime unavailable; falling back to ORT SquareFormer.', { label: spec.label ?? spec.id, modelId, fallbackReason });

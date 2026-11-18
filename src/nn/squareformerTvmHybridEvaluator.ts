@@ -73,7 +73,7 @@ type HybridRuntimeManifest = {
     files?: Array<{ path: string; bytes?: number; sha256: string }>;
   };
 };
-type ArtifactVerifier = { signal?: AbortSignal; verify(url: string, bytes: ArrayBuffer): Promise<void> };
+type ArtifactVerifier = { verify(url: string, bytes: ArrayBuffer): Promise<void> };
 type FixtureArrayKey =
   | 'staticAttentionBias'
   | 'attnQkvWeight'
@@ -119,13 +119,10 @@ type FixtureSummary = {
   arrays: Record<FixtureArrayKey, { file: string }>;
 };
 async function loadBytes(url: string, verifier?: ArtifactVerifier): Promise<ArrayBuffer> {
-  verifier?.signal?.throwIfAborted();
-  const res = await fetch(url, { signal: verifier?.signal });
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`fetch ${url}: ${res.status} ${res.statusText}`);
   const bytes = await res.arrayBuffer();
-  verifier?.signal?.throwIfAborted();
   await verifier?.verify(url, bytes);
-  verifier?.signal?.throwIfAborted();
   return bytes;
 }
 async function loadText(url: string, verifier?: ArtifactVerifier): Promise<string> {
@@ -168,21 +165,19 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
-async function verifySha256(label: string, url: string, expected: string | undefined, signal?: AbortSignal): Promise<void> {
+async function verifySha256(label: string, url: string, expected: string | undefined): Promise<void> {
   if (!expected) return;
-  const actual = await sha256Hex(await loadBytes(url, createArtifactVerifier(undefined, undefined, signal)));
-  signal?.throwIfAborted();
+  const actual = await sha256Hex(await loadBytes(url));
   if (actual !== expected) throw new Error(`Hybrid TVM artifact SHA-256 mismatch for ${label}: expected ${expected}, got ${actual}`);
 }
 function artifactUrl(manifestUrl: string, path: string): string {
   return new URL(path, new URL(manifestUrl, typeof location !== 'undefined' ? location.href : 'http://localhost/')).toString();
 }
-function createArtifactVerifier(manifest: HybridRuntimeManifest | undefined, manifestUrl: string | undefined, signal?: AbortSignal): ArtifactVerifier {
-  const byUrl = new Map(manifestUrl ? (manifest?.artifacts?.files ?? []).map((file) => [artifactUrl(manifestUrl, file.path), file]) : []);
+function createArtifactVerifier(manifest: HybridRuntimeManifest | undefined, manifestUrl: string | undefined): ArtifactVerifier | undefined {
+  if (!manifest?.artifacts?.files?.length || !manifestUrl) return undefined;
+  const byUrl = new Map(manifest.artifacts.files.map((file) => [artifactUrl(manifestUrl, file.path), file]));
   return {
-    signal,
     async verify(url: string, bytes: ArrayBuffer): Promise<void> {
-      signal?.throwIfAborted();
       const resolved = new URL(url, typeof location !== 'undefined' ? location.href : 'http://localhost/').toString();
       const expected = byUrl.get(resolved);
       if (!expected) return;
@@ -193,16 +188,11 @@ function createArtifactVerifier(manifest: HybridRuntimeManifest | undefined, man
     },
   };
 }
-async function verifyManifestArtifacts(
-  manifest: HybridRuntimeManifest | undefined,
-  kernelBase: string,
-  fixtureRoot: string,
-  signal?: AbortSignal,
-): Promise<void> {
+async function verifyManifestArtifacts(manifest: HybridRuntimeManifest | undefined, kernelBase: string, fixtureRoot: string): Promise<void> {
   if (!manifest?.artifacts || manifest.artifacts.files?.length) return;
   await Promise.all([
-    verifySha256('kernel summary', `${kernelBase}/summary.json`, manifest.artifacts.kernelSummarySha256, signal),
-    verifySha256('fixture summary', `${fixtureRoot}/summary.json`, manifest.artifacts.fixtureSummarySha256, signal),
+    verifySha256('kernel summary', `${kernelBase}/summary.json`, manifest.artifacts.kernelSummarySha256),
+    verifySha256('fixture summary', `${fixtureRoot}/summary.json`, manifest.artifacts.fixtureSummarySha256),
   ]);
 }
 function nowMs(): number {
@@ -240,7 +230,6 @@ async function loadKernels(kernelBase: string, verifier?: ArtifactVerifier): Pro
 export class SquareformerTvmHybridEvaluator implements Evaluator {
   private readonly queue = new ExclusiveQueue();
   private destroyed = false;
-  private closePromise?: Promise<void>;
   private failureReason: string | undefined;
   private device: GPUDevice;
   private meta: SquareFormerMeta;
@@ -280,20 +269,19 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
   static async create(
     device: GPUDevice,
     meta: SquareFormerMeta,
-    urls: { kernelBase?: string; fixtureRoot?: string; manifestUrl?: string; signal?: AbortSignal } = {},
+    urls: { kernelBase?: string; fixtureRoot?: string; manifestUrl?: string } = {},
   ): Promise<SquareformerTvmHybridEvaluator> {
-    urls.signal?.throwIfAborted();
     let kernelBase = stripSlash(urls.kernelBase ?? '/tvm/squareformer-ffn');
     let fixtureRoot = stripSlash(urls.fixtureRoot ?? '/tvm/ffn-fixtures');
     let manifest: HybridRuntimeManifest | undefined;
     if (urls.manifestUrl) {
-      manifest = await loadJson<HybridRuntimeManifest>(urls.manifestUrl, createArtifactVerifier(undefined, undefined, urls.signal));
+      manifest = await loadJson<HybridRuntimeManifest>(urls.manifestUrl);
       validateManifest(manifest, meta);
       kernelBase = resolveManifestPath(urls.manifestUrl, urls.kernelBase ?? manifest.kernelBase, kernelBase);
       fixtureRoot = resolveManifestPath(urls.manifestUrl, urls.fixtureRoot ?? manifest.fixtureRoot, fixtureRoot);
-      await verifyManifestArtifacts(manifest, kernelBase, fixtureRoot, urls.signal);
+      await verifyManifestArtifacts(manifest, kernelBase, fixtureRoot);
     }
-    const verifier = createArtifactVerifier(manifest, urls.manifestUrl, urls.signal);
+    const verifier = createArtifactVerifier(manifest, urls.manifestUrl);
     const [kernels, root] = await Promise.all([loadKernels(kernelBase, verifier), loadJson<FixtureRootSummary>(`${fixtureRoot}/summary.json`, verifier)]);
     if (!root.layers.length) throw new Error(`No layers in ${fixtureRoot}/summary.json`);
     assertExpected('layers', manifest?.expected?.layers, root.layers.length);
@@ -369,7 +357,6 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
       SquareformerTvmValueHeadWebgpuBlock.create(device as never, valueWeights, last.summary.shape),
       SquareformerTvmLegalPolicyGatherWebgpuBlock.createDynamic(device as never, Math.max(1, Number(meta.max_legal_moves ?? 256)), meta.policy_size),
     ]);
-    urls.signal?.throwIfAborted();
     return new SquareformerTvmHybridEvaluator(
       device,
       meta,
@@ -456,31 +443,23 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
   }
 
   /** Frees the GPU buffers and the owned device once in-flight evaluations have settled. */
-  dispose(): Promise<void> {
-    if (this.closePromise) return this.closePromise;
+  destroy(): void {
+    if (this.destroyed) return;
     this.destroyed = true;
-    const release = async () => {
-      const errors: unknown[] = [];
+    const release = () => {
       for (const block of [this.stem, ...this.layers, this.policy, this.value, this.legal]) {
         try {
-          await block.destroy();
-        } catch (error) {
-          errors.push(error);
+          block.destroy();
+        } catch {
+          /* best effort */
         }
       }
       try {
         this.device.destroy();
-      } catch (error) {
-        errors.push(error);
+      } catch {
+        /* best effort */
       }
-      if (errors.length) throw new AggregateError(errors, 'Custom WebGPU runtime retirement failed');
     };
-    this.closePromise = this.queue.idle().then(release);
-    void this.closePromise.catch(() => undefined);
-    return this.closePromise;
-  }
-
-  destroy(): void {
-    void this.dispose();
+    void this.queue.idle().then(release);
   }
 }

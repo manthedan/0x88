@@ -405,28 +405,7 @@ type PreparedOrtModelInput = {
   original?: OrtModelSource;
 };
 
-function isFetchableOrtModelUrl(input: OrtModelInput | undefined): input is string {
-  return typeof input === 'string' && (!runningUnderNode() || /^https?:\/\//i.test(input));
-}
-
-async function fetchOrtModelUrl(url: string, signal: AbortSignal): Promise<Uint8Array> {
-  signal.throwIfAborted();
-  const response = await fetch(url, { signal });
-  if (!response.ok) throw new Error(`ORT model fetch failed ${response.status}: ${url}`);
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  signal.throwIfAborted();
-  return bytes;
-}
-
-async function prepareOrtModelInput(
-  modelPath: OrtModelInput,
-  reloadModel?: () => Promise<OrtModelInput>,
-  signal?: AbortSignal,
-): Promise<PreparedOrtModelInput> {
-  signal?.throwIfAborted();
-  // Own browser URL ingestion so ORT cannot start an uninterruptible URL fetch.
-  // Node filesystem paths retain ORT's existing file-loading behavior.
-  if (signal && isFetchableOrtModelUrl(modelPath)) modelPath = await fetchOrtModelUrl(modelPath, signal);
+async function prepareOrtModelInput(modelPath: OrtModelInput, reloadModel?: () => Promise<OrtModelInput>): Promise<PreparedOrtModelInput> {
   if (!ortDequantFoldEnabled()) {
     lastOrtDequantFold = { enabled: false, foldedNodes: 0, skippedNodes: 0, removedInitializers: 0, bytesBefore: 0, bytesAfter: 0, elapsedMs: 0 };
     return { input: modelPath };
@@ -1493,7 +1472,7 @@ export type OrtSessionAttemptPlan = {
 };
 
 export type CreateOrtSessionOptions = {
-  /** Cancel model ingestion, preparation waits and future native attempts; already-admitted creation is released before rejection. */
+  /** Cancel preparation waits and future native attempts; already-admitted creation is released before rejection. */
   signal?: AbortSignal;
   /**
    * Model for the WebGPU -> WASM fallback attempt, loaded only if that attempt
@@ -1501,7 +1480,7 @@ export type CreateOrtSessionOptions = {
    * on WASM; the default reuses the primary model's unfolded bytes.
    */
   wasmFallbackModel?: () => Promise<OrtModelInput>;
-  /** Reacquire the same model through its source loader (verified for product models), only when an unfolded/provider fallback needs it. */
+  /** Reacquire the same model through its verified loader, only if an unfolded/provider fallback needs it. */
   reloadModel?: () => Promise<OrtModelInput>;
   /**
    * Extra session options for the WebGPU attempts only (never the WASM
@@ -1554,11 +1533,6 @@ export function planOrtSessionAttempts(
 }
 
 export function createOrtSession(modelPath: OrtModelInput, options: CreateOrtSessionOptions = {}): Promise<ort.InferenceSession> {
-  if (options.signal && !options.reloadModel && isFetchableOrtModelUrl(modelPath)) {
-    const url = modelPath,
-      signal = options.signal;
-    options = { ...options, reloadModel: () => fetchOrtModelUrl(url, signal) };
-  }
   // Async frames retain original argument registers even after reassignment.
   // Only this synchronous, consumed holder ever receives the raw argument.
   return createOrtSessionFromSource(() => {
@@ -1571,7 +1545,6 @@ export function createOrtSession(modelPath: OrtModelInput, options: CreateOrtSes
 async function createOrtSessionFromSource(takeModel: () => OrtModelInput, options: CreateOrtSessionOptions): Promise<ort.InferenceSession> {
   // Must precede resolvedOrtExecutionProviders(): both it and the artifact
   // selector read the probe result, and the locks below freeze that choice.
-  options.signal?.throwIfAborted();
   await untilAborted(ensureWebGpuAdapterProbed(), options.signal);
   options.signal?.throwIfAborted();
   const resolved = resolvedOrtExecutionProviders();
@@ -1582,13 +1555,12 @@ async function createOrtSessionFromSource(takeModel: () => OrtModelInput, option
   // the WebGPU->WASM fallback below then reuses the same binary.
   lockRequestedOrtWasmArtifact();
   lockOrtRuntimeArtifactKind(providers);
-  let prepared: PreparedOrtModelInput | undefined = await prepareOrtModelInput(takeModel(), options.reloadModel, options.signal);
+  let prepared: PreparedOrtModelInput | undefined = await prepareOrtModelInput(takeModel(), options.reloadModel);
   const wasmFallback = !options.webgpuOnly && shouldFallbackToWasmAfterOrtFailure(requestedOrtExecutionProvider(), providers);
   const attempts = planOrtSessionAttempts(prepared, providers, wasmFallback, options);
   prepared = undefined;
   let lastMessage: string | null = null;
   for (let i = 0; i < attempts.length; i++) {
-    options.signal?.throwIfAborted();
     const attempt = attempts[i];
     const t0 = typeof performance === 'undefined' ? Date.now() : performance.now();
     try {
@@ -1596,7 +1568,6 @@ async function createOrtSessionFromSource(takeModel: () => OrtModelInput, option
       attempt.input = undefined as never; // Consumed records must not pin an input through later attempts.
       let input: OrtModelInput | undefined = typeof source === 'function' ? await untilAborted(source(), options.signal) : source;
       source = undefined;
-      if (options.signal && isFetchableOrtModelUrl(input)) input = await fetchOrtModelUrl(input, options.signal);
       options.signal?.throwIfAborted();
       const extra = attempt.providers.includes('webgpu') ? options.webgpuSessionOptions : undefined;
       const creating = ort.InferenceSession.create(input as never, { ...sessionOptions(attempt.providers), ...extra });

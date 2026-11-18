@@ -80,29 +80,12 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
       { runtime: 'ort' },
     );
     assert.equal(research.evaluator, evaluator, 'default metadata does not make an explicit research ONNX the pinned artifact');
-    const previousNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
-    let deviceDestroys = 0;
-    Object.defineProperty(globalThis, 'navigator', {
-      configurable: true,
-      value: {
-        gpu: {
-          requestAdapter: async () => ({
-            requestDevice: async () => ({
-              destroy() {
-                deviceDestroys++;
-              },
-            }),
-          }),
-        },
-      },
-    });
-    t.after(() => (previousNavigator ? Object.defineProperty(globalThis, 'navigator', previousNavigator) : delete globalThis.navigator));
-    for (const runtime of ['tvmjs', 'custom-webgpu']) {
+    for (const runtime of ['tvmjs']) {
       const controller = new AbortController();
       let compiledCalls = 0;
-      compiledFactory = (kind, args) => {
+      compiledFactory = (_kind, args) => {
         compiledCalls++;
-        assert.equal(kind === 'tvmjs' ? args[2] : args[2].signal, controller.signal);
+        assert.equal(args[2], controller.signal);
         controller.abort();
         throw controller.signal.reason;
       };
@@ -115,6 +98,5 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
       );
       assert.equal(compiledCalls, 1, 'the compiled factory receives cancellation instead of an ORT fallback');
     }
-    assert.equal(deviceDestroys, 1, 'custom-device cleanup is retained when initialization is canceled');
   });
 }
