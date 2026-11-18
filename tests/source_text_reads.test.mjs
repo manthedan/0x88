@@ -28,9 +28,30 @@ test('template paths expand to the files named by literals in the test', () => {
   assert.deepEqual(scan(text), ['src/fake/analysisBrowser.ts', 'src/fake/playBrowser.ts']);
 });
 
-test('computed template holes fall back to every matching file', () => {
-  const text = holes("import { readFileSync } from 'node:fs';\nconst s = pick(); readFileSync(new URL(`../src/fake/#{s}Browser.ts`, import.meta.url));");
+test('computed template holes fall back to every matching file, even with a matching literal elsewhere', () => {
+  const text = holes(
+    "import { readFileSync } from 'node:fs';\nconst label = 'analysis';\nconst surface = pick(); readFileSync(new URL(`../src/fake/#{surface}Browser.ts`, import.meta.url));",
+  );
   assert.deepEqual(scan(text), ['src/fake/analysisBrowser.ts', 'src/fake/arenaBrowser.ts', 'src/fake/playBrowser.ts']);
+});
+
+test('hole values are traced through tuples, array callbacks and helper call sites', () => {
+  const tuples = holes(
+    "import { readFileSync } from 'node:fs';\nfor (const [surface, n] of [['play', 1], ['arena', 2]]) readFileSync(new URL(`../src/fake/#{surface}Browser.ts`, import.meta.url));",
+  );
+  assert.deepEqual(scan(tuples), ['src/fake/arenaBrowser.ts', 'src/fake/playBrowser.ts']);
+  const callback = holes(
+    "import { readFileSync } from 'node:fs';\nconst SURFACES = ['arena'];\nSURFACES.map((name) => readFileSync(new URL(`../src/fake/#{name}Browser.ts`, import.meta.url)));",
+  );
+  assert.deepEqual(scan(callback), ['src/fake/arenaBrowser.ts']);
+  const helper = holes(
+    "import { readFileSync } from 'node:fs';\nconst source = (file) => readFileSync(new URL(`../src/fake/#{file}`, import.meta.url));\nsource('util.ts');\nfor (const page of ['playBrowser.ts']) source(page);",
+  );
+  assert.deepEqual(scan(helper), ['src/fake/playBrowser.ts', 'src/fake/util.ts']);
+  const untraced = holes(
+    "import { readFileSync } from 'node:fs';\nconst source = (file) => readFileSync(new URL(`../src/fake/#{file}`, import.meta.url));\nsource('util.ts');\nsource(pick());",
+  );
+  assert.equal(scan(untraced).length, 4);
 });
 
 test('imports, scratch-tree joins and files without a read API are not source reads', () => {

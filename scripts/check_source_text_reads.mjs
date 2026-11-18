@@ -67,21 +67,100 @@ function joinedOntoNonRoot(node) {
 
 const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const HOLE = '\u0000';
+const ARRAY_CALLBACKS = new Set(['map', 'flatMap', 'forEach', 'filter', 'some', 'every']);
+const MAX_DEPTH = 8;
+
+const isFunctionLike = (node) => ts.isArrowFunction(node) || ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node);
+const union = (sets) => (sets.some((set) => set === null) ? null : new Set(sets.flatMap((set) => [...set])));
+
+/** Where `name` is bound, as seen from `from`: walk outward and take the innermost binding. */
+function findBinding(name, from) {
+  for (let node = from.parent; node; node = node.parent) {
+    if (ts.isForOfStatement(node) && ts.isVariableDeclarationList(node.initializer)) {
+      const target = node.initializer.declarations[0]?.name;
+      if (target && ts.isIdentifier(target) && target.text === name) return { iterable: node.expression, index: null };
+      if (target && ts.isArrayBindingPattern(target)) {
+        const index = target.elements.findIndex((el) => ts.isBindingElement(el) && ts.isIdentifier(el.name) && el.name.text === name);
+        if (index >= 0) return { iterable: node.expression, index };
+      }
+    }
+    if (isFunctionLike(node)) {
+      const index = node.parameters.findIndex((param) => ts.isIdentifier(param.name) && param.name.text === name);
+      if (index >= 0) return { fn: node, index };
+    }
+    const statements = ts.isBlock(node) || ts.isSourceFile(node) ? node.statements : [];
+    for (const statement of statements) {
+      if (!ts.isVariableStatement(statement)) continue;
+      for (const decl of statement.declarationList.declarations) {
+        if (ts.isIdentifier(decl.name) && decl.name.text === name && decl.initializer) return { init: decl.initializer };
+      }
+    }
+  }
+  return null;
+}
+
+/** Elements of an array literal (or a const bound to one), optionally the `index`th of each tuple. */
+function iterableValues(expr, index, depth) {
+  if (ts.isIdentifier(expr)) {
+    const binding = findBinding(expr.text, expr);
+    return binding?.init ? iterableValues(binding.init, index, depth + 1) : null;
+  }
+  if (!ts.isArrayLiteralExpression(expr)) return null;
+  return union(
+    expr.elements.map((el) => {
+      if (index === null) return valuesOf(el, depth + 1);
+      return ts.isArrayLiteralExpression(el) && el.elements[index] ? valuesOf(el.elements[index], depth + 1) : null;
+    }),
+  );
+}
+
+/** Every string `fn`'s parameter `index` can take: each call site's argument, or the array a callback iterates. */
+function parameterValues(fn, index, depth) {
+  const call = fn.parent;
+  if (ts.isCallExpression(call) && call.arguments.includes(fn) && ts.isPropertyAccessExpression(call.expression)) {
+    return ARRAY_CALLBACKS.has(call.expression.name.text) && index === 0 ? iterableValues(call.expression.expression, null, depth) : null;
+  }
+  let name = null;
+  if (ts.isFunctionDeclaration(fn) && fn.name) name = fn.name.text;
+  else if (ts.isVariableDeclaration(fn.parent) && ts.isIdentifier(fn.parent.name)) name = fn.parent.name.text;
+  if (!name) return null;
+  const sets = [];
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === name) {
+      sets.push(node.arguments[index] ? valuesOf(node.arguments[index], depth + 1) : null);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(fn.getSourceFile());
+  return sets.length > 0 ? union(sets) : null;
+}
+
+/** The set of strings an expression can evaluate to, or null when it is computed in a way we cannot follow. */
+function valuesOf(expr, depth = 0) {
+  if (depth > MAX_DEPTH) return null;
+  if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) return new Set([expr.text]);
+  if (ts.isParenthesizedExpression(expr)) return valuesOf(expr.expression, depth + 1);
+  if (ts.isConditionalExpression(expr)) return union([valuesOf(expr.whenTrue, depth + 1), valuesOf(expr.whenFalse, depth + 1)]);
+  if (!ts.isIdentifier(expr)) return null;
+  const binding = findBinding(expr.text, expr);
+  if (!binding) return null;
+  if (binding.init) return valuesOf(binding.init, depth + 1);
+  if (binding.iterable) return iterableValues(binding.iterable, binding.index, depth + 1);
+  return parameterValues(binding.fn, binding.index, depth + 1);
+}
 
 /** Scan one test file's text. Returns sorted repo-relative src paths (directories end in '/'). */
 export function scanTestSource(text, testFile, tree) {
   if (!READ_API.test(text)) return [];
   const testDir = posix.dirname(testFile);
   const sourceFile = ts.createSourceFile(testFile, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  const literals = new Set();
   const paths = [];
   const templates = [];
   const visit = (node) => {
     if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-      literals.add(node.text);
       if (!isModuleSpecifier(node) && !joinedOntoNonRoot(node)) paths.push(node.text);
     } else if (ts.isTemplateExpression(node) && !isModuleSpecifier(node) && !joinedOntoNonRoot(node)) {
-      templates.push([node.head.text, ...node.templateSpans.map((span) => span.literal.text)]);
+      templates.push(node);
     }
     ts.forEachChild(node, visit);
   };
@@ -94,17 +173,19 @@ export function scanTestSource(text, testFile, tree) {
     if (tree.files.includes(rel)) reads.add(rel);
     else if (tree.dirs.has(`${rel}/`)) reads.add(`${rel}/`);
   }
-  for (const parts of templates) {
-    const joined = parts.join(HOLE);
+  for (const node of templates) {
+    const joined = [node.head.text, ...node.templateSpans.map((span) => span.literal.text)].join(HOLE);
     if (!joined.includes('src/')) continue;
     const rel = resolveLiteral(joined, testDir);
     if (!rel) continue;
     const pattern = new RegExp(`^${rel.split(HOLE).map(escapeRegex).join('([^/]*)')}$`);
     const matches = tree.files.map((file) => [file, file.match(pattern)]).filter(([, match]) => match);
-    // `${surface}Browser.ts` with 'analysis'/'play' literals in the file: keep only those expansions.
-    // Fall back to every match when the hole values are computed rather than written as literals.
-    const narrowed = matches.filter(([, match]) => match.slice(1).every((hole) => literals.has(hole)));
-    for (const [file] of narrowed.length > 0 ? narrowed : matches) reads.add(file);
+    // `${surface}Browser.ts` inside `for (const surface of ['analysis', 'play'])`: keep only those expansions.
+    // A hole whose values cannot be traced to literals bound to it widens to every matching file.
+    const holeValues = node.templateSpans.map((span) => valuesOf(span.expression));
+    for (const [file, match] of matches) {
+      if (holeValues.every((values, i) => values === null || values.has(match[i + 1]))) reads.add(file);
+    }
   }
   return [...reads].sort();
 }
