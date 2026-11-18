@@ -47,6 +47,7 @@ test('a waiter never waits on a release registered after it started (no self-wai
   await Promise.race([waiter, new Promise((resolve) => setTimeout(resolve, 50))]);
   assert.equal(admitted, true, 'the waiter is admitted once the releases it observed have settled');
   await later;
+  await awaitEngineRetirements();
   assert.equal(hasEngineRetirements(), false);
 });
 
@@ -66,4 +67,19 @@ test('a stalled release stops holding the barrier after the cap, with a warning'
   await waiter;
   assert.match(warnings.join('\n'), /still pending/);
   assert.equal(hasEngineRetirements(), false, 'later engine starts do not pay the cap again');
+});
+
+test('a caller awaiting its own release still waits for the real completion past the cap', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.method(console, 'warn', () => {});
+  const release = Promise.withResolvers();
+  let released = false;
+  const direct = trackEngineRetirement(release.promise).then(() => {
+    released = true;
+  });
+  t.mock.timers.tick(ENGINE_RETIREMENT_CAP_MS);
+  await awaitEngineRetirements();
+  assert.equal(released, false, 'e.g. GPU-IO setup failure must not create its CPU-IO session while the first is live');
+  release.resolve();
+  await direct;
 });

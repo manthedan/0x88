@@ -79,6 +79,8 @@ export class Lc0WebHybridEvaluator {
 
   private runtime(): Promise<Lc0WebHybridEvaluatorRuntime> {
     if (!this.runtimePromise) {
+      // A queued evaluation must not restart the init that dispose() cancelled.
+      this.owner.signal.throwIfAborted();
       const runtimePromise = this.createRuntime({
         packUrl: this.packUrl,
         layers: this.layers,

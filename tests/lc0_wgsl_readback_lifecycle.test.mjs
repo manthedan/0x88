@@ -172,3 +172,43 @@ test('batch finalization releases a mapped buffer after a mapped-range read thro
   assert.equal(batch.unmapped, 1);
   assert.equal(r.wgslDeferredReadbackInUse.size, 0);
 });
+
+test('a hybrid runtime init cancelled during pipeline compilation allocates nothing and releases what it holds', async () => {
+  const compile = Promise.withResolvers();
+  const events = [];
+  const device = {
+    createBuffer: () => events.push('createBuffer'),
+    destroy: () => events.push('device.destroy'),
+  };
+  const session = { session: 'head' };
+  const CreateRuntime = runInNewContext(`${stripTypeScriptTypes(classSource)}; Lc0WebHybridRuntime`, {
+    nowMs: () => performance.now(),
+    clampInteger: (value, fallback) => value ?? fallback,
+    lc0WebEncoderBlockTensorNames: () => ({}),
+    inputBodyTensorNameList: () => [],
+    encoderBlockTensorNameList: () => [],
+    policyValueHeadTensorNameList: () => [],
+    loadLc0WebModelPack: async () => ({ manifestUrl: '/pack.json', elapsedMs: 0 }),
+    requestDevice: async () => ({ device, timestampQuerySupported: false }),
+    createLc0WasmInputEncoder: async () => undefined,
+    createLc0WasmLegalPriors: async () => undefined,
+    prepareInitialInputTensors: (tensors) => tensors,
+    loadInitialInputTensors: () => ({}),
+    loadEncoder0FfnInputs: () => ({}),
+    loadPolicyValueHeadTensors: () => ({}),
+    gpuGlobals: () => ({ GPUBufferUsage: { STORAGE: 1, COPY_DST: 2, MAP_READ: 4, UNIFORM: 8 } }),
+    DEFAULT_TOKENS: 64,
+    DEFAULT_N: 256,
+    hybridPipelineDescriptors: () => [],
+    createLc0WebGpuPipelineCache: () => compile.promise,
+    createCachedPolicyValueHeadSession: async () => session,
+    ort: { releaseOrtSession: async (released) => events.push(`release:${released}`) },
+  });
+  const owner = new AbortController();
+  const creating = CreateRuntime.create({ packUrl: '/pack.json', layers: 1, signal: owner.signal });
+  await new Promise(setImmediate);
+  owner.abort(); // Past the cap, a replacement may already be loading.
+  compile.resolve({});
+  await assert.rejects(creating, { name: 'AbortError' });
+  assert.deepEqual(events, ['release:head', 'device.destroy']);
+});

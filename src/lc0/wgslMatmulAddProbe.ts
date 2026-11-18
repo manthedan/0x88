@@ -8201,6 +8201,8 @@ class Lc0WebHybridRuntime {
     const buffers: BufferLike[] = [];
     let headSession: CachedPolicyValueHeadSession | undefined;
     try {
+      // A canceled owner may already have been replaced: stop before each allocation stage.
+      options.signal?.throwIfAborted();
       const inputTensors = prepareInitialInputTensors(loadInitialInputTensors(pack));
       const tensorsByLayer = layerTensorNames.map((names) => loadEncoder0FfnInputs(pack, names));
       const headTensors = encoderProfileOnly ? undefined : loadPolicyValueHeadTensors(pack);
@@ -8219,6 +8221,7 @@ class Lc0WebHybridRuntime {
       }
       const pipelineCache = (initializedResources[0] as PromiseFulfilledResult<WgslPipelineCache>).value;
       headSession = (headSessionResult as PromiseFulfilledResult<CachedPolicyValueHeadSession | undefined>).value;
+      options.signal?.throwIfAborted();
       const inputBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
       const readbackBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
       buffers.push(inputBuffer, readbackBuffer);
