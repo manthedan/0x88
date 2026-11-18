@@ -57,14 +57,27 @@ const proc = (pid, type, used) => `        GPU instance ID                   : N
             Type                          : ${type}
             Name                          : /home/ddbb/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome --type=gpu-process --x=a:b
             Used GPU Memory               : ${used}`;
-const vramReport = (...procs) => pidsReport(procs.length ? `    Processes\n${procs.join('\n')}` : '    Processes                                          : None');
+const vramReport = (...procs) =>
+  pidsReport(procs.length ? `    Processes\n${procs.join('\n')}` : '    Processes                                          : None');
 
 test('nvidia-smi PIDS report parses every context type to MiB per PID; unavailable values are errors, not zero', () => {
   assert.deepEqual(parseNvidiaProcesses(vramReport(proc(313973, 'C+G', '90 MiB'))), new Map([[313973, 90]]));
   // Graphics-only contexts are absent from --query-compute-apps but count here.
-  assert.deepEqual(parseNvidiaProcesses(vramReport(proc(5, 'G', '40 MiB'), proc(6, 'C', '2 MiB'))), new Map([[5, 40], [6, 2]]));
+  assert.deepEqual(
+    parseNvidiaProcesses(vramReport(proc(5, 'G', '40 MiB'), proc(6, 'C', '2 MiB'))),
+    new Map([
+      [5, 40],
+      [6, 2],
+    ]),
+  );
   assert.deepEqual(parseNvidiaProcesses(vramReport()), new Map());
-  assert.deepEqual(parseNvidiaProcesses(vramReport(proc(7, 'C+G', '10 MiB'), proc(8, 'G', '1 MiB'), proc(7, 'C', '5 MiB'))), new Map([[7, 15], [8, 1]]));
+  assert.deepEqual(
+    parseNvidiaProcesses(vramReport(proc(7, 'C+G', '10 MiB'), proc(8, 'G', '1 MiB'), proc(7, 'C', '5 MiB'))),
+    new Map([
+      [7, 15],
+      [8, 1],
+    ]),
+  );
   assert.throws(() => parseNvidiaProcesses(vramReport(proc(7, 'G', 'Not available'))), /Used GPU Memory: Not available/);
   assert.throws(() => parseNvidiaProcesses(vramReport(proc(7, 'G', '10 MiB').replace(/.*Used GPU Memory.*/, ''))), /without Used GPU Memory/);
   assert.throws(() => parseNvidiaProcesses(''), /Unrecognized/);
@@ -230,7 +243,10 @@ test('WebGPU warm-up retries the early null adapter, rejects software and f16-le
   assert.equal(polls, 4, 'checks once more after the last wait');
   assert.equal(lingering.state.closed, 1);
   const noF16 = fakeBrowser([{ ...nvidia, shaderF16: false }]);
-  await assert.rejects(warmWebGpu(noF16, async () => true, { attempts: 3, delayMs: 0 }), /lacks shader-f16/);
+  await assert.rejects(
+    warmWebGpu(noF16, async () => true, { attempts: 3, delayMs: 0 }),
+    /lacks shader-f16/,
+  );
   assert.equal(noF16.state.closed, 1);
 });
 
@@ -242,9 +258,33 @@ test('the gate refuses to combine sessions from different browser builds (browse
   assert.equal(browserIdentity(same), '149.0.7827.55 @ /c/chromium-1228/chrome');
   assert.equal(browserIdentity({ browserVersion: '27.0' }), '27.0', 'macOS rows carry no executable');
   assert.equal(browserIdentity({}), null);
-  assert.doesNotThrow(() => compareRuns(rows(() => same), options));
+  assert.doesNotThrow(() =>
+    compareRuns(
+      rows(() => same),
+      options,
+    ),
+  );
   // A session that failed before launching a browser has no identity and does not count as a different build.
-  assert.doesNotThrow(() => compareRuns(rows((i) => (i ? same : {})), options));
-  assert.throws(() => compareRuns(rows((i) => (i ? same : chromium('150.0.1.0', same.browserExecutable))), options), /different browser builds: 150\.0\.1\.0 @/);
-  assert.throws(() => compareRuns(rows((i) => (i ? same : chromium(same.browserVersion, '/c/chromium-1223/chrome'))), options), /different browser builds/);
+  assert.doesNotThrow(() =>
+    compareRuns(
+      rows((i) => (i ? same : {})),
+      options,
+    ),
+  );
+  assert.throws(
+    () =>
+      compareRuns(
+        rows((i) => (i ? same : chromium('150.0.1.0', same.browserExecutable))),
+        options,
+      ),
+    /different browser builds: 150\.0\.1\.0 @/,
+  );
+  assert.throws(
+    () =>
+      compareRuns(
+        rows((i) => (i ? same : chromium(same.browserVersion, '/c/chromium-1223/chrome'))),
+        options,
+      ),
+    /different browser builds/,
+  );
 });

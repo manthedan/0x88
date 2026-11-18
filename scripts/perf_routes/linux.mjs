@@ -101,7 +101,12 @@ export function linuxFootprintReader({ readText = (path) => readFile(path, 'utf8
 // vulkan_enable_f16_on_nvidia is set. Without shader-f16 the app runs every ORT session (Lc0, Maia3)
 // on WASM, so the run would measure the CPU fallback, not the WebGPU path that Windows/NVIDIA (D3D12)
 // users get. Linux Chrome users on such drivers do get WASM; this datapoint stands in for Windows.
-export const LINUX_CHROME_ARGS = ['--enable-features=Vulkan', '--use-angle=vulkan', '--disable-vulkan-surface', '--enable-dawn-features=vulkan_enable_f16_on_nvidia'];
+export const LINUX_CHROME_ARGS = [
+  '--enable-features=Vulkan',
+  '--use-angle=vulkan',
+  '--disable-vulkan-surface',
+  '--enable-dawn-features=vulkan_enable_f16_on_nvidia',
+];
 
 export const ADAPTER_INFO = `(async () => {
   const a = await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' });

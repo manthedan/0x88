@@ -282,7 +282,14 @@ export function compareRuns(runs, options) {
   if (platforms.length > 1) throw Error(`Refusing to compare runs from different platforms: ${platforms.join(', ')}`);
   // A browser update or a changed PERF_ROUTES_CHROMIUM between --resume invocations must not mix builds.
   for (const browser of new Set(runs.map((r) => r.browser))) {
-    const builds = [...new Set(runs.filter((r) => r.browser === browser).map(browserIdentity).filter(Boolean))];
+    const builds = [
+      ...new Set(
+        runs
+          .filter((r) => r.browser === browser)
+          .map(browserIdentity)
+          .filter(Boolean),
+      ),
+    ];
     if (builds.length > 1) throw Error(`Refusing to combine ${browser} sessions from different browser builds: ${builds.join('; ')}. Start a new cohort.`);
   }
   const platform = platforms[0] ?? null;
