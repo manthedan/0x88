@@ -313,8 +313,12 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
       const vm = runtime.createVirtualMachine(runtime.webgpu());
       return new SquareformerTvmjsWebgpuEvaluator(runtime, device, vm.getInternalModule(), meta, model.batch, manifestResolved.toString());
     } catch (error) {
-      runtime?.dispose();
-      device.destroy();
+      // The device must be destroyed even if runtime cleanup throws, or the ORT fallback starts beside live GPU allocations.
+      try {
+        runtime?.dispose();
+      } finally {
+        device.destroy();
+      }
       throw error;
     }
   }
