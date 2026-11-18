@@ -508,6 +508,44 @@ test('cancelling Analysis during reclaim does not start a model or restart a ret
   );
 });
 
+test('cancelling Play during reclaim retracts its Freeing memory note and starts no model', async (t) => {
+  const native = nativeModels(t, { gap: 20000 });
+  fakeTime(t);
+  const engines = createPlayEngines({
+    loadCentipawn: () => assert.fail('unused'),
+    createCpuEngine: () => {
+      const cpu = new native.StockfishEngine({}, 'lite');
+      cpu.analyze(1);
+      return cpu;
+    },
+  });
+  let note = '';
+  const ui = {
+    current: () => () => true,
+    mounted: () => true,
+    note: (text) => {
+      note = text;
+    },
+    clearNote: (text) => {
+      if (note === text) note = '';
+    },
+    progress: nop,
+    hideProgress: nop,
+  };
+  await engines.cpuEngineFor({ id: 'sf-lite', label: 'Stockfish', family: 'sf', variant: 'lite' }, ui);
+  const turn = new AbortController();
+  const loading = assert.rejects(engines.acquireBigNet('bt4', turn.signal, ui), { name: 'AbortError' });
+  await tick();
+  assert.equal(note, 'Freeing memory…');
+  turn.abort();
+  await loading;
+  assert.equal(note, '');
+  assert.deepEqual(
+    native.trace.map(({ name, phase }) => `${name}:${phase}`),
+    ['sf-lite:init', 'sf-lite:terminated'],
+  );
+});
+
 test('removing the large row cancels reclaim so CPU-only Analysis can restart without the timer', async (t) => {
   const native = nativeModels(t, { gap: 20000 });
   fakeTime(t);
