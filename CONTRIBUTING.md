@@ -132,6 +132,13 @@ Two things people usually miss:
 - Comments explain *why*, especially for anything that looks arbitrary. Several
   constants in this repo encode a hard-won browser or toolchain constraint; if
   you find one that is unexplained, documenting it is a good first PR.
+- Some tests read `src/` files as text, sometimes through computed paths, so
+  grep misses them. Before moving or renaming code, run
+  `npm run test:who-reads -- src/lc0/<file>.ts`. A new test that reads source
+  fails `tests/source_text_reads.test.mjs` until it is listed, with a reason, in
+  `tests/source_text_reads.allowlist.json`
+  (`node scripts/check_source_text_reads.mjs --update --reason "<why>"`).
+  Prefer testing behaviour through exports.
 - Don't commit generated engine binaries unless the distribution policy says
   that family is deploy-tracked.
 - Documentation belongs in `docs/` when it is durable product, runtime,
