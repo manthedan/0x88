@@ -526,6 +526,9 @@ function webgpuUsableForProviderSelection(): boolean {
 
 export function resolvedOrtExecutionProviders(requested = requestedOrtExecutionProvider()): string[] {
   if (requested === 'webgpu') return ['webgpu'];
+  // The CPU-only binary is thread-global once loaded: a later request (a client-side
+  // navigation that dropped ?ep=wasm) stays on WASM rather than failing to lock.
+  if (lockedOrtRuntimeArtifactKind === 'wasm') return ['wasm'];
   if (requested === 'webgpu,wasm') return webgpuUsableForProviderSelection() ? ['webgpu', 'wasm'] : ['wasm'];
   if (requested === 'auto') return webgpuUsableForProviderSelection() ? ['webgpu', 'wasm'] : ['wasm'];
   return ['wasm'];
