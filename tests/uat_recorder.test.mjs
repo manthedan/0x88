@@ -440,7 +440,16 @@ test('probe samples overflow, controls and texts from a DOM', () => {
   };
   const stop = el('button', [250, 0, 340, 40], { id: 'stop', innerText: 'Stop 41%', childNodes: [{ nodeType: 3, textContent: 'Stop' }] });
   const toolbar = el('div', [0, 0, 300, 40], { id: 'toolbar' }, [stop]);
-  const body = el('body', [0, 0, 400, 800], {}, [toolbar]);
+  // Neither a 1px screen-reader-only box nor a closed <details> body is on screen, so neither overflows.
+  const srOnly = el('p', [0, 50, 1, 51], {
+    id: 'announcement',
+    scrollWidth: 400,
+    style: { display: 'block', visibility: 'visible', overflowX: 'hidden', overflowY: 'hidden', position: 'absolute', clip: 'auto', clipPath: 'inset(50%)' },
+  });
+  const summary = el('summary', [0, 60, 300, 80], { id: 'summary' });
+  const hiddenBody = el('div', [0, 80, 360, 200], { id: 'detailsBody' });
+  const details = el('details', [0, 60, 300, 80], { id: 'details', open: false }, [summary, hiddenBody]);
+  const body = el('body', [0, 0, 400, 800], {}, [toolbar, srOnly, details]);
   const html = el('html', [0, 0, 400, 800], {}, [body]);
   body.parentElement = html;
   const document = {
@@ -473,6 +482,11 @@ test('probe samples overflow, controls and texts from a DOM', () => {
   runInNewContext(`(${installUatProbe})(${detectOverflows}, ${JSON.stringify({ ...PROBE_OPTIONS, textSelectors: ['#status'] })})`, window);
   const sample = JSON.parse(JSON.stringify(window.__uat.sample())); // cross-realm objects
   assert.deepEqual(sample.overflow, [{ key: '#stop', kind: 'escapes', dx: 40, dy: 0, text: 'Stop 41%' }]);
+  details.open = true;
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(window.__uat.sample())).overflow.map((o) => `${o.key} ${o.kind}`),
+    ['#stop escapes', '#detailsBody escapes'],
+  );
   assert.deepEqual(sample.controls, { '#stop': [250, 0, 90, 40] });
   assert.deepEqual(sample.texts, [['#toolbar', 'Searching…']]);
   assert.equal(sample.url, '/app/analysis/');
