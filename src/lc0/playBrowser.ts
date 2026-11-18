@@ -428,7 +428,7 @@ function ctxActionableEngineError(ctx: PlayContext, error: unknown): string {
 }
 
 function ctxSetEngineFailure(ctx: PlayContext, error: unknown): void {
-  ctxSetEngineNote(ctxActionableEngineError(ctx, error), true);
+  ctxSetEngineNote(ctx, ctxActionableEngineError(ctx, error), true);
   ctx.dom.buttonEl('retryEngine').hidden = false;
 }
 
