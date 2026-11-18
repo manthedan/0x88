@@ -43,7 +43,7 @@ import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryC
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
-import { lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
+import { LC0_SMALL_BATCH1_QDQ8_PATH, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
 import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle } from './maia3.ts';
 import type { MountScope } from './mountScope.ts';
@@ -79,16 +79,16 @@ import { uciGameHistory } from './uciGameHistory.ts';
 import { createWakeLockManager } from './wakeLock.ts';
 import { createWorkspaceAutosave, decodePlaySnapshot, readWorkspace } from './workspaceAutosave.ts';
 
-const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
-
-/** Read per mount: client-side navigation can change ?model= without reloading this module. */
+/** Read per mount: client-side navigation can change ?model=, ?assetBase= and ?modelBase= without reloading this module. */
 function playModelRequest(url: URL): { blockedModelOverride: boolean; lc0SmallModel: Lc0SmallModel } {
   const requested = url.searchParams.get('model');
+  // resolvePublicAssetUrl reads the asset base from the live page URL, which is this mount's.
+  const defaultModelUrl = resolvePublicAssetUrl(LC0_SMALL_BATCH1_QDQ8_PATH);
   // v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
   const blockedModelOverride = phoneBlockedBigNetModelUrl(requested);
   return {
     blockedModelOverride,
-    lc0SmallModel: lc0SmallModelRequest(DEFAULT_MODEL_URL, isV0DeployProfile() || blockedModelOverride ? null : requested, resolvePublicAssetUrl),
+    lc0SmallModel: lc0SmallModelRequest(defaultModelUrl, isV0DeployProfile() || blockedModelOverride ? null : requested, resolvePublicAssetUrl),
   };
 }
 

@@ -380,7 +380,7 @@ test('an explicit ?model= override, even naming the default file, loads exactly 
     // Known large-net overrides additionally require phone consent; ordinary overrides are unchanged.
     assert.match(
       source,
-      /lc0SmallModelRequest\(\s*DEFAULT_MODEL_URL,\s*isV0DeployProfile\(\)(?: \|\| blockedModelOverride)? \? null : (?:params\.get\('model'\)|requested)/,
+      /lc0SmallModelRequest\(\s*(?:DEFAULT_MODEL_URL|defaultModelUrl),\s*isV0DeployProfile\(\)(?: \|\| blockedModelOverride)? \? null : (?:params\.get\('model'\)|requested)/,
       file,
     );
     assert.doesNotMatch(source, /(deviceSelection|deviceModelSelection): MODEL_URL === DEFAULT_MODEL_URL/, file);
@@ -400,7 +400,9 @@ test('an explicit ?model= override, even naming the default file, loads exactly 
   assert.deepEqual(loads, [[ORIGINAL, false]]);
 });
 
-test("Play's readiness and move paths forward its small-net request to the engine host intact", async () => {
+// Play's own request builder plus its production readiness and move paths. `base` stands
+// in for the ?assetBase=/?modelBase= override that resolvePublicAssetUrl reads from the page URL.
+function playSmallNetPaths(engines, failures, assetBase = { current: '' }) {
   const play = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
   const slice = (start, end) => {
     const from = play.indexOf(start);
@@ -408,13 +410,55 @@ test("Play's readiness and move paths forward its small-net request to the engin
     assert.ok(from >= 0 && to > from, start);
     return stripTypeScriptTypes(play.slice(from, to));
   };
-  // Play's own request declaration plus its production readiness and move paths.
-  const code = `${slice('const DEFAULT_MODEL_URL =', 'interface PlayEngineOption')}
+  const code = `${slice('function playModelRequest(', 'interface PlayEngineOption')}
     ${slice('async function ctxRequestEngineMove(', 'async function ctxVerifySelectedEngineReady(')}
     ${slice('async function ctxVerifySelectedEngineReady(', '// ---')}
-    return { move: ctxRequestEngineMove, ready: ctxVerifySelectedEngineReady };`;
+    return { request: playModelRequest, move: ctxRequestEngineMove, ready: ctxVerifySelectedEngineReady };`;
   const small = { id: 'lc0-small', label: 'Lc0', family: 'lc0', variant: 'small' };
+  const deps = {
+    engines,
+    LC0_SMALL_BATCH1_QDQ8_PATH,
+    resolvePublicAssetUrl: (url) => (url.startsWith('/models/') ? `${assetBase.current}${url}` : url),
+    isV0DeployProfile: () => false,
+    phoneBlockedBigNetModelUrl: () => null,
+    lc0SmallModelRequest,
+    ctxSelectedEngine: () => small,
+    ctxStrengthFor: () => 1,
+    ctxSetEngineNote() {},
+    ctxRender() {},
+    ctxHideDownloadProgress() {},
+    ctxSetEngineFailure: (_ctx, error) => failures.push(error.message),
+  };
+  return new Function('deps', `const { ${Object.keys(deps)} } = deps; ${code}`)(deps);
+}
+
+function playMountCtx(api, query) {
   const engineUi = { current: () => () => false, mounted: () => true, note() {}, clearNote() {}, progress() {}, hideProgress() {} };
+  return {
+    ...api.request(new URL(`https://0x88.test/app/play?${query}`)),
+    abort: new AbortController(),
+    board: { turn: 'w' },
+    humanColor: 'w',
+    moves: [],
+    positions: [],
+    enginePreparationGeneration: 0,
+    opponent: { active: { level: 0 } },
+    engineUi,
+    dom: { buttonEl: () => ({}) },
+  };
+}
+
+function recordingSmallNetHost(loads) {
+  return createPlayEngines({
+    loadCentipawn: () => assert.fail('unused'),
+    loadLc0Small: async (url, options) => {
+      loads.push([url, options.deviceSelection]);
+      throw new Error('loader stops here');
+    },
+  });
+}
+
+test("Play's readiness and move paths forward its small-net request to the engine host intact", async () => {
   for (const [query, expected] of [
     ['', [ORIGINAL, true]],
     [`model=${ORIGINAL}`, [ORIGINAL, false]],
@@ -423,39 +467,8 @@ test("Play's readiness and move paths forward its small-net request to the engin
     for (const path of ['ready', 'move']) {
       const loads = [];
       const failures = [];
-      const engines = createPlayEngines({
-        loadCentipawn: () => assert.fail('unused'),
-        loadLc0Small: async (url, options) => {
-          loads.push([url, options.deviceSelection]);
-          throw new Error('loader stops here');
-        },
-      });
-      const deps = {
-        engines,
-        params: new URLSearchParams(query),
-        resolvePublicAssetUrl: (url) => url,
-        isV0DeployProfile: () => false,
-        phoneBlockedBigNetModelUrl: () => null,
-        lc0SmallModelRequest,
-        ctxSelectedEngine: () => small,
-        ctxStrengthFor: () => 1,
-        buttonEl: () => ({}),
-        ctxSetEngineNote() {},
-        ctxRender() {},
-        ctxHideDownloadProgress() {},
-        ctxSetEngineFailure: (_ctx, error) => failures.push(error.message),
-      };
-      const api = new Function('deps', `const { ${Object.keys(deps)} } = deps; ${code}`)(deps);
-      const ctx = {
-        abort: new AbortController(),
-        board: { turn: 'w' },
-        humanColor: 'w',
-        moves: [],
-        positions: [],
-        enginePreparationGeneration: 0,
-        opponent: { active: { level: 0 } },
-        engineUi,
-      };
+      const api = playSmallNetPaths(recordingSmallNetHost(loads), failures);
+      const ctx = playMountCtx(api, query);
       if (path === 'ready') {
         await api.ready(ctx);
         assert.deepEqual(failures, ['loader stops here'], query);
@@ -463,6 +476,22 @@ test("Play's readiness and move paths forward its small-net request to the engin
       assert.deepEqual(loads, [expected], `${path} ${query}`);
     }
   }
+});
+
+test("Play resolves the default small net against each mount's asset base, not the first module load's", async () => {
+  const loads = [];
+  const assetBase = { current: 'https://old.cdn' };
+  // Evaluating the slice is the module load; each request is one mount.
+  const api = playSmallNetPaths(recordingSmallNetHost(loads), [], assetBase);
+  for (const base of ['https://new.cdn', '']) {
+    assetBase.current = base;
+    const ctx = playMountCtx(api, '');
+    await assert.rejects(api.move(ctx, ctx.abort.signal), /loader stops here/);
+  }
+  assert.deepEqual(loads, [
+    [`https://new.cdn${ORIGINAL}`, true],
+    [ORIGINAL, true],
+  ]);
 });
 
 test('critical-moment results are keyed by the model the Lc0 lane actually ran', async () => {
