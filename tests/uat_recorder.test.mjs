@@ -4,6 +4,7 @@ import { runInNewContext } from 'node:vm';
 import { JOURNEYS, PROMOTION_FEN } from '../scripts/uat/journeys.mjs';
 import {
   assembleTimeline,
+  burstGapFor,
   cadenceFor,
   chunk,
   collapseFrames,
@@ -11,6 +12,7 @@ import {
   diffControlRects,
   FrameStore,
   parseViewports,
+  renderIndexHtml,
   renderJourneyHtml,
   renderSheetHtml,
 } from '../scripts/uat/lib.mjs';
@@ -51,6 +53,15 @@ test('cadence thins after the soft cap and stops after the hard cap', () => {
   assert.equal(cadenceFor(0, opts), 250);
   assert.equal(cadenceFor(10, opts), 1000);
   assert.equal(cadenceFor(20, opts), null);
+});
+
+test('burst captures outlive the cadence cap, sparser, up to 1.5x the hard cap', () => {
+  const opts = { burstGap: 100, softCap: 10, hardCap: 20 };
+  assert.equal(burstGapFor(0, opts), 100);
+  assert.equal(burstGapFor(10, opts), 400);
+  assert.equal(burstGapFor(20, opts), 2000);
+  assert.equal(burstGapFor(29, opts), 2000);
+  assert.equal(burstGapFor(30, opts), null);
 });
 
 test('frame store writes identical screenshots once', () => {
@@ -237,6 +248,24 @@ test('review pages escape page text and link frames', () => {
   const sheet = renderSheetHtml(collapseFrames(tl.frames), { title: 't', cols: 6, thumbWidth: 210 });
   assert.match(sheet, /src="\.\.\/frames\/0001\.jpg"/);
   assert.match(sheet, /grid-template-columns:repeat\(6,210px\)/);
+  // Sheets are screenshotted after load, so lazy images would be missing from the capture.
+  assert.ok(!sheet.includes('loading="lazy"'));
+  assert.match(page, /loading="lazy"/);
+});
+
+test('review pages escape every imported timeline field (--sheets-only reads shared recordings)', () => {
+  const evil = '<script>x()</script>';
+  const tl = assembleTimeline({
+    meta: { startedAt: 0, journey: 'j', viewport: { name: 'v', mobile: false }, browser: 'b', status: 's', cadenceMs: evil },
+    samples: [],
+  });
+  tl.digest.frames = evil;
+  tl.digest.uniqueFrames = evil;
+  assert.ok(!renderJourneyHtml(tl).includes('<script>'));
+  const index = renderIndexHtml([
+    { dir: 'd', journey: 'j', viewport: 'v', status: 's', uniqueFrames: evil, overflowSpans: evil, controlResizes: evil, errors: evil },
+  ]);
+  assert.ok(!index.includes('<script>'));
 });
 
 test('injected probe script parses and survives String.replace in the proxy', () => {
@@ -326,4 +355,91 @@ test('recorder plan covers every journey at every viewport and keeps FEN encodin
     assert.equal(typeof journey.run, 'function');
     assert.match(journey.entry, /^\/app\//);
   }
+});
+
+// Scripted page: every wait is satisfied at once unless respond() says otherwise.
+function fakeJourneyContext(respond = () => undefined) {
+  const log = [];
+  const steps = [];
+  let failed = false;
+  const ctx = {
+    viewport: { mobile: false },
+    async evaluate(expression) {
+      log.push(['eval', expression]);
+      const answer = respond(expression);
+      return answer === undefined ? true : answer;
+    },
+    async click(selector) {
+      log.push(['click', selector]);
+    },
+    pause: async () => {},
+    note: (type, text) => log.push([type, text]),
+    async step(label, fn) {
+      if (failed) return;
+      try {
+        await fn();
+        steps.push([label, 'ok']);
+      } catch (error) {
+        steps.push([label, 'failed', error.message]);
+        failed = true;
+      }
+    },
+  };
+  return { ctx, log, steps };
+}
+
+test('promotion journey presses Play without waiting for an engine that only loads on Play', async () => {
+  const { ctx, log, steps } = fakeJourneyContext((e) => (/restartBanner/.test(e) ? false : /gameOverCard/.test(e) && !/status/.test(e) ? false : undefined));
+  await JOURNEYS['play-promotion'].run(ctx);
+  assert.ok(!log.some(([kind, e]) => kind === 'eval' && /is ready/.test(e)), 'handoff must not wait for "is ready" before Play');
+  const clicks = log.filter(([kind]) => kind === 'click').map(([, s]) => s);
+  assert.ok(clicks.indexOf('#newGame') < clicks.indexOf('.promotion-overlay .promo-tile[data-promo="q"]'));
+  assert.deepEqual(
+    steps.filter(([, status]) => status !== 'ok'),
+    [],
+  );
+});
+
+test('analysis journey waits for Analyze to enable before clicking it', async () => {
+  const { ctx, log } = fakeJourneyContext((e) => (e === 'window.__analysisSchedulingState().analyzing' ? false : undefined));
+  await JOURNEYS['analysis-engines'].run(ctx);
+  const firstClick = log.findIndex(([kind, s]) => kind === 'click' && s === '#analyze');
+  const enabledWait = log.findIndex(([kind, e]) => kind === 'eval' && e.includes("!document.querySelector('#analyze').disabled"));
+  assert.ok(enabledWait >= 0 && enabledWait < firstClick);
+});
+
+test('analysis journey starts a search before pressing Stop when none is running', async () => {
+  let stopEnabled = false;
+  const { ctx, log } = fakeJourneyContext((e) => {
+    if (/^\[\.\.\.document\.querySelectorAll\('#engineList \.engine-row'\)\]/.test(e))
+      return [
+        ['lc0', 'bt4'],
+        ['sf', 'lite'],
+        ['berserk', ''],
+      ];
+    if (e === "!!document.querySelector('#stop') && !document.querySelector('#stop').disabled") return stopEnabled;
+    if (/option\[value="bt4"\]/.test(e)) return 'ok';
+    return undefined;
+  });
+  const click = ctx.click;
+  ctx.click = async (selector) => {
+    if (selector === '#analyze') stopEnabled = true;
+    if (selector === '#stop') stopEnabled = false;
+    return click(selector);
+  };
+  await JOURNEYS['analysis-engines'].run(ctx);
+  const clicks = log.filter(([kind]) => kind === 'click').map(([, s]) => s);
+  const stop = clicks.indexOf('#stop');
+  assert.ok(stop > 0, 'Stop was pressed');
+  assert.equal(clicks[stop - 1], '#analyze', 'Analyze started a search right before Stop');
+  assert.ok(log.some(([kind, text]) => kind === 'info' && /pressed Analyze/.test(text)));
+});
+
+test('arena journey fails the run when the result chip records an illegal move', async () => {
+  const { ctx, steps } = fakeJourneyContext((e) =>
+    e.includes('chips:') ? { chips: '0-1', log: 'Lc0 Small played an illegal move e2e5', message: 'Match finished' } : undefined,
+  );
+  await JOURNEYS['arena-match'].run(ctx);
+  assert.deepEqual(steps.at(-1).slice(0, 2), ['finished match', 'failed']);
+  assert.match(steps.at(-1)[2], /did not complete validly/);
 });

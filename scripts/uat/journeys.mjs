@@ -2,7 +2,7 @@
 // so a UI change that breaks one breaks both. Each journey is a list of labelled steps; the
 // recorder captures a frame at every step boundary on top of its fixed cadence.
 import { chooseHumanMove, playHumanTurn } from '../perf_routes/human.mjs';
-import { MIDGAME, setControl, userMove, waitFor } from '../perf_routes/journeys.mjs';
+import { arenaGameFailed, MIDGAME, setControl, userMove, waitFor } from '../perf_routes/journeys.mjs';
 
 const PLAY_TURN = `(${playHumanTurn.toString()})(document.querySelector('#status')?.textContent)`;
 // White to move, a7-a8 promotes; the engine has only a king, so the game outlives the promotion.
@@ -15,6 +15,8 @@ const GAME_OVER = `!!document.querySelector('#gameOverCard') && !document.queryS
 const ROWS = `[...document.querySelectorAll('#engineList .engine-row')].map(r => [r.querySelector('.row-fam')?.value, r.querySelector('.row-var')?.value])`;
 const SAN_COUNT = `document.querySelectorAll('#moveList .san').length`;
 const MANAGER_OPEN = `!!document.querySelector('#engineManager')?.open`;
+const STOP_ENABLED = `!!document.querySelector('#stop') && !document.querySelector('#stop').disabled`;
+const ANALYZE_ENABLED = `!!document.querySelector('#analyze') && !document.querySelector('#analyze').disabled`;
 
 /** Click the visible header link, or the phone menu's link when the header nav is collapsed. */
 async function navigateVia(ctx, href, ready) {
@@ -39,19 +41,21 @@ async function ensureWhite(ctx) {
   else await setControl(ctx.evaluate, '#colorSelect', 'white');
 }
 
-async function chooseOpponent(ctx, engine = 'lc0-small') {
+// A handed-off position defers loading the engine until Play is pressed ("Loads on Play"),
+// so only a normal game can wait for readiness before starting.
+async function chooseOpponent(ctx, { waitReady = true } = {}) {
   await waitFor(ctx.evaluate, `${PLAY_READY} && !document.querySelector('#engineSelect')?.disabled`, 120000);
   await ensureWhite(ctx);
-  await setControl(ctx.evaluate, '#engineSelect', engine);
+  await setControl(ctx.evaluate, '#engineSelect', 'lc0-small');
   await setControl(ctx.evaluate, '#levelSelect', '0');
-  await waitFor(ctx.evaluate, `/is ready/.test(document.querySelector('#engineNote')?.textContent)`, 180000);
+  if (waitReady) await waitFor(ctx.evaluate, `/is ready/.test(document.querySelector('#engineNote')?.textContent)`, 180000);
 }
 
 async function startGame(ctx) {
   // Same branch as the production smoke: a started game asks to confirm the restart.
   if (await ctx.evaluate(`!!document.querySelector('#restartBanner') && !document.querySelector('#restartBanner').hidden`)) await ctx.click('#confirmRestart');
   else await ctx.click('#newGame');
-  await waitFor(ctx.evaluate, `${PLAY_TURN} || ${GAME_OVER}`, 120000);
+  await waitFor(ctx.evaluate, `${PLAY_TURN} || ${GAME_OVER}`, 180000);
 }
 
 async function playGame(ctx) {
@@ -78,28 +82,27 @@ async function playPromotion(ctx) {
     await ctx.click('#playFromHere');
     await waitFor(ctx.evaluate, `location.pathname === '/app/play/' && ${PLAY_READY}`, 60000);
   });
-  await ctx.step('choose Lc0 Small, level 0, White', () => chooseOpponent(ctx));
-  await ctx.step('start game', () => startGame(ctx));
+  await ctx.step('choose Lc0 Small, level 0, White', () => chooseOpponent(ctx, { waitReady: false }));
+  await ctx.step('press Play (engine loads)', () => startGame(ctx));
   await ctx.step('drag a7-a8: promotion picker', async () => {
     await ctx.evaluate(`(window.__playUserMove('a7', 'a8'), true)`);
     await waitFor(ctx.evaluate, `!!document.querySelector('.promotion-overlay .promo-tile[data-promo="q"]')`, 10000);
     await ctx.pause(1200); // hold the overlay on screen
   });
-  // Wait on ply counts, not just the status text, so a stale "Your move" cannot satisfy a reply wait.
-  let plies = 0;
-  const engineReply = () => waitFor(ctx.evaluate, `(${SAN_COUNT} > ${plies} && ${PLAY_TURN}) || ${GAME_OVER}`, 120000);
+  // Count from before each human move: a fast reply may already be on the list when the move lands.
+  let before = 0;
+  const engineReply = () => waitFor(ctx.evaluate, `(${SAN_COUNT} >= ${before + 2} && ${PLAY_TURN}) || ${GAME_OVER}`, 120000);
   await ctx.step('pick queen', async () => {
-    const before = await ctx.evaluate(SAN_COUNT);
+    before = await ctx.evaluate(SAN_COUNT);
     await ctx.click('.promotion-overlay .promo-tile[data-promo="q"]');
     await waitFor(ctx.evaluate, `${SAN_COUNT} > ${before}`, 10000);
-    plies = await ctx.evaluate(SAN_COUNT);
   });
   await ctx.step('engine reply after promotion', engineReply);
   for (let i = 0; i < 2; i++) {
     if (await ctx.evaluate(GAME_OVER)) break;
     await ctx.step(`user move ${i + 1} after promotion`, async () => {
+      before = await ctx.evaluate(SAN_COUNT);
       await userMove(ctx.evaluate, false, i);
-      plies = await ctx.evaluate(SAN_COUNT);
     });
     await ctx.step(`engine reply ${i + 1} after promotion`, engineReply);
   }
@@ -115,10 +118,20 @@ async function closeManager(ctx) {
   await waitFor(ctx.evaluate, `!(${MANAGER_OPEN})`, 10000);
 }
 
+async function ensureActiveSearch(ctx) {
+  await waitFor(ctx.evaluate, `${STOP_ENABLED} || ${ANALYZE_ENABLED}`, 60000);
+  if (await ctx.evaluate(STOP_ENABLED)) return;
+  ctx.note('info', 'No search running; pressed Analyze to start one');
+  await ctx.click('#analyze');
+  await waitFor(ctx.evaluate, STOP_ENABLED, 30000);
+}
+
 async function analysisEngines(ctx) {
   await ctx.step('two engines streaming', async () => {
     await waitFor(ctx.evaluate, `${ANALYSIS_READY} && document.querySelectorAll('#engineList .engine-row').length >= 2`, 120000);
     ctx.note('info', `default rows ${JSON.stringify(await ctx.evaluate(ROWS))}`);
+    // Analyze stays disabled while the first backend loads; auto-analysis may start on its own.
+    await waitFor(ctx.evaluate, `window.__analysisSchedulingState().analyzing || ${ANALYZE_ENABLED}`, 180000);
     if (!(await ctx.evaluate(`window.__analysisSchedulingState().analyzing`))) await ctx.click('#analyze');
     await waitFor(ctx.evaluate, `window.__analysisSchedulingState().workerProgressMessages > 0`, 180000);
     await ctx.pause(5000);
@@ -171,19 +184,21 @@ async function analysisEngines(ctx) {
     await closeManager(ctx);
     await ctx.pause(3000);
   });
-  await ctx.step('Stop', async () => {
-    await waitFor(ctx.evaluate, `!!document.querySelector('#stop') && !document.querySelector('#stop').disabled`, 60000);
+  // A refresh after removing an engine can reuse cached results and finish at once, so Stop
+  // follows a board move (a fresh search) and presses Analyze first if nothing is running.
+  await ctx.step('board move, then Stop mid-search', async () => {
+    await userMove(ctx.evaluate, true);
+    await ensureActiveSearch(ctx);
+    await ctx.pause(1000); // progress on the Stop button
+    await ensureActiveSearch(ctx);
     await ctx.click('#stop');
+    await waitFor(ctx.evaluate, `!(${STOP_ENABLED})`, 15000);
     await ctx.pause(2500);
   });
   await ctx.step('Start (Analyze)', async () => {
-    await waitFor(ctx.evaluate, `!!document.querySelector('#analyze') && !document.querySelector('#analyze').disabled`, 30000);
+    await waitFor(ctx.evaluate, ANALYZE_ENABLED, 30000);
     await ctx.click('#analyze');
     await waitFor(ctx.evaluate, `window.__analysisSchedulingState().analyzing`, 30000);
-    await ctx.pause(5000);
-  });
-  await ctx.step('board move during analysis', async () => {
-    await userMove(ctx.evaluate, true);
     await ctx.pause(5000);
   });
   await ctx.step('switch result tabs', async () => {
@@ -227,8 +242,13 @@ async function arenaMatch(ctx) {
     ),
   );
   await ctx.step('finished match', async () => {
-    ctx.note('info', `result ${await ctx.evaluate(`document.querySelector('#gameChips')?.textContent`)}`);
     await ctx.pause(4000);
+    // Illegal moves and timeouts also produce a result chip; the perf gate's check tells them apart.
+    const { chips, log, message } = await ctx.evaluate(
+      `({ chips: document.querySelector('#gameChips')?.textContent ?? '', log: document.querySelector('#log')?.textContent ?? '', message: document.querySelector('#message')?.textContent ?? '' })`,
+    );
+    ctx.note('info', `result ${chips}`);
+    if (arenaGameFailed(log) || /failed|error/i.test(message)) throw Error(`Arena game did not complete validly: ${message} ${log.slice(-300)}`);
   });
 }
 
