@@ -313,6 +313,8 @@ function arenaOwner(disposeArenaCpuEngines = nop) {
     {
       row,
       ARENA_BIG_NET_KEYS: keys,
+      arenaRunDownloads: new Set(),
+      requestLargeNetDownloadConsent: async () => 'cached',
       disposeArenaCpuEngines,
       arenaCacheEntries: () => 2048,
       showDownloadProgress: nop,
@@ -622,6 +624,7 @@ test('phone Analysis Stop during a first BT4 download ends the load, then Maia3 
     clearTimeout(timer);
   }
   assert.equal(bt4.disposeRequest?.type, 'dispose');
+  assert.equal(owner.message.textContent, 'Analysis stopped.', 'Stop replaces the loading status');
   const maia = owner.enableMaia3Panel();
   await tick();
   assert.deepEqual(native.initializing(), ['bt4'], 'Maia3 must wait for the BT4 worker to retire');

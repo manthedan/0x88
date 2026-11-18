@@ -173,6 +173,7 @@ test('batch finalization releases a mapped buffer after a mapped-range read thro
   assert.equal(r.wgslDeferredReadbackInUse.size, 0);
 });
 
+let ownerSignal;
 test('a hybrid runtime init cancelled during pipeline compilation allocates nothing and releases what it holds', async () => {
   const compile = Promise.withResolvers();
   const events = [];
@@ -190,8 +191,8 @@ test('a hybrid runtime init cancelled during pipeline compilation allocates noth
     policyValueHeadTensorNameList: () => [],
     loadLc0WebModelPack: async () => ({ manifestUrl: '/pack.json', elapsedMs: 0 }),
     requestDevice: async () => ({ device, timestampQuerySupported: false }),
-    createLc0WasmInputEncoder: async () => undefined,
-    createLc0WasmLegalPriors: async () => undefined,
+    createLc0WasmInputEncoder: async (_source, signal) => events.push(`input-wasm:${signal === ownerSignal}`),
+    createLc0WasmLegalPriors: async (_source, signal) => events.push(`priors-wasm:${signal === ownerSignal}`),
     prepareInitialInputTensors: (tensors) => tensors,
     loadInitialInputTensors: () => ({}),
     loadEncoder0FfnInputs: () => ({}),
@@ -205,10 +206,18 @@ test('a hybrid runtime init cancelled during pipeline compilation allocates noth
     ort: { releaseOrtSession: async (released) => events.push(`release:${released}`) },
   });
   const owner = new AbortController();
-  const creating = CreateRuntime.create({ packUrl: '/pack.json', layers: 1, signal: owner.signal });
+  ownerSignal = owner.signal;
+  const creating = CreateRuntime.create({
+    packUrl: '/pack.json',
+    layers: 1,
+    signal: owner.signal,
+    inputBackend: 'wasm',
+    legalPriorsBackend: 'wasm',
+    headBackend: 'ort',
+  });
   await new Promise(setImmediate);
   owner.abort(); // Past the cap, a replacement may already be loading.
   compile.resolve({});
   await assert.rejects(creating, { name: 'AbortError' });
-  assert.deepEqual(events, ['release:head', 'device.destroy']);
+  assert.deepEqual(events, ['input-wasm:true', 'priors-wasm:true', 'release:head', 'device.destroy'], 'the WASM helper modules load under the owner signal');
 });

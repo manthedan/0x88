@@ -85,3 +85,23 @@ test('JS legal priors fail at the source on NaN, +Infinity or all -Infinity lega
   assert.equal(priors.find((entry) => entry.uci === 'e2e4').prior, 0);
   assert.ok(Math.abs(priors.reduce((sum, entry) => sum + entry.prior, 0) - 1) < 1e-9);
 });
+
+test('createLc0WasmLegalPriors aborts a stalled module fetch on its owner signal', async (t) => {
+  // A stalled request settles only through its abort signal, like fetch().
+  t.mock.method(
+    globalThis,
+    'fetch',
+    (_url, init = {}) => new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true })),
+  );
+  const controller = new AbortController();
+  const loading = createLc0WasmLegalPriors(undefined, controller.signal);
+  controller.abort();
+  const settled = await Promise.race([
+    loading.then(
+      () => 'loaded',
+      (error) => error.name,
+    ),
+    new Promise((resolve) => setTimeout(() => resolve('stalled'), 100)),
+  ]);
+  assert.equal(settled, 'AbortError', 'Arena Stop must not wait on the hybrid runtime module download');
+});

@@ -1028,7 +1028,8 @@ async function fetchUncachedVerifiedModel(
   options.signal?.throwIfAborted();
   // A prefetch would download bytes only to drop them; its caller loads them itself.
   if (options.cacheOnly) throw new Error(`LC0 model cannot be cached here (${cacheStatus}): ${modelUrl}`);
-  if (options.allowUnverified && !options.onProgress) {
+  // The lab opt-out only skips checks that have no metadata; it never skips a known hash.
+  if (options.allowUnverified && !options.onProgress && !resolved.expectedSha256 && resolved.expectedBytes === undefined) {
     return {
       model: resolved.url,
       url: resolved.url,

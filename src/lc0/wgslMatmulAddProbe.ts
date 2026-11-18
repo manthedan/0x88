@@ -8185,8 +8185,8 @@ class Lc0WebHybridRuntime {
         ),
       }),
       requestDevice({ timestampQuery: options.timestampQuery }),
-      inputBackend === 'wasm' ? createLc0WasmInputEncoder() : Promise.resolve(undefined),
-      legalPriorsBackend === 'wasm' ? createLc0WasmLegalPriors() : Promise.resolve(undefined),
+      inputBackend === 'wasm' ? createLc0WasmInputEncoder(undefined, options.signal) : Promise.resolve(undefined),
+      legalPriorsBackend === 'wasm' ? createLc0WasmLegalPriors(undefined, options.signal) : Promise.resolve(undefined),
     ]);
     const initializationFailure = initialization.find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
     if (initializationFailure) {

@@ -124,14 +124,17 @@ export class Lc0WasmLegalPriors {
   }
 }
 
-export async function createLc0WasmLegalPriors(source: Lc0WasmLegalPriorsSource = '/lc0/lc0_legal_priors.wasm'): Promise<Lc0WasmLegalPriors> {
+export async function createLc0WasmLegalPriors(
+  source: Lc0WasmLegalPriorsSource = '/lc0/lc0_legal_priors.wasm',
+  signal?: AbortSignal,
+): Promise<Lc0WasmLegalPriors> {
   if (source instanceof WebAssembly.Module) return new Lc0WasmLegalPriors(await WebAssembly.instantiate(source, {}));
   if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
     const bytes = source instanceof ArrayBuffer ? source : source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength);
     const result = (await WebAssembly.instantiate(bytes, {})) as WebAssembly.Instance | WebAssembly.WebAssemblyInstantiatedSource;
     return new Lc0WasmLegalPriors(result instanceof WebAssembly.Instance ? result : result.instance);
   }
-  const response = await fetch(source);
+  const response = await fetch(source, { signal });
   if (!response.ok) throw new Error(`Failed to fetch LC0 WASM legal-prior module ${source}: HTTP ${response.status}`);
   const result = (await WebAssembly.instantiate(await response.arrayBuffer(), {})) as WebAssembly.Instance | WebAssembly.WebAssemblyInstantiatedSource;
   return new Lc0WasmLegalPriors(result instanceof WebAssembly.Instance ? result : result.instance);
