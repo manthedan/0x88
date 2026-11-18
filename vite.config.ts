@@ -36,8 +36,9 @@ function chessgroundArrows(): Plugin {
 export default defineConfig({
   cacheDir: sharedNodeModules ? '.vite-cache' : undefined,
   plugins: labOnly ? [] : [chessgroundArrows(), sveltekit()],
-  // Build-time constant: the lab-route layouts 404 in product builds (src/lib/buildScope.ts).
-  define: { 'import.meta.env.VITE_BUILD_SCOPE': JSON.stringify(process.env.BUILD_SCOPE ?? '') },
+  // Build-time constant: the lab-route layouts 404 in product builds (src/lib/buildScope.ts). A bare
+  // global, not import.meta.env.VITE_*, which Vite would also copy into every bundled env object.
+  define: { __BUILD_SCOPE__: JSON.stringify(process.env.BUILD_SCOPE ?? '') },
   optimizeDeps: labOnly ? { exclude: ['onnxruntime-web'] } : { exclude: ['chessground'] },
   resolve: {
     // ORT is configured to load its staged /ort/ glue and WASM at runtime.
