@@ -1168,16 +1168,19 @@ async function workerLc0Lines(
   }
 }
 
-function modelProgressEl(): HTMLElement {
+/** Null once the page is gone (progress can settle after teardown). */
+function modelProgressEl(): HTMLElement | null {
   let node = maybeEl('downloadProgress');
   if (node) return node;
   node = maybeEl('modelLoadProgress');
   if (!node) {
+    const message = maybeEl('message');
+    if (!message) return null;
     node = document.createElement('div');
     node.id = 'modelLoadProgress';
     node.className = 'model-load-progress';
     node.hidden = true;
-    el('message').insertAdjacentElement('afterend', node);
+    message.insertAdjacentElement('afterend', node);
   }
   return node;
 }
@@ -1197,6 +1200,7 @@ const cpuSessions = new AnalysisCpuSessions();
 
 function renderLoadingProgressItems(): void {
   const node = modelProgressEl();
+  if (!node) return;
   const items = [...loadingProgressItems.values()];
   if (items.length) renderLoadingProgress(node, items);
   else hideLoadingProgress(node);
@@ -4171,38 +4175,40 @@ function cancelAnalysisOperation(operationId: number): void {
   const controller = analysisOperations.get(operationId);
   if (!controller) return;
   controller.abort();
-  if (analysisAbort === controller) {
-    retireAnalysisRunCentipawnKeys();
+  const current = analysisAbort === controller;
+  const reload = analysisReloadAbort === controller || !current;
+  // Engines first: page teardown (DISPOSE) cancels after Svelte has removed the DOM, and a
+  // missing element must not leave a worker search or big-net init running.
+  if (current) retireAnalysisRunCentipawnKeys();
+  if (reload) {
+    analysisReloadAbort = null;
+    disposeRuntimeResources(); // also cancels the worker and big nets, and clears analysisAbort
+  }
+  const stillCurrent = analysisAbort === controller;
+  const hybridInit = stillCurrent && activeWorkerSearchId !== null && !!searchWorker && workerRuntime.startsWith('hybrid-') && !workerSearchWarm;
+  if (hybridInit) resetSearchWorker('LC0 hybrid worker initialization cancelled');
+  else if (stillCurrent && activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
+  if (stillCurrent) for (const key of ANALYSIS_BIG_NET_KEYS) peekBigNetSearcher(key)?.cancel();
+  // Progress state outlives the page; the renders skip a page that is gone.
+  clearAnalysisSearchProgress();
+  hideModelProgress();
+  if (mountAbort.signal.aborted) return;
+  el('analyze').toggleAttribute('disabled', false);
+  selectEl('lc0RuntimeSelect').disabled = false;
+  if (current) {
     const message = el('message');
     if (message.textContent === 'Freeing memory…') message.textContent = 'Analysis stopped.';
   }
-  clearAnalysisSearchProgress();
-  hideModelProgress();
-  el('analyze').toggleAttribute('disabled', false);
-  selectEl('lc0RuntimeSelect').disabled = false;
-  if (analysisReloadAbort === controller || analysisAbort !== controller) {
-    analysisReloadAbort = null;
-    disposeRuntimeResources();
+  if (reload) {
     el('stop').toggleAttribute('disabled', true);
     el('backend').textContent = 'not loaded';
     el('message').textContent = 'Analysis stopped during LC0 backend reload.';
   }
-  if (analysisAbort !== controller) return;
-  if (activeWorkerSearchId !== null && searchWorker) {
-    if (workerRuntime.startsWith('hybrid-') && !workerSearchWarm) {
-      resetSearchWorker('LC0 hybrid worker initialization cancelled');
-      clearAnalysisSearchProgress();
-      hideModelProgress();
-      el('stop').toggleAttribute('disabled', true);
-      el('analyze').toggleAttribute('disabled', false);
-      selectEl('lc0RuntimeSelect').disabled = false;
-      el('backend').textContent = 'not loaded';
-      el('message').textContent = 'Analysis stopped during LC0 hybrid backend initialization.';
-    } else {
-      searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
-    }
+  if (hybridInit) {
+    el('stop').toggleAttribute('disabled', true);
+    el('backend').textContent = 'not loaded';
+    el('message').textContent = 'Analysis stopped during LC0 hybrid backend initialization.';
   }
-  for (const key of ANALYSIS_BIG_NET_KEYS) peekBigNetSearcher(key)?.cancel();
 }
 
 function scheduleAnalyzeCurrent(options: { force?: boolean } = {}, delayMs = 250): void {

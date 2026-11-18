@@ -75,3 +75,103 @@ for (const type of ['error', 'messageerror']) {
     api.resetSearchWorker('cleanup');
   });
 }
+
+// Leaving Analysis mid-load: Svelte removes the page's DOM before the mount cleanup dispatches
+// DISPOSE, which cancels the running operation. That cancel must not throw on the missing
+// elements, and must still stop the worker search and big-net inits.
+function cancelController({ page, hybrid = false, reload = false }) {
+  const slice = (start, end) => {
+    const first = source.indexOf(start);
+    const last = source.indexOf(end, first);
+    assert.ok(first >= 0 && last > first, `${start} .. ${end}`);
+    return source.slice(first, last);
+  };
+  const posted = [];
+  const calls = [];
+  const searchWorker = { postMessage: (message) => posted.push(message) };
+  const controller = new AbortController();
+  const document = {
+    getElementById: (id) => page?.get(id) ?? null,
+    createElement: () => ({}),
+  };
+  const code = ts.transpile(
+    `
+    function el(id) { const node = document.getElementById(id); if (!node) throw new Error('Missing #' + id); return node; }
+    const maybeEl = (id) => document.getElementById(id), selectEl = el;
+    const hasBoundedSearchProgress = () => false, searchProgressHtml = () => '';
+    const renderLoadingProgress = (node, items) => { node.hidden = false; node.items = items; };
+    const hideLoadingProgress = (node) => { node.hidden = true; };
+    const searchProgressByEngine = new Map([['lc0', { completed: 1, requested: 4 }]]);
+    const loadingProgressItems = new Map([['model', { id: 'model', label: 'Lc0 BT4' }]]);
+    const mountAbort = new AbortController();
+    if (!page) mountAbort.abort();
+    const analysisOperations = new Map([[1, operation]]);
+    let analysisAbort = reload ? null : operation, analysisReloadAbort = reload ? operation : null;
+    let activeWorkerSearchId = 7, workerSearchWarm = !hybrid, workerRuntime = hybrid ? 'hybrid-small' : 'onnx';
+    let searchWorker = worker;
+    const ANALYSIS_BIG_NET_KEYS = ['bt4', 't3'];
+    const peekBigNetSearcher = (key) => ({ cancel: () => calls.push('cancel ' + key) });
+    const retireAnalysisRunCentipawnKeys = () => calls.push('retire centipawn');
+    const disposeRuntimeResources = () => { calls.push('dispose runtime'); analysisAbort = null; };
+    const resetSearchWorker = (reason) => { calls.push('reset worker: ' + reason); searchWorker = null; activeWorkerSearchId = null; };
+    ${slice('function modelProgressEl(', 'const loadingProgressItems')}
+    ${slice('function renderLoadingProgressItems(', 'function showModelProgress(')}
+    ${slice('function hideModelProgress(', 'function storageGet(')}
+    ${slice('function renderAnalysisSearchProgress(', 'function progressKey(')}
+    ${slice('function cancelAnalysisOperation(', 'function scheduleAnalyzeCurrent(')}
+    return { cancel: () => cancelAnalysisOperation(1), loadingProgressItems, searchProgressByEngine };
+  `,
+    { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
+  );
+  const api = new Function('document', 'page', 'operation', 'worker', 'calls', 'hybrid', 'reload', code)(
+    document,
+    page,
+    controller,
+    searchWorker,
+    calls,
+    hybrid,
+    reload,
+  );
+  return { ...api, posted, calls, controller };
+}
+
+test('leaving Analysis mid-search cancels the worker search and big nets without touching the removed page', () => {
+  const api = cancelController({ page: null });
+  assert.doesNotThrow(() => api.cancel()); // threw "Missing #message" before the fix
+  assert.equal(api.controller.signal.aborted, true);
+  assert.deepEqual(api.posted, [{ type: 'cancel', target: 7 }]);
+  assert.deepEqual(api.calls, ['retire centipawn', 'cancel bt4', 'cancel t3']);
+  // Progress state is module-wide and must not leak into the next mount.
+  assert.equal(api.loadingProgressItems.size, 0);
+  assert.equal(api.searchProgressByEngine.size, 0);
+});
+
+test('leaving Analysis during hybrid init or a backend reload releases the engines without the page', () => {
+  const hybrid = cancelController({ page: null, hybrid: true });
+  assert.doesNotThrow(() => hybrid.cancel());
+  assert.deepEqual(hybrid.calls, ['retire centipawn', 'reset worker: LC0 hybrid worker initialization cancelled', 'cancel bt4', 'cancel t3']);
+  const reload = cancelController({ page: null, reload: true });
+  assert.doesNotThrow(() => reload.cancel());
+  assert.deepEqual(reload.calls, ['dispose runtime']);
+});
+
+test('a cancel on the mounted page still updates its controls and status', () => {
+  const node = () => ({
+    textContent: '',
+    disabled: true,
+    toggled: {},
+    toggleAttribute(name, on) {
+      this.toggled[name] = on;
+    },
+    insertAdjacentElement() {},
+  });
+  const page = new Map(['message', 'analyze', 'stop', 'backend', 'lc0RuntimeSelect', 'downloadProgress'].map((id) => [id, node()]));
+  page.get('message').textContent = 'Freeing memory…';
+  const api = cancelController({ page, hybrid: true });
+  api.cancel();
+  assert.equal(page.get('message').textContent, 'Analysis stopped during LC0 hybrid backend initialization.');
+  assert.equal(page.get('analyze').toggled.disabled, false);
+  assert.equal(page.get('stop').toggled.disabled, true);
+  assert.equal(page.get('lc0RuntimeSelect').disabled, false);
+  assert.equal(page.get('downloadProgress').hidden, true);
+});
