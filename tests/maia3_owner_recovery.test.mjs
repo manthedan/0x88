@@ -51,7 +51,7 @@ test('Analysis Maia failure removes the failed owner, settles task ownership and
   const api = compile(
     `
     let maia3PanelEvaluator = null, maia3PanelLoading = false, maia3PanelLoadGeneration = 0, maia3PanelPending = null, maia3PanelAbort = null, maia3PanelBlockedByRun = null;
-    const awaitEngineRetirements = async () => {};
+    const awaitEngineRetirements = async () => {}, trackEngineRetirement = () => {};
     let maia3PanelTask = null, maia3PanelTimer = null, explorerMaia = null;
     const elements = new Map();
     const el = (id) => { if (!elements.has(id)) elements.set(id, {}); return elements.get(id); };

@@ -4940,9 +4940,7 @@ async function enableMaia3Panel(): Promise<void> {
     if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) return;
     maia3PanelPending = Maia3BrowserEvaluator.create({
       signal: loadAbort.signal,
-      onInitCleanup: (cleanup) => {
-        trackEngineRetirement(cleanup);
-      },
+      onInitCleanup: trackEngineRetirement,
       onFailure: (error) => {
         if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) return;
         maia3PanelTask?.dispose();
