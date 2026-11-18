@@ -338,6 +338,7 @@ test('only client aborts from the outgoing route during navigation, or at/after 
     { ...recorded, endedAt: at - 1 },
     { ...recorded, endedAt: readyAt + 1 },
     { ...recorded, at: at + 1, endedAt: readyAt },
+    { ...recorded, at: routeMarks.at(-1).at - 1, endedAt: readyAt },
     { ...sessionEnd, endedAt: measuredUntil - 1 },
     { ...sessionEnd, status: 503 },
     { ...transitionStart, status: 404 },

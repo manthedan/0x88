@@ -53,7 +53,8 @@ const mark = (value) => {
   }
 };
 const checkJsDeadline = (requests) => {
-  result.incompleteJsTransfers = incompleteJsTransfers(requests);
+  // Copy at the cutoff: proxy records keep mutating while diagnostics and shutdown run.
+  result.incompleteJsTransfers = incompleteJsTransfers(requests).map((r) => ({ ...r }));
   if (result.incompleteJsTransfers.length) throw Error('Required JS did not finish before the measurement deadline; see incompleteJsTransfers');
 };
 let awayAt;
