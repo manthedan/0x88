@@ -15,6 +15,27 @@ export function claimOutput(dir) {
   }
 }
 
+// One coordinator per output directory, held from inspection through final reporting, so a resume
+// cannot pick the same pending sessions as a live run. Never taken over automatically: two resumes
+// racing to replace a stale lock could both win. Only SIGKILL/power loss leave it behind.
+export function lockRun(dir) {
+  const file = join(dir, 'coordinator.lock');
+  const owner = `${hostname()} ${process.pid}\n`;
+  try {
+    writeFileSync(file, owner, { flag: 'wx' });
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    throw Error(`Another coordinator (${readFileSync(file, 'utf8').trim()}) owns ${dir}; if that process is gone, remove ${file}`);
+  }
+  return () => {
+    try {
+      if (readFileSync(file, 'utf8') === owner) rmSync(file);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  };
+}
+
 export function watchShutdown() {
   const controller = new AbortController();
   const stop = (signal) => controller.abort(Object.assign(Error(`Interrupted by ${signal}`), { exitCode: signal === 'SIGINT' ? 130 : 143 }));

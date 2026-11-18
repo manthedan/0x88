@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -13,12 +13,13 @@ import {
   cancellationMarker,
   claimOutput,
   cleanupMarker,
+  lockRun,
   releaseAfterSession,
   runOwnedSession,
   shutdownDelay,
   watchShutdown,
 } from './lifecycle.mjs';
-import { manifestMismatches, runManifest, selectSessions } from './resume.mjs';
+import { manifestMismatches, measuringFiles, readJson, recordAttempt, reusableBuild, runManifest, selectSessions, writeJsonAtomic } from './resume.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 // Build/archive/git/file operations are confined to the calling worktree's ignored output tree.
@@ -72,12 +73,10 @@ function build(source, out, arm) {
   if (source.kind === 'prebuilt') return source;
   const dir = join(out, 'builds', arm),
     record = join(out, 'builds', `${arm}.json`);
-  if (existsSync(record)) {
-    const built = JSON.parse(readFileSync(record, 'utf8'));
-    if (built.commit === source.commit && existsSync(join(built.dist, 'app/analysis/index.html'))) {
-      console.log(`reusing ${arm} build of ${source.commit}`);
-      return built;
-    }
+  const reused = reusableBuild(record, source.commit);
+  if (reused) {
+    console.log(`reusing ${arm} build of ${source.commit}`);
+    return reused;
   }
   // Unrecorded means interrupted mid-build. rm does not follow the node_modules/asset links.
   rmSync(record, { force: true });
@@ -106,7 +105,7 @@ function build(source, out, arm) {
     dependencies: sameLock ? 'shared-installed/same-lockfile' : 'isolated-npm-ci',
     linkedLocalAssets: links.size,
   };
-  writeFileSync(record, JSON.stringify(built, null, 2));
+  writeJsonAtomic(record, built);
   return built;
 }
 async function serve(dist, out, arm, signal) {
@@ -153,22 +152,10 @@ async function serve(dist, out, arm, signal) {
     throw error;
   }
 }
-// Files whose changes alter what a session measures or how it is served. The mini workspace has
-// no static server (builds are served from the laptop), so only present files are hashed.
 function harnessHash() {
   const hash = createHash('sha256');
-  const files = [
-    ...readdirSync(join(root, 'scripts/perf_routes'))
-      .filter((name) => !['run.mjs', 'resume.mjs'].includes(name))
-      .map((name) => `perf_routes/${name}`),
-    'perf_matrix/common.mjs',
-    'perf_matrix/proxy.mjs',
-    'lib/perf_canary_stats.mjs',
-    'serve_isolated_static.mjs',
-  ]
-    .filter((file) => existsSync(join(root, 'scripts', file)))
-    .sort();
-  for (const file of files) hash.update(`${file}\0`).update(readFileSync(join(root, 'scripts', file)));
+  for (const file of measuringFiles(root, 'scripts/perf_routes/session.mjs', ['scripts/perf_matrix/pidfp.c', 'scripts/serve_isolated_static.mjs']))
+    hash.update(`${file}\0`).update(readFileSync(join(root, file)));
   return hash.digest('hex');
 }
 async function run(signal) {
@@ -179,24 +166,28 @@ async function run(signal) {
     sources[arm] = args[`${arm}-url`] ? { input: args[arm], url: args[`${arm}-url`], kind: 'externally-served' } : armSource(args[arm]);
   const manifest = runManifest(args, sources, { host: hostname(), harness: harnessHash() });
   const resuming = args.resume && existsSync(out);
-  if (resuming) {
-    const manifestFile = join(out, 'manifest.json');
-    if (!existsSync(manifestFile)) throw Error(`Cannot resume ${out}: no manifest.json (not started by a resumable run)`);
-    const mismatches = manifestMismatches(JSON.parse(readFileSync(manifestFile, 'utf8')), manifest);
-    if (mismatches.length) throw Error(`Cannot resume ${out}; it measured a different cohort: ${mismatches.join(', ')}`);
-  } else {
-    claimOutput(out);
-    mkdirSync(join(out, 'sessions'));
-    writeFileSync(join(out, 'plan.json'), JSON.stringify(args, null, 2));
-    writeFileSync(join(out, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  if (!resuming) claimOutput(out);
+  const unlock = lockRun(out);
+  try {
+    if (resuming) {
+      const saved = readJson(join(out, 'manifest.json'));
+      if (!saved) throw Error(`Cannot resume ${out}: no readable manifest.json (not started by a resumable run)`);
+      const mismatches = manifestMismatches(saved, manifest);
+      if (mismatches.length) throw Error(`Cannot resume ${out}; it measured a different cohort: ${mismatches.join(', ')}`);
+    } else {
+      mkdirSync(join(out, 'sessions'));
+      writeJsonAtomic(join(out, 'plan.json'), args);
+      writeJsonAtomic(join(out, 'manifest.json'), manifest);
+    }
+    await measure(signal, out, sources, resuming);
+  } finally {
+    unlock();
   }
+}
+async function measure(signal, out, sources, resuming) {
   const cells = selectSessions(plan(args), (id) => {
     const file = join(out, 'sessions', `${id}.json`);
-    let result = null;
-    try {
-      result = JSON.parse(readFileSync(file, 'utf8'));
-    } catch {} // missing or truncated: run it again
-    return { result, cleanupPending: existsSync(cleanupMarker(file)), cancelled: existsSync(cancellationMarker(file)) };
+    return { result: readJson(file), cleanupPending: existsSync(cleanupMarker(file)) };
   });
   if (resuming) console.log(`resume ${out}: reusing ${cells.filter((c) => c.reuse).length}/${cells.length} sessions`);
   const servers = [];
@@ -249,14 +240,13 @@ async function run(signal) {
           await shutdownDelay(30000, signal);
         }
       } while (cleanupConfirmed && status === 75 && !signal.aborted);
-      const row = existsSync(resultFile)
-        ? JSON.parse(readFileSync(resultFile, 'utf8'))
-        : { ...cell, status: 'invalid', error: `session process exited ${status}` };
-      if (!cleanupConfirmed) {
-        row.status = 'invalid';
-        row.error = `Browser cleanup unconfirmed; see ${cleanupMarker(resultFile)}${args['lock-dir'] ? `; mutex retained at ${args['lock-dir']}` : ''}`;
-        console.error(row.error);
-      }
+      const row = recordAttempt(cell, resultFile, {
+        status,
+        cleanupConfirmed,
+        interruption: signal.aborted ? signal.reason.message : undefined,
+        lockDir: args['lock-dir'],
+      });
+      if (!cleanupConfirmed) console.error(row.error);
       appendFileSync(join(out, 'runs.jsonl'), `${JSON.stringify(row)}\n`);
       signal.throwIfAborted();
       if (!cleanupConfirmed) {

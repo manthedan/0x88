@@ -33,12 +33,23 @@ import {
   checkSessionCancellation,
   claimOutput,
   cleanupMarker,
+  lockRun,
   releaseAfterSession,
   runOwnedSession,
   safariCreationRefused,
   waitForCleanup,
 } from '../scripts/perf_routes/lifecycle.mjs';
-import { manifestMismatches, runManifest, selectSessions, sessionId } from '../scripts/perf_routes/resume.mjs';
+import {
+  manifestMismatches,
+  measuringFiles,
+  readJson,
+  recordAttempt,
+  reusableBuild,
+  runManifest,
+  selectSessions,
+  sessionId,
+  writeJsonAtomic,
+} from '../scripts/perf_routes/resume.mjs';
 
 const args = (...extra) => parseArgs(['--baseline', 'main', '--candidate', 'HEAD', '--dry-run', ...extra]);
 
@@ -831,6 +842,10 @@ test('resume manifest names every cohort-defining difference and ignores paths/l
   );
   // JSON round trip (as stored on disk) still matches.
   assert.deepEqual(manifestMismatches(JSON.parse(JSON.stringify(saved)), runManifest(args(), arms, extras)), []);
+  // After `main` moves, resuming with the recorded SHAs is the same cohort; the ref is provenance only.
+  const bySha = { baseline: { ...arms.baseline, input: arms.baseline.commit }, candidate: { ...arms.candidate, input: arms.candidate.commit } };
+  assert.deepEqual(manifestMismatches(saved, runManifest(args(), bySha, extras)), []);
+  assert.equal(saved.inputs.baseline, 'main');
   const moved = { ...arms, candidate: { ...arms.candidate, commit: 'c'.repeat(40) } };
   assert.deepEqual(manifestMismatches(saved, runManifest(args(), moved, extras)), ['arms.candidate.commit']);
   assert.deepEqual(manifestMismatches(saved, runManifest(args('--repeats', '6', '--browser', 'chrome'), arms, extras)), ['options.browser', 'options.repeats']);
@@ -840,7 +855,6 @@ test('resume manifest names every cohort-defining difference and ignores paths/l
   assert.deepEqual(manifestMismatches(saved, runManifest(args(), prebuilt, extras)), [
     'arms.baseline.commit',
     'arms.baseline.dist',
-    'arms.baseline.input',
     'arms.baseline.kind',
     'arms.baseline.version',
   ]);
@@ -859,8 +873,10 @@ test('resume reuses every recorded outcome and reruns only missing or operator-s
     [ids[2], { result: result(2, { status: 'invalid', error: 'Interrupted by SIGINT' }) }],
     [ids[3], { result: result(3, { status: 'invalid', error: 'Error: Interrupted before browser startup\n    at x' }) }],
     [ids[4], { result: result(4, { status: 'invalid', error: 'Error: session not created: already paired' }) }],
+    // A benchlock cancel can land while the browser already runs; its finished result is an outcome.
     [ids[5], { result: result(5), cancelled: true }],
     [ids[6], { result: null }], // unreadable / truncated
+    [ids[7], { result: result(7, { status: 'invalid', error: 'Error: Interrupted before browser startup' }), cancelled: true }],
   ]);
   const selected = selectSessions(cells, (id) => files.get(id) ?? { result: null });
   assert.deepEqual(
@@ -874,7 +890,7 @@ test('resume reuses every recorded outcome and reruns only missing or operator-s
   // A genuine failure stays in the denominator, exactly as in a fresh run.
   assert.deepEqual(
     selected.map((s, i) => (s.reuse ? i : null)).filter((i) => i !== null),
-    [0, 1],
+    [0, 1, 5],
   );
   assert.equal(selected[1].reuse.error, 'Error: board never interactive');
   // A fresh run selects every session.
@@ -977,4 +993,95 @@ test('the isolated static server serves a linked asset like a copied one, under 
     await once(server, 'close');
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('one coordinator owns an output directory until it releases, and never removes another owner', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'perf-routes-lock-'));
+  try {
+    const release = lockRun(dir);
+    assert.throws(() => lockRun(dir), /Another coordinator .* owns/);
+    release();
+    const again = lockRun(dir);
+    writeFileSync(join(dir, 'coordinator.lock'), 'other-host 1\n');
+    again();
+    assert.equal(readFileSync(join(dir, 'coordinator.lock'), 'utf8'), 'other-host 1\n');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('coordinator-only failures are persisted as session outcomes; interruptions stay resumable', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'perf-routes-attempt-'));
+  try {
+    const cells = plan(args('--browser', 'chrome', '--journey', 'navigation')).slice(0, 4);
+    const file = (i) => join(dir, `${sessionId(cells[i], i)}.json`);
+    // 0: the wrapper/session exited without writing a result.
+    assert.equal(recordAttempt(cells[0], file(0), { status: 2, cleanupConfirmed: true }).error, 'session process exited 2');
+    // 1: the operator stopped the run before the session wrote anything.
+    recordAttempt(cells[1], file(1), { status: null, cleanupConfirmed: true, interruption: 'Interrupted by SIGINT' });
+    // 2: a measured session whose browser cleanup the coordinator could not confirm.
+    writeFileSync(file(2), JSON.stringify({ ...cells[2], status: 'ok', metrics: { jsBytes: 1 } }));
+    assert.match(recordAttempt(cells[2], file(2), { status: 0, cleanupConfirmed: false, lockDir: '/m' }).error, /cleanup unconfirmed.*mutex retained at \/m/);
+    // 3: a normal result is returned untouched.
+    writeFileSync(file(3), JSON.stringify({ ...cells[3], status: 'ok', metrics: { jsBytes: 2 } }));
+    assert.equal(recordAttempt(cells[3], file(3), { status: 0, cleanupConfirmed: true }).status, 'ok');
+
+    const selected = selectSessions(cells, (id) => ({ result: readJson(join(dir, `${id}.json`)) }));
+    assert.deepEqual(
+      selected.map((s) => s.reuse?.status ?? 'rerun'),
+      ['invalid', 'rerun', 'invalid', 'ok'],
+    );
+    assert.equal(selected[0].reuse.error, 'session process exited 2');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('build records are atomic and any unreadable or foreign record is a rebuild, not a crash', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'perf-routes-build-'));
+  try {
+    const dist = join(dir, 'dist-client');
+    mkdirSync(join(dist, 'app/analysis'), { recursive: true });
+    writeFileSync(join(dist, 'app/analysis/index.html'), '');
+    const record = join(dir, 'baseline.json');
+    writeJsonAtomic(record, { dist, commit: 'a' });
+    assert.equal(existsSync(`${record}.tmp`), false);
+    assert.equal(reusableBuild(record, 'a').dist, dist);
+    assert.equal(reusableBuild(record, 'b'), null);
+    writeFileSync(record, '{"dist": "/tru');
+    assert.equal(reusableBuild(record, 'a'), null);
+    writeJsonAtomic(record, { dist: join(dir, 'gone'), commit: 'a' });
+    assert.equal(reusableBuild(record, 'a'), null);
+    assert.equal(reusableBuild(join(dir, 'missing.json'), 'a'), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('harness identity covers every measuring dependency, including move choice and memory sampling', () => {
+  const root = new URL('..', import.meta.url).pathname;
+  const files = measuringFiles(root, 'scripts/perf_routes/session.mjs', [
+    'scripts/perf_matrix/pidfp.c',
+    'scripts/serve_isolated_static.mjs',
+    'scripts/nope.mjs',
+  ]);
+  for (const file of [
+    'scripts/perf_routes/session.mjs',
+    'scripts/perf_routes/journeys.mjs',
+    'scripts/perf_routes/human.mjs',
+    'scripts/perf_routes/gate.mjs',
+    'scripts/perf_routes/lifecycle.mjs',
+    'scripts/perf_routes/probe.js',
+    'scripts/perf_matrix/common.mjs',
+    'scripts/perf_matrix/proxy.mjs',
+    'scripts/perf_matrix/pidfp.c',
+    'scripts/lib/perf_canary_stats.mjs',
+    'scripts/serve_isolated_static.mjs',
+    'src/chess/board.ts',
+    'src/chess/moveCodec.ts',
+    'src/chess/movegen.ts',
+    'src/chess/san.ts',
+  ])
+    assert.ok(files.includes(file), file);
+  for (const file of ['scripts/perf_routes/run.mjs', 'scripts/perf_routes/resume.mjs', 'scripts/nope.mjs']) assert.equal(files.includes(file), false, file);
 });
