@@ -67,7 +67,7 @@ async function rerouteFor(scope) {
 test('product builds refuse client navigation to lab routes; other builds install no hook', async () => {
   assert.equal(LAB_PATH.source, LAB_ROUTE_ID.source);
   const reroute = await rerouteFor('product');
-  for (const pathname of ['/lab/mobile-soak/', '/lab/copy-prototypes/x/', '/single-engine/', '/single-engine']) {
+  for (const pathname of ['/lab/mobile-soak/', '/lab/copy-prototypes/x/', '/single-engine/', '/single-engine', '/l%61b/mobile-soak/', '/%6Cab/']) {
     assert.throws(() => reroute({ url: new URL(pathname, 'https://0x88.app') }), /not in product builds/);
   }
   for (const pathname of [...PRODUCT_ROUTES, '/labs/', '/single-engines/']) {

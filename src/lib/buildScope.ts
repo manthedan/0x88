@@ -8,5 +8,12 @@ export const LAB_PATH = /^\/(?:lab|single-engine)(?:\/|$)/;
  * client router. A throwing reroute makes Kit fall back to a full page load, which the server 404s.
  */
 export const refuseLabRoute: Reroute = ({ url }) => {
-  if (LAB_PATH.test(url.pathname)) throw new Error(`${url.pathname} is not in product builds`);
+  // Kit matches routes against the decoded pathname, so /l%61b/ must be refused too.
+  let path = url.pathname;
+  try {
+    path = decodeURI(path);
+  } catch {
+    // Malformed escapes cannot match a route; check the raw path.
+  }
+  if (LAB_PATH.test(path)) throw new Error(`${url.pathname} is not in product builds`);
 };
