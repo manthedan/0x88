@@ -548,6 +548,8 @@ async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config
     );
   if (reclaim) await reclaim;
   const searcher = await acquireBigNetSearcherAsync(key, true, signal);
+  // A Stop in the await's continuations would miss the listener below.
+  signal.throwIfAborted();
   if (!searcher.isInitializedFor({ evalCacheEntries })) {
     // init() does not watch the match signal, and a cold prefetch can stall:
     // Stop retires a net that is still loading, as Analysis does.

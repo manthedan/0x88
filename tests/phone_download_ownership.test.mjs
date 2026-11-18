@@ -456,6 +456,42 @@ for (const answer of [false, 'download']) {
   });
 }
 
+test('Arena Stop landing as the pool hands over the searcher skips the cache-only init', async () => {
+  const controller = new AbortController();
+  let inits = 0;
+  const searcher = {
+    loaded: false,
+    isInitializedFor: () => false,
+    init: async () => {
+      inits++;
+    },
+  };
+  const deps = {
+    BIG_NETS,
+    LC0_MODEL_DOWNLOAD_NOT_APPROVED,
+    isMemoryConstrainedDevice: () => true,
+    arenaRunDownloads: new Set(),
+    arenaCacheEntries: () => 0,
+    peekBigNetSearcher: () => null,
+    inspectLargeNetDownload: async () => assert.fail('no prompt'),
+    requestLargeNetDownloadConsent: async () => 'cached',
+    preparePhoneBigNet: () => undefined,
+    disposeArenaCpuEngines() {},
+    disposeBigNetSearcherNow: () => assert.fail('nothing to retire: no listener was registered'),
+    el: () => ({}),
+    acquireBigNetSearcherAsync: async () => {
+      controller.abort(); // Stop between the pool's resolution and bigNetFor resuming
+      return searcher;
+    },
+  };
+  const bigNetFor = new Function(
+    'deps',
+    `const { ${Object.keys(deps)} } = deps;\n${extract(source.arena, 'async function bigNetFor(', 'let runtimeIsolation')}\nreturn bigNetFor;`,
+  )(deps);
+  await assert.rejects(bigNetFor('bt4', controller.signal), { name: 'AbortError' });
+  assert.equal(inits, 0, 'a stopped load must not initialize');
+});
+
 test('a saved Arena run with no games shows its own opening, not the replaced run', () => {
   const calls = [];
   const opening = { name: 'new opening' };

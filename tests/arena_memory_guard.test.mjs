@@ -138,7 +138,7 @@ test('safe gauntlet warmup uses only each game on phones; desktop still warms th
         calls.push(ids);
         for (const id of ids) {
           if (!id.startsWith('lc0:')) continue;
-          await bigNetFor(id.split(':')[1]);
+          await bigNetFor(id.split(':')[1], new AbortController().signal);
           if (constrained) assert.equal(Object.keys(BIG_NETS).filter((key) => pool.has(key)).length, 1);
         }
       },
