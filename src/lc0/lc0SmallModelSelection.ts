@@ -1,5 +1,12 @@
 import { type OrtSessionPlacement, resolveOrtSessionPlacement } from '../nn/ortRuntime.ts';
-import { clearLc0ModelCacheEntry, type Lc0ModelLoadInfo, type Lc0ModelLoadOptions, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
+import {
+  clearLc0ModelCacheEntry,
+  type Lc0ModelLoadInfo,
+  type Lc0ModelLoadOptions,
+  type Lc0ModelLoadResult,
+  loadLc0ModelForOrt,
+  untilAborted,
+} from './modelCache.ts';
 import { Lc0OnnxEvaluator, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
 import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
 
@@ -94,7 +101,7 @@ function takeModel(load: LoadedModel): ModelBytes | undefined {
 
 export type Lc0OrtEvaluatorFromUrlOptions = {
   load?: Lc0ModelLoadOptions;
-  evaluator?: Omit<Lc0OnnxEvaluatorOptions, 'wasmFallbackModel' | 'reloadModel' | 'rejectModelParseErrors'>;
+  evaluator?: Omit<Lc0OnnxEvaluatorOptions, 'signal' | 'wasmFallbackModel' | 'reloadModel' | 'rejectModelParseErrors'>;
   /**
    * Apply the device rule above. Product surfaces set it from
    * lc0SmallModelRequest (no ?model= override); explicit overrides and lab
@@ -155,7 +162,9 @@ export async function createLc0OnnxEvaluatorFromUrl(
   deps: Lc0OrtEvaluatorDeps = DEFAULT_DEPS,
 ): Promise<Lc0OrtEvaluatorFromUrl> {
   const loadOptions = options.load ?? {};
-  const selectedUrl = options.deviceSelection ? selectLc0OrtModelUrl(requestedUrl, await deps.placement()) : requestedUrl;
+  loadOptions.signal?.throwIfAborted();
+  const selectedUrl = options.deviceSelection ? selectLc0OrtModelUrl(requestedUrl, await untilAborted(deps.placement(), loadOptions.signal)) : requestedUrl;
+  loadOptions.signal?.throwIfAborted();
   let fallbackReason: string | undefined;
   let modelLoad: LoadedModel | undefined;
   let servedUrl = requestedUrl;
@@ -199,6 +208,7 @@ export async function createLc0OnnxEvaluatorFromUrl(
     input ??= await reloadPrimary();
     const creating = deps.createEvaluator(input, {
       ...options.evaluator,
+      signal: loadOptions.signal,
       ...(wasmFallbackModel ? { wasmFallbackModel } : {}),
       ...(modelLoad?.info.sha256Valid === true ? { reloadModel: reloadPrimary } : {}),
       rejectModelParseErrors,

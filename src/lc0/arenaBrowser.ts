@@ -3590,7 +3590,7 @@ function hideEngineWarmupStatus(): void {
 }
 
 async function warmUpSelectedEngines(ids: string[], signal: AbortSignal, minimumVisibleMs = 400): Promise<void> {
-  await awaitEngineRetirements();
+  await untilAborted(awaitEngineRetirements(), signal);
   if (signal.aborted) return;
   const pending: ArenaEngine[] = [];
   const seen = new Set<string>();
@@ -4472,7 +4472,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   };
   let enginesReady = false;
   try {
-    await awaitEngineRetirements();
+    await untilAborted(awaitEngineRetirements(), matchAbort.signal);
     if (isStaleMount(mountSignal)) return;
     matchAbort.signal.throwIfAborted();
     if (isolatedCpuPool()) {
@@ -4712,7 +4712,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
   };
   signal.addEventListener('abort', retireUninstalled, { once: true });
   try {
-    await awaitEngineRetirements();
+    await untilAborted(awaitEngineRetirements(), signal);
     signal.throwIfAborted();
     const owned = await loadArenaResource(async () => {
       const evaluator = await createSelectedLc0Evaluator(signal);

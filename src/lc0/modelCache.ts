@@ -830,7 +830,10 @@ export function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoadOption
  */
 export function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return promise;
-  signal.throwIfAborted();
+  if (signal.aborted) {
+    void promise.catch(() => undefined); // The shared operation may fail after this consumer has stopped waiting.
+    return Promise.reject(signal.reason);
+  }
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(signal.reason);
     signal.addEventListener('abort', onAbort, { once: true });

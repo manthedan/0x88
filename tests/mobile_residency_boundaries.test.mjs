@@ -14,6 +14,7 @@ function extract(text, first, last) {
   return text.slice(start, text.indexOf(last, start));
 }
 function compile(body, deps) {
+  deps = { untilAborted, ...deps };
   return new Function(...Object.keys(deps), `return (${stripTypeScriptTypes(`function run(){${body}\n}`)})();`)(...Object.values(deps));
 }
 
@@ -375,7 +376,7 @@ for (const reason of ['navigation', 'seat cancellation', 'diagnostics failure'])
 
 test("Stop during retirement reaches Arena's stopped-state handler rather than leaving a live match", async () => {
   const text = source('arenaBrowser'),
-    start = text.indexOf('    await awaitEngineRetirements();', text.indexOf('  let enginesReady = false;'));
+    start = text.indexOf('    await untilAborted(awaitEngineRetirements(), matchAbort.signal);', text.indexOf('  let enginesReady = false;'));
   const guard = text.slice(start, text.indexOf('    if (isolatedCpuPool())', start));
   const catchStart = text.indexOf('  } catch (error) {', start),
     caught = text.slice(catchStart, text.indexOf('  } finally {', catchStart));
@@ -385,10 +386,11 @@ test("Stop during retirement reaches Arena's stopped-state handler rather than l
       ['message', { textContent: 'Stopping…' }],
       ['pairing', {}],
     ]);
+  trackEngineRetirement(gate.promise);
   const run = compile(
     `return async function(){let arenaMatchState='live',enginesReady=false;const mode='match',score={games:0},schedule=[];try{${guard}throw new Error('must not start');${caught}}return arenaMatchState;};`,
     {
-      awaitEngineRetirements: () => gate.promise,
+      awaitEngineRetirements,
       isStaleMount: () => false,
       mountSignal: matchAbort.signal,
       matchAbort,
@@ -398,8 +400,18 @@ test("Stop during retirement reaches Arena's stopped-state handler rather than l
   );
   const pending = run();
   matchAbort.abort();
+  const stopped = await Promise.race([pending, new Promise((resolve) => setImmediate(() => resolve('still-waiting')))]);
+  let admitted = false;
+  const next = awaitEngineRetirements().then(() => {
+    admitted = true;
+  });
+  await new Promise(setImmediate);
+  const blocked = !admitted;
   gate.resolve();
-  assert.equal(await pending, 'stopped');
+  await next;
+  await pending;
+  assert.equal(stopped, 'stopped', 'Stop must settle before the old native release');
+  assert.equal(blocked, true, 'stopping a consumer must not drop the old native retirement');
   assert.equal(nodes.get('message').textContent, 'Match stopped.');
 });
 
@@ -407,7 +419,7 @@ for (const canceled of [false, true])
   test(`private Arena CPU startup awaits neural retirement and then checks cancellation (${canceled})`, async () => {
     const text = source('arenaBrowser');
     const start = text.indexOf('  let enginesReady = false;\n  try {');
-    const entryStart = text.indexOf('    await awaitEngineRetirements();', start);
+    const entryStart = text.indexOf('    await untilAborted(awaitEngineRetirements(), matchAbort.signal);', start);
     const entry = text.slice(entryStart, text.indexOf('    } else {', entryStart));
     assert.ok(start >= 0 && entryStart > start && entry.includes('runIsolatedCpuTournament'));
     const gate = Promise.withResolvers(),

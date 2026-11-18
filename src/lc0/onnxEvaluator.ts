@@ -5,6 +5,8 @@ import { f16BitsToF32, f32ToF16Bits } from '../nn/float16.ts';
 import { OrtGpuIoBinding, type OrtGpuIoOutputs, type OrtGpuIoTensorSpec, ortGraphCaptureSessionOptions } from '../nn/ortGpuIo.ts';
 import * as ort from '../nn/ortRuntime.ts';
 import { encodeLc0Classical112, type Lc0EncoderInput, type Lc0HistoryFill, type Lc0PositionHistoryInput } from './encoder112.ts';
+import { trackEngineRetirement } from './engineRetirement.ts';
+import { untilAborted } from './modelCache.ts';
 import { applyOnnxFreeDimensionOverrides, type OnnxModelIo, readOnnxModelIo } from './onnxModelIo.ts';
 import { isOnnxModelParseError } from './onnxModelRecovery.ts';
 import { type OrtPhysicalBatchMode, resolveOrtPhysicalBatchSize } from './ortPhysicalBatch.ts';
@@ -64,6 +66,8 @@ export interface Lc0Evaluation {
 }
 
 export interface Lc0OnnxEvaluatorOptions {
+  /** Initialization owner only; admitted inference is drained by dispose(). */
+  signal?: AbortSignal;
   policyTemperature?: number;
   historyFill?: Lc0HistoryFill;
   /**
@@ -630,8 +634,11 @@ async function createLc0GpuIoSession(
 ): Promise<{ session: ort.InferenceSession; binding: OrtGpuIoBinding } | null> {
   let modelPath = takeModel();
   let session: ort.InferenceSession | undefined;
+  let binding: OrtGpuIoBinding | undefined;
   try {
+    options.signal?.throwIfAborted();
     const creating = ort.createOrtSession(modelPath, {
+      signal: options.signal,
       webgpuOnly: true,
       reloadModel: options.reloadModel,
       rejectModelParseErrors: options.rejectModelParseErrors,
@@ -659,25 +666,41 @@ async function createLc0GpuIoSession(
     ) {
       throw new Error('GPU IO metadata differs from the declared/overridden shape');
     }
-    const device = (await (ort.env.webgpu as unknown as { device?: unknown }).device) as ConstructorParameters<typeof OrtGpuIoBinding>[1] | undefined;
+    const device = (await untilAborted(Promise.resolve((ort.env.webgpu as unknown as { device?: unknown }).device), options.signal)) as
+      | ConstructorParameters<typeof OrtGpuIoBinding>[1]
+      | undefined;
+    options.signal?.throwIfAborted();
     if (!device) throw new Error('ORT exposed no WebGPU device');
     // Captured sessions keep ORT's own output buffers bound across replays; preallocated
     // fetches leak a native OrtValue per output per replay there (OrtGpuIoOutputMode).
-    const binding = new OrtGpuIoBinding(session, device, ort.Tensor as never, specs.input, specs.outputs, {
+    binding = new OrtGpuIoBinding(session, device, ort.Tensor as never, specs.input, specs.outputs, {
       outputMode: mode === 'gpu-capture' ? 'session' : 'preallocated',
     });
     // One zero-input invoke: ORT allocates (and, with capture, records) on the first
     // run, so a rejection surfaces here, where the CPU-IO fallback can still run.
     const elements = specs.input.dims.reduce((a, b) => a * b, 1);
-    try {
-      await binding.run(specs.input.type === 'float16' ? new Uint16Array(elements) : new Float32Array(elements));
-    } catch (error) {
-      await binding.dispose();
-      throw error;
-    }
+    await binding.run(specs.input.type === 'float16' ? new Uint16Array(elements) : new Float32Array(elements));
+    options.signal?.throwIfAborted();
     return { session, binding };
   } catch (error) {
-    if (session) await ort.releaseOrtSession(session).catch(() => undefined);
+    if (session || binding)
+      await trackEngineRetirement(
+        (async () => {
+          const failures: unknown[] = [];
+          try {
+            if (session) await ort.releaseOrtSession(session);
+          } catch (failure) {
+            failures.push(failure);
+          }
+          try {
+            await binding?.dispose();
+          } catch (failure) {
+            failures.push(failure);
+          }
+          if (failures.length) throw new AggregateError(failures, 'GPU IO initialization retirement failed');
+        })(),
+      );
+    options.signal?.throwIfAborted();
     const rejectParse = typeof options.rejectModelParseErrors === 'function' ? options.rejectModelParseErrors() : options.rejectModelParseErrors;
     if (rejectParse && isOnnxModelParseError(error)) throw error;
     console.warn(`Lc0: GPU-resident ORT IO (${mode}) unavailable, using CPU IO. ${error instanceof Error ? error.message : String(error)}`);
@@ -715,10 +738,12 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   }
 
   private static async createFromSource(takeModel: () => string | Uint8Array | ArrayBuffer, options: Lc0OnnxEvaluatorOptions): Promise<Lc0OnnxEvaluator> {
+    options.signal?.throwIfAborted();
     let modelPath = takeModel();
     const declared = options.ioMode === 'gpu' || options.ioMode === 'gpu-capture' ? gpuIoModelSpecs(modelPath, options.ioMode, options) : null;
     if ((options.ioMode === 'gpu' || options.ioMode === 'gpu-capture') && declared) {
-      const placement = await ort.resolveOrtSessionPlacement();
+      const placement = await untilAborted(ort.resolveOrtSessionPlacement(), options.signal);
+      options.signal?.throwIfAborted();
       if (placement.providers[0] === 'webgpu') {
         const creating = createLc0GpuIoSession(() => modelPath, options.ioMode, options, declared);
         // Raw callers need these bytes for CPU-IO fallback; verified URL loaders
@@ -726,10 +751,11 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
         if (options.reloadModel) modelPath = undefined as never;
         const gpu = await creating;
         if (gpu) return new Lc0OnnxEvaluator(gpu.session, options, { binding: gpu.binding, mode: options.ioMode });
-        if (options.reloadModel) modelPath = await options.reloadModel();
+        if (options.reloadModel) modelPath = await untilAborted(options.reloadModel(), options.signal);
       }
     }
     const creating = ort.createOrtSession(modelPath, {
+      signal: options.signal,
       wasmFallbackModel: options.wasmFallbackModel,
       reloadModel: options.reloadModel,
       rejectModelParseErrors: options.rejectModelParseErrors,

@@ -5,12 +5,14 @@ import test from 'node:test';
 import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
 import { deviceMemoryClass, shouldAutoAnalyzePosition } from '../src/lc0/deviceMemoryClass.ts';
 import { awaitEngineRetirements, trackEngineRetirement } from '../src/lc0/engineRetirement.ts';
+import { untilAborted } from '../src/lc0/modelCache.ts';
 
 const source = (name) => readFileSync(new URL(`../src/lc0/${name}.ts`, import.meta.url), 'utf8');
 function extract(text, start, end) {
   return text.slice(text.indexOf(start), text.indexOf(end, text.indexOf(start)));
 }
 function compile(code, deps = {}) {
+  deps = { untilAborted, ...deps };
   return new Function(...Object.keys(deps), `return (${stripTypeScriptTypes(`function run(){${code}\n}`)})();`)(...Object.values(deps));
 }
 const play = source('playBrowser');

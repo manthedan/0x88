@@ -405,6 +405,19 @@ type PreparedOrtModelInput = {
   original?: OrtModelSource;
 };
 
+function isFetchableOrtModelUrl(input: OrtModelInput | undefined): input is string {
+  return typeof input === 'string' && (!runningUnderNode() || /^https?:\/\//i.test(input));
+}
+
+async function fetchOrtModelUrl(url: string, signal: AbortSignal): Promise<Uint8Array> {
+  signal.throwIfAborted();
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error(`ORT model fetch failed ${response.status}: ${url}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  signal.throwIfAborted();
+  return bytes;
+}
+
 async function prepareOrtModelInput(
   modelPath: OrtModelInput,
   reloadModel?: () => Promise<OrtModelInput>,
@@ -413,12 +426,7 @@ async function prepareOrtModelInput(
   signal?.throwIfAborted();
   // Own browser URL ingestion so ORT cannot start an uninterruptible URL fetch.
   // Node filesystem paths retain ORT's existing file-loading behavior.
-  if (signal && typeof modelPath === 'string' && (!runningUnderNode() || /^https?:\/\//i.test(modelPath))) {
-    const response = await fetch(modelPath, { signal });
-    if (!response.ok) throw new Error(`ORT model fetch failed ${response.status}: ${modelPath}`);
-    modelPath = new Uint8Array(await response.arrayBuffer());
-    signal.throwIfAborted();
-  }
+  if (signal && isFetchableOrtModelUrl(modelPath)) modelPath = await fetchOrtModelUrl(modelPath, signal);
   if (!ortDequantFoldEnabled()) {
     lastOrtDequantFold = { enabled: false, foldedNodes: 0, skippedNodes: 0, removedInitializers: 0, bytesBefore: 0, bytesAfter: 0, elapsedMs: 0 };
     return { input: modelPath };
@@ -1493,7 +1501,7 @@ export type CreateOrtSessionOptions = {
    * on WASM; the default reuses the primary model's unfolded bytes.
    */
   wasmFallbackModel?: () => Promise<OrtModelInput>;
-  /** Reacquire the same model through its verified loader, only if an unfolded/provider fallback needs it. */
+  /** Reacquire the same model through its source loader (verified for product models), only when an unfolded/provider fallback needs it. */
   reloadModel?: () => Promise<OrtModelInput>;
   /**
    * Extra session options for the WebGPU attempts only (never the WASM
@@ -1546,6 +1554,11 @@ export function planOrtSessionAttempts(
 }
 
 export function createOrtSession(modelPath: OrtModelInput, options: CreateOrtSessionOptions = {}): Promise<ort.InferenceSession> {
+  if (options.signal && !options.reloadModel && isFetchableOrtModelUrl(modelPath)) {
+    const url = modelPath,
+      signal = options.signal;
+    options = { ...options, reloadModel: () => fetchOrtModelUrl(url, signal) };
+  }
   // Async frames retain original argument registers even after reassignment.
   // Only this synchronous, consumed holder ever receives the raw argument.
   return createOrtSessionFromSource(() => {
@@ -1583,6 +1596,7 @@ async function createOrtSessionFromSource(takeModel: () => OrtModelInput, option
       attempt.input = undefined as never; // Consumed records must not pin an input through later attempts.
       let input: OrtModelInput | undefined = typeof source === 'function' ? await untilAborted(source(), options.signal) : source;
       source = undefined;
+      if (options.signal && isFetchableOrtModelUrl(input)) input = await fetchOrtModelUrl(input, options.signal);
       options.signal?.throwIfAborted();
       const extra = attempt.providers.includes('webgpu') ? options.webgpuSessionOptions : undefined;
       const creating = ort.InferenceSession.create(input as never, { ...sessionOptions(attempt.providers), ...extra });
