@@ -157,7 +157,7 @@ import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
-import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
+import { requestLargeNetConsent, requestLargeNetDownloadConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { untilAborted } from './modelCache.ts';
@@ -5284,7 +5284,8 @@ function wireEvents() {
         const request = new AbortController();
         arenaPickerConsentAbort = request;
         const signal = AbortSignal.any([mountAbort.signal, request.signal]);
-        if (!(await requestLargeNetConsent(config, signal))) return;
+        const consent = await requestLargeNetDownloadConsent(config, signal);
+        if (!consent) return;
         if (signal.aborted || arenaPickerConsentAbort !== request || seatRows[seat] !== row || running || startPending) return;
         if (!bigNetSelectableSync(config)) {
           el('message').textContent = bigNetUnavailableText(config);
@@ -5293,7 +5294,8 @@ function wireEvents() {
           return;
         }
         target.value = selectedVariant;
-        if (isMemoryConstrainedDevice()) arenaDownloadApprovals.add(config.key);
+        // A cache hit is rechecked at Start: storage may evict the model before then.
+        if (isMemoryConstrainedDevice() && consent === 'download') arenaDownloadApprovals.add(config.key);
       }
       row.variant = target.value;
     } else if (target.classList.contains('seat-strength')) {

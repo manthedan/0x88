@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { BIG_NETS, bigNetLoadWarning } from '../src/lc0/bt4Engine.ts';
-import { requestLargeNetConsent } from '../src/lc0/largeNetConsent.ts';
+import { requestLargeNetConsent, requestLargeNetDownloadConsent } from '../src/lc0/largeNetConsent.ts';
 import { inspectLargeNetDownload } from '../src/lc0/largeNetDownload.ts';
 import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
 import { createSoakBigNetBinding } from '../src/lc0/mobileSoakBigNet.ts';
@@ -108,6 +108,21 @@ for (const key of ['bt4', 't3']) {
     });
   }
 }
+
+test('consent says whether it covers a download: a cache hit does not', async (t) => {
+  const f = browser(t);
+  const inspect = async (config) => ({ cached: f.state.cached, url: config.modelUrl, downloadBytes: 1_000_000 });
+  const request = (config) => requestLargeNetDownloadConsent(config, f.abort.signal, false, undefined, inspect);
+  let pending = request(BIG_NETS.bt4);
+  choose(await f.dialog(), true);
+  assert.equal(await pending, 'download');
+  f.state.cached = true;
+  assert.equal(await request(BIG_NETS.t3), 'cached', 'opted-in phones skip the dialog for a cached net');
+  phoneLargeNetPreference.setEnabled(false);
+  pending = request(BIG_NETS.t3);
+  choose(await f.dialog(), true);
+  assert.equal(await pending, 'cached', 'crash consent for a cached net approves no download');
+});
 
 test('download copy uses selected artifact bytes, not the stale config estimate', async (t) => {
   const f = browser(t);
