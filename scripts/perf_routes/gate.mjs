@@ -160,7 +160,15 @@ export async function chromeFootprint(discover, read) {
     const previous = initial.get(pid);
     if (validFootprint(row) && validFootprint(previous)) refreshed.set(pid, { ...row, interval: Math.max(row.interval, previous.interval) });
   }
-  return { render: footprintSum(current.rendererPids, refreshed, 'renderer'), gpu: footprintSum(current.gpuPids, refreshed, 'Chrome GPU') };
+  const retryRender = footprintSum(current.rendererPids, refreshed, 'renderer');
+  const retryGpu = footprintSum(current.gpuPids, refreshed, 'Chrome GPU');
+  const observedRendererInterval = first.rendererPids.reduce((sum, pid) => {
+    const row = initial.get(pid);
+    return validFootprint(row) ? sum + row.interval : sum;
+  }, 0);
+  retryRender.interval = Math.max(retryRender.interval, observedRendererInterval);
+  retryGpu.interval = Math.max(retryGpu.interval, gpu.interval);
+  return { render: retryRender, gpu: retryGpu };
 }
 
 export function requestFailures(requests) {
@@ -169,7 +177,9 @@ export function requestFailures(requests) {
   for (const r of requests) {
     if (r.complete && !r.failure && r.status < 400) continue;
     const probe =
-      r.method === 'HEAD' && /^\/(?:models\/lc0\/(?:(?:BT4-|t3-)[^/?]+|lqo_v2\.f16\.qdq8)\.onnx|engine-logos\/[^/?]+\.(?:svg|png|jpe?g))(?:\?|$)/i.test(r.path);
+      r.method === 'HEAD' &&
+      (/^\/(?:models\/lc0\/(?:(?:BT4-|t3-)[^/?]+|lqo_v2\.f16\.qdq8)\.onnx|engine-logos\/[^/?]+\.(?:svg|png|jpe?g))(?:\?|$)/i.test(r.path) ||
+        /^\/(?:stockfish|berserk|plentychess|stormphrax|viridithas)\/[^/?]+\.(?:m?js|wasm|data|nnue)(?:\?|$)/.test(r.path));
     const speculative = ['GET', 'HEAD'].includes(r.method) && r.path.startsWith('/reckless/');
     const absent = r.complete && !r.failure && [404, 410].includes(r.status);
     if ((probe && absent) || (speculative && (absent || r.clientAborted))) optional.push(r);

@@ -35,7 +35,7 @@ const guarded =
 let proxy, browser, sid, cdp, page, evaluate, navigate, close, sampling, safariPid;
 const wc = 'com.apple.WebKit.WebContent';
 const pendingCleanup = cleanupMarker(outFile);
-const markBrowserStarting = () => writeFileSync(pendingCleanup, `${spec.browser} session process ${process.pid}\n`, { flag: 'wx' });
+const markBrowserStarting = () => writeFileSync(pendingCleanup, `${spec.browser} session process ${process.pid}\n`, { flag: 'wx', mode: 0o600 });
 let phase = 'journey',
   busy = false,
   samplingError;

@@ -204,13 +204,20 @@ test('proxy records upstream failure before headers, truncated bodies and downst
   const brokenProbe = { ...bigNetProbe, complete: false, failure: 'disconnected' };
   const missingModel = { ...bigNetProbe, method: 'GET' };
   const queenOdds = { ...bigNetProbe, path: '/models/lc0/lqo_v2.f16.qdq8.onnx' };
-  const logos = ['/engine-logos/stockfish.png', '/engine-logos/berserk.jpg'].map((path) => ({ ...bigNetProbe, path }));
+  const optionalProbes = ['/engine-logos/stockfish.png', '/engine-logos/berserk.jpg', '/stormphrax/stormphrax-emscripten.wasm'].map((path) => ({
+    ...bigNetProbe,
+    path,
+  }));
+  const failedDownload = { ...optionalProbes.at(-1), method: 'GET' };
   const recklessCancel = { ...late, method: 'GET', path: '/reckless/engine.wasm', clientAborted: true };
   const recklessBroken = { ...recklessCancel, clientAborted: false, failure: 'upstream truncated' };
-  assert.deepEqual(requestFailures([bigNetProbe, queenOdds, ...logos, recklessCancel, brokenProbe, missingModel, late, recklessBroken]), {
-    optional: [bigNetProbe, queenOdds, ...logos, recklessCancel],
-    unexpected: [brokenProbe, missingModel, late, recklessBroken],
-  });
+  assert.deepEqual(
+    requestFailures([bigNetProbe, queenOdds, ...optionalProbes, recklessCancel, brokenProbe, missingModel, late, recklessBroken, failedDownload]),
+    {
+      optional: [bigNetProbe, queenOdds, ...optionalProbes, recklessCancel],
+      unexpected: [brokenProbe, missingModel, late, recklessBroken, failedDownload],
+    },
+  );
 });
 
 test('route probes retain original worker payloads, count teardown once and parse both UCI transports', () => {
@@ -422,11 +429,12 @@ test('Chrome GPU and renderer sums reject missing or invalid reads instead of re
 });
 
 test('Chrome retries only a verified renderer exit, without losing interval peaks or accepting a missing GPU', async () => {
-  const old = { rendererPids: [1, 2], gpuPids: [3] };
+  const old = { rendererPids: [1, 2, 5], gpuPids: [3] };
   const fresh = { rendererPids: [2, 4], gpuPids: [3] };
   const first = new Map([
     [2, { cur: 4, life: 12, interval: 12 }],
     [3, { cur: 2, life: 10, interval: 10 }],
+    [5, { cur: 15, life: 20, interval: 20 }],
   ]);
   const second = new Map([
     [2, { cur: 3, life: 12, interval: 5 }],
@@ -436,7 +444,7 @@ test('Chrome retries only a verified renderer exit, without losing interval peak
   const discover = (states) => async () => states.shift();
   const read = (reads) => () => reads.shift();
   const sample = await chromeFootprint(discover([old, fresh]), read([first, second]));
-  assert.deepEqual(sample.render, { cur: 5, life: 15, interval: 15 });
+  assert.deepEqual(sample.render, { cur: 5, life: 15, interval: 32 });
   assert.deepEqual(sample.gpu, { cur: 3, life: 10, interval: 10 });
   await assert.rejects(chromeFootprint(discover([old, old]), read([first])), /renderer footprint for PID 1/);
   await assert.rejects(chromeFootprint(discover([old]), read([new Map()])), /Chrome GPU footprint for PID 3/);
