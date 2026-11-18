@@ -17,6 +17,9 @@ const SAN_COUNT = `document.querySelectorAll('#moveList .san').length`;
 const MANAGER_OPEN = `!!document.querySelector('#engineManager')?.open`;
 const STOP_ENABLED = `!!document.querySelector('#stop') && !document.querySelector('#stop').disabled`;
 const ANALYZE_ENABLED = `!!document.querySelector('#analyze') && !document.querySelector('#analyze').disabled`;
+// BT4's card: a principal variation for the position on the board, or the engine's error line.
+const BT4_CARD = `[...document.querySelectorAll('#engineSummaries .engine-card')].find(c => /BT4/.test(c.getAttribute('aria-label') ?? ''))`;
+const BT4_RESULT = `(() => { const card = ${BT4_CARD}; if (!card) return null; const error = card.querySelector('.line-error'); if (error) return { error: error.textContent }; const fen = window.__analysisSchedulingState().fen; return [...card.querySelectorAll('.result-line[data-pv]')].some(r => r.dataset.pv && r.dataset.pvFen === fen) ? { pv: true } : null; })()`;
 
 /** Click the visible header link, or the phone menu's link when the header nav is collapsed. */
 async function navigateVia(ctx, href, ready) {
@@ -51,11 +54,19 @@ async function chooseOpponent(ctx, { waitReady = true } = {}) {
   if (waitReady) await waitFor(ctx.evaluate, `/is ready/.test(document.querySelector('#engineNote')?.textContent)`, 180000);
 }
 
+// Play also shows the game-over card when the engine forfeits with an illegal move or no move at all.
+async function waitForEngine(ctx, expression, timeoutMs) {
+  await waitFor(ctx.evaluate, `${expression} || ${GAME_OVER}`, timeoutMs);
+  if (!(await ctx.evaluate(GAME_OVER))) return;
+  const reason = await ctx.evaluate(`document.querySelector('#resultReason')?.textContent ?? ''`);
+  if (/illegal move|returned no move/i.test(reason)) throw Error(`Engine forfeited: ${reason}`);
+}
+
 async function startGame(ctx) {
   // Same branch as the production smoke: a started game asks to confirm the restart.
   if (await ctx.evaluate(`!!document.querySelector('#restartBanner') && !document.querySelector('#restartBanner').hidden`)) await ctx.click('#confirmRestart');
   else await ctx.click('#newGame');
-  await waitFor(ctx.evaluate, `${PLAY_TURN} || ${GAME_OVER}`, 180000);
+  await waitForEngine(ctx, PLAY_TURN, 180000);
 }
 
 async function playGame(ctx) {
@@ -68,7 +79,7 @@ async function playGame(ctx) {
       const sans = await ctx.evaluate(`[...document.querySelectorAll('#moveList .san')].map(el => el.textContent)`);
       await userMove(ctx.evaluate, false, i, chooseHumanMove(sans));
     });
-    await ctx.step(`engine reply ${i + 1}`, () => waitFor(ctx.evaluate, `(${SAN_COUNT} >= ${(i + 1) * 2} && ${PLAY_TURN}) || ${GAME_OVER}`, 120000));
+    await ctx.step(`engine reply ${i + 1}`, () => waitForEngine(ctx, `(${SAN_COUNT} >= ${(i + 1) * 2} && ${PLAY_TURN})`, 120000));
   }
   await ctx.step('settle', () => ctx.pause(3000));
 }
@@ -91,7 +102,7 @@ async function playPromotion(ctx) {
   });
   // Count from before each human move: a fast reply may already be on the list when the move lands.
   let before = 0;
-  const engineReply = () => waitFor(ctx.evaluate, `(${SAN_COUNT} >= ${before + 2} && ${PLAY_TURN}) || ${GAME_OVER}`, 120000);
+  const engineReply = () => waitForEngine(ctx, `(${SAN_COUNT} >= ${before + 2} && ${PLAY_TURN})`, 120000);
   await ctx.step('pick queen', async () => {
     before = await ctx.evaluate(SAN_COUNT);
     await ctx.click('.promotion-overlay .promo-tile[data-promo="q"]');
@@ -173,7 +184,12 @@ async function analysisEngines(ctx) {
       ctx.note('info', 'No BT4 download progress shown (cached model?)'),
     );
     await waitFor(ctx.evaluate, `(() => { const p = document.querySelector('#downloadProgress'); return !p || p.hidden; })()`, 300000);
-    await ctx.pause(6000);
+    // A hidden indicator also follows a failed init, and the CPU fallback can still be searching:
+    // removing Berserk next must not race BT4's first result.
+    await waitFor(ctx.evaluate, `!!${BT4_RESULT}`, 300000);
+    const result = await ctx.evaluate(BT4_RESULT);
+    if (result.error) throw Error(`BT4 failed: ${result.error}`);
+    await ctx.pause(3000);
   });
   await ctx.step('remove Berserk', async () => {
     await openManager(ctx);
