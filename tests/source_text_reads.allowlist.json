@@ -105,6 +105,10 @@
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts"]
     },
+    "tests/build_scope.test.mjs": {
+      "reason": "lists src/routes page files (no text read) to require every route be classified as product or lab for the BUILD_SCOPE=product prerender gate",
+      "reads": ["src/routes/"]
+    },
     "tests/centipawn_s4fix_search.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts", "src/lc0/playBrowser.ts"]

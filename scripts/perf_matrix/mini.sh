@@ -70,7 +70,7 @@ up)
   DIST=${1:-$REPO/dist-client}
   LPORT=${2:-8781}
   MPORT=${3:-18781}
-  [ -d "$DIST" ] || { echo "no build at $DIST (BUILD_SCOPE=product npm run build:client)"; exit 1; }
+  [ -d "$DIST" ] || { echo "no build at $DIST (npm run build:client; the soak page is a lab route, absent from BUILD_SCOPE=product builds)"; exit 1; }
   require_owned_or_dead "$STATE/server.pid"
   require_owned_or_dead "$STATE/tunnel.pid"
   if ! alive "$STATE/server.pid"; then
