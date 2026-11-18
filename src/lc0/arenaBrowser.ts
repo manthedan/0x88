@@ -4479,7 +4479,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     // A 'cached' approval loads cache-only, and that load can still find the net evicted or
     // unreadable and ask again. Load the first game's nets now (it would next anyway), so a
     // decline there also keeps the previous tournament. Resumes keep their own checkpoint.
-    if (!resume) {
+    if (!resume && [...checkedBigNetVariants].some((variant) => !arenaRunDownloads.has(variant))) {
       for (const pid of [schedule[0].whiteId, schedule[0].blackId]) {
         const row = rowForEngineId(byPid.get(pid)!.engine!.id);
         if (row?.family !== 'lc0' || !isLc0BigNetVariant(row.variant) || arenaRunDownloads.has(row.variant)) continue;

@@ -557,7 +557,7 @@ for (const answer of [false, 'download']) {
       ${extract(source.analysis, 'async function initBigNetsForRun(', '/** After initBigNetsForRun:')}
       return initBigNetsForRun;`,
     )({
-      bigNetFor: async (key) => ({ config: BIG_NETS[key], searcher }),
+      bigNetFor: async (key) => ({ config: BIG_NETS[key], searcher, cacheOnly: cacheOnly.has(key) }),
       showModelProgress() {},
       hideModelProgress() {},
       ANALYSIS_BIG_NET_SESSION: { evalCacheEntries: 0 },

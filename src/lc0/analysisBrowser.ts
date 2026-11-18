@@ -627,9 +627,9 @@ async function requestAnalysisBigNetConsent(config: BigNetConfig, signal: AbortS
   else if (consent === 'download') analysisCacheOnlyBigNets.delete(key);
   return consent !== false;
 }
-async function bigNetFor(variant: string, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
-  const key: BigNetKey = variant === 't3' ? 't3' : 'bt4'; // keep in step with engineAnalysisCacheKey
-  return { config: BIG_NETS[key], searcher: await acquireBigNetSearcherAsync(key, false, signal) };
+async function bigNetFor(variant: string, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher; cacheOnly: boolean }> {
+  const key: AnalysisBigNetKey = variant === 't3' ? 't3' : 'bt4'; // keep in step with engineAnalysisCacheKey
+  return { config: BIG_NETS[key], searcher: await acquireBigNetSearcherAsync(key, false, signal), cacheOnly: analysisCacheOnlyBigNets.has(key) };
 }
 let ground: Ground | null = null;
 let pvGround: Ground | null = null;
@@ -2003,12 +2003,13 @@ function bigNetsAwaitingInit(rows: EngineRow[]): AnalysisBigNetKey[] {
   return [...keys];
 }
 
-async function initBigNetsForRun(keys: AnalysisBigNetKey[], cancelled: () => boolean, signal: AbortSignal): Promise<Map<AnalysisBigNetKey, Error>> {
+/** `signal` owns the download prompt a cache-only approval may need (bigNetFor().cacheOnly). */
+async function initBigNetsForRun(keys: AnalysisBigNetKey[], cancelled: () => boolean, signal?: AbortSignal): Promise<Map<AnalysisBigNetKey, Error>> {
   const errors = new Map<AnalysisBigNetKey, Error>();
   await Promise.all(
     keys.map(async (key) => {
       try {
-        const { config, searcher } = await bigNetFor(key);
+        const { config, searcher, cacheOnly } = await bigNetFor(key);
         // Checked before each attempt: a stopped run must not reload a pooled
         // session that Play or Arena may have taken back.
         if (cancelled()) return;
@@ -2027,7 +2028,7 @@ async function initBigNetsForRun(keys: AnalysisBigNetKey[], cancelled: () => boo
           await searcher.init(options);
         };
         try {
-          if (!analysisCacheOnlyBigNets.has(key)) {
+          if (!cacheOnly) {
             await load(ANALYSIS_BIG_NET_SESSION);
             return;
           }
