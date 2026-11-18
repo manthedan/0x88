@@ -51,8 +51,10 @@ server hooks, parameter matchers or custom adapters requiring those migrations.
    the existing undici 7.30.2 security override.
 6. Adapted the post-build runtime guard: Kit 3 calls `kit.init(payload)` instead
    of embedding its global id in every client chunk. Verify each HTML payload
-   against `_app/version.json`, initialization and existing start/app entry
-   files. Added seven tests for valid/nested pages, stale versions, regexp-safe
+   against `_app/version.json`, initialization and the start/app entries plus
+   every module they import statically or by literal dynamic import (Kit 3's
+   start entry statically imports `payload.*.js`; a missing module would break
+   hydration), confined to `_app/immutable`. Added seven tests for valid/nested pages, stale versions, regexp-safe
    comparison, missing initialization and missing entry files; retained Kit 2
    mismatch tests. Deployment still runs the guard.
 7. Fixed import ordering/formatting with the same `biome check` used in CI.

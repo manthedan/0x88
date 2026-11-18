@@ -29,9 +29,29 @@ async function idsInFiles(files) {
   return [...ids].sort();
 }
 
+// Relative specifiers of static imports/re-exports and literal dynamic imports.
+// Kit 3's start entry statically imports the payload module, then imports the
+// runtime on kit.init, so a missing module anywhere here breaks hydration.
+const MODULE_SPECIFIER =
+  /(?<![\w$.])(?:(?:import|export)\s*(?:(?:\{[^}]*\}|\*(?:\s*as\s*[\w$]+)?|[\w$]+(?:\s*,\s*(?:\{[^}]*\}|\*\s*as\s*[\w$]+))?)\s*from\s*)?|import\s*\(\s*)(["'`])(\.{1,2}\/[^"'`]+?\.js)\1/g;
+
+async function checkModuleGraph(entry, immutable, seen) {
+  const pending = [entry];
+  while (pending.length) {
+    const file = pending.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    if (!file.startsWith(immutable + sep)) throw new Error(`Unsafe SvelteKit module: ${file}`);
+    const source = await readFile(file, 'utf8');
+    for (const match of source.matchAll(MODULE_SPECIFIER)) pending.push(resolve(dirname(file), match[2]));
+  }
+}
+
 // Kit 3 passes its payload into kit.init instead of baking the global id into
 // client chunks. Bind each page to the build version and its emitted entries.
 async function checkPayloadBuild(output, pages, runtimeId) {
+  const immutable = join(output, '_app', 'immutable');
+  const seen = new Set();
   const { version } = JSON.parse(await readFile(join(output, '_app', 'version.json'), 'utf8'));
   if (typeof version !== 'string' || !version) throw new Error('Missing SvelteKit build version');
   const encodedVersion = JSON.stringify(version).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -45,8 +65,8 @@ async function checkPayloadBuild(output, pages, runtimeId) {
       const imports = [...html.matchAll(new RegExp(`import\\(["']([^"']*\\/_app/immutable/entry/${entry}\\.[^"'/]+\\.js)["']\\)`, 'g'))];
       if (imports.length !== 1) throw new Error(`Missing SvelteKit ${entry} entry: ${page}`);
       const path = resolve(dirname(page), imports[0][1]);
-      if (!path.startsWith(join(output, '_app', 'immutable', 'entry') + sep)) throw new Error(`Unsafe SvelteKit entry: ${path}`);
-      await readFile(path, 'utf8');
+      if (!path.startsWith(join(immutable, 'entry') + sep)) throw new Error(`Unsafe SvelteKit entry: ${path}`);
+      await checkModuleGraph(path, immutable, seen);
     }
   }
 }
