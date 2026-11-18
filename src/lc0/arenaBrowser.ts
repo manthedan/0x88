@@ -158,9 +158,10 @@ import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent,
 import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
 import { requestLargeNetDownloadConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
+import { inspectLargeNetDownload } from './largeNetDownload.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
-import { untilAborted } from './modelCache.ts';
+import { LC0_MODEL_DOWNLOAD_NOT_APPROVED, untilAborted } from './modelCache.ts';
 import { rememberMoveFocus } from './moveListFocus.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, type Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import {
@@ -524,11 +525,14 @@ async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config
   // full cache is enough), so a load not covered by a download approval asks again.
   // Ask unless the warm session will be reused; preparePhoneBigNet retires one configured differently.
   const evalCacheEntries = arenaCacheEntries();
+  const notApproved = () => new Error(`Lc0 ${BIG_NETS[key].name} is no longer cached and its download was not approved.`);
+  let cacheOnly = false;
   if (isMemoryConstrainedDevice() && !arenaRunDownloads.has(key) && !peekBigNetSearcher(key)?.isInitializedFor({ evalCacheEntries })) {
     const consent = await requestLargeNetDownloadConsent(BIG_NETS[key], signal);
     signal.throwIfAborted();
-    if (!consent) throw new Error(`Lc0 ${BIG_NETS[key].name} is no longer cached and its download was not approved.`);
+    if (!consent) throw notApproved();
     if (consent === 'download') arenaRunDownloads.add(key);
+    cacheOnly = consent === 'cached';
   }
   const reclaim =
     isMemoryConstrainedDevice() &&
@@ -554,6 +558,22 @@ async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config
       },
       { once: true },
     );
+  }
+  if (cacheOnly) {
+    // 'cached' approved no download, and the entry can be evicted or unreadable by now.
+    try {
+      await searcher.init({ evalCacheEntries, noDownload: true });
+    } catch (error) {
+      signal.throwIfAborted();
+      if (!(error instanceof Error && error.message.includes(LC0_MODEL_DOWNLOAD_NOT_APPROVED))) throw error;
+      // The cache key may still be there (unreadable body), so ask as for a download.
+      const uncached = (config: BigNetConfig, inspectSignal?: AbortSignal) =>
+        inspectLargeNetDownload(config, inspectSignal).then((state) => ({ ...state, cached: false }));
+      const consent = await requestLargeNetDownloadConsent(BIG_NETS[key], signal, true, undefined, uncached);
+      signal.throwIfAborted();
+      if (!consent) throw notApproved();
+      arenaRunDownloads.add(key);
+    }
   }
   return { config: BIG_NETS[key], searcher };
 }

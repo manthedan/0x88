@@ -122,6 +122,15 @@ export interface Lc0ModelLoadOptions {
   metadataStore?: Lc0ModelVerificationMetadataStore;
   /** Set by prefetchLc0ModelToCache: fail instead of downloading bytes Cache Storage cannot keep. */
   cacheOnly?: boolean;
+  /** Serve Cache Storage only: fail with LC0_MODEL_DOWNLOAD_NOT_APPROVED instead of downloading. */
+  noDownload?: boolean;
+}
+
+/** Error text of a noDownload load that needs network bytes; plain text survives worker messages. */
+export const LC0_MODEL_DOWNLOAD_NOT_APPROVED = 'LC0 model download not approved';
+
+function refuseUnapprovedDownload(options: Lc0ModelLoadOptions, modelUrl: string): void {
+  if (options.noDownload) throw new Error(`${LC0_MODEL_DOWNLOAD_NOT_APPROVED}: ${modelUrl}`);
 }
 
 /**
@@ -806,6 +815,7 @@ function modelLoadFlightKey(modelUrl: string, options: Lc0ModelLoadOptions): str
     options.maxCacheEntries ?? DEFAULT_MAX_CACHE_ENTRIES,
     options.maxCacheBytes ?? DEFAULT_MAX_CACHE_BYTES,
     options.cacheOnly ?? false,
+    options.noDownload ?? false,
   ]);
 }
 
@@ -1026,6 +1036,7 @@ async function fetchUncachedVerifiedModel(
   storagePersistent?: boolean,
 ): Promise<Lc0ModelLoadResult> {
   options.signal?.throwIfAborted();
+  refuseUnapprovedDownload(options, modelUrl);
   // A prefetch would download bytes only to drop them; its caller loads them itself.
   if (options.cacheOnly) throw new Error(`LC0 model cannot be cached here (${cacheStatus}): ${modelUrl}`);
   // The lab opt-out only skips checks that have no metadata; it never skips a known hash.
@@ -1088,6 +1099,7 @@ async function fetchAndCacheModel(
   storagePersistent: boolean | undefined,
   inheritedTelemetry: Pick<Lc0ModelLoadTelemetry, 'manifestMs' | 'cacheReadMs' | 'hashMs'> = {},
 ): Promise<Lc0ModelLoadResult> {
+  refuseUnapprovedDownload(options, logicalModelUrl);
   const download = await fetchModelBytes(fetchRequest, fetchModelUrl, expectation.expectedBytes, options.onProgress);
   options.signal?.throwIfAborted();
   const check = await verifyLc0ModelBytes(download.bytes, expectation, options.allowUnverified);

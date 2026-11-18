@@ -77,6 +77,8 @@ type InitMessage = {
   reportDownloadProgress?: boolean;
   requestPersistentModelStorage?: boolean;
   minimumFreeBytesAfterModelCache?: number;
+  /** Load from Cache Storage only (a cache-hit approval); downloading fails instead (modelCache.ts noDownload). */
+  noModelDownload?: boolean;
   /** Verified bytes from a phone prefetch whose cache.put failed (largeNetDownload.ts), for one load of `url`. */
   prefetchedModel?: { url: string; load: Lc0ModelLoadResult };
 };
@@ -456,6 +458,7 @@ async function handleInit(message: InitMessage): Promise<void> {
         allowUnverified: message.allowUnverifiedModel,
         requestPersistentStorage: message.requestPersistentModelStorage,
         minimumFreeBytesAfterCache: message.minimumFreeBytesAfterModelCache,
+        noDownload: message.noModelDownload,
         signal: initAbort.signal,
         onProgress: message.reportDownloadProgress
           ? (loadedBytes, totalBytes) => {

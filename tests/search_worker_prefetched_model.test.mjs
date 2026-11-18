@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { LC0_MODEL_DOWNLOAD_NOT_APPROVED } from '../src/lc0/modelCache.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { startSearchWorker } from '../src/lc0/searchWorkerCore.ts';
 
@@ -54,4 +55,43 @@ test('search worker init loads a prefetched model from memory, once, without fet
   assert.equal(reply.type, 'error');
   assert.match(reply.error, /stop after session input/);
   assert.deepEqual(created, ['abc']);
+});
+
+// Arena's cache-hit consent: the worker's loader must refuse network bytes, not download them.
+test('search worker init with noModelDownload refuses to download an uncached model', async (t) => {
+  const descriptors = new Map(['self', 'navigator', 'fetch', 'caches'].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  t.after(() => {
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  });
+  const define = (key, value) => Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  let handle;
+  const replies = new Map();
+  define('self', {
+    addEventListener(_type, listener) {
+      handle = listener;
+    },
+    postMessage(message) {
+      replies.get(message.id)?.(message);
+    },
+  });
+  define('navigator', { userAgent: 'test' });
+  define('caches', { has: async () => true, open: async () => ({ match: async () => undefined }) });
+  const modelUrl = 'https://test.invalid/models/lc0/uncached.onnx';
+  const sha256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+  define('fetch', async (input) => {
+    const href = input.url ?? String(input);
+    if (href.endsWith('/manifest.json')) return Response.json({ models: [{ file: 'uncached.onnx', url: modelUrl, bytes: 3, sha256 }] });
+    assert.fail(`downloaded ${href}`);
+  });
+  t.mock.method(Lc0OnnxEvaluator, 'create', async () => assert.fail('no session without model bytes'));
+  startSearchWorker();
+  const reply = await new Promise((resolve) => {
+    replies.set(2, resolve);
+    handle({ data: { type: 'init', id: 2, modelUrl, ep: 'wasm', cacheModel: true, noModelDownload: true } });
+  });
+  assert.equal(reply.type, 'error');
+  assert.match(reply.error, new RegExp(LC0_MODEL_DOWNLOAD_NOT_APPROVED));
 });

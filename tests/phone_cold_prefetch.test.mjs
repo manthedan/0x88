@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { BT4_NET, Bt4WorkerSearcher, T3_NET } from '../src/lc0/bt4Engine.ts';
 import { prefetchLargeNetToCache } from '../src/lc0/largeNetDownload.ts';
 import { lc0SplitKUrl, selectLc0OrtModelUrl } from '../src/lc0/lc0SmallModelSelection.ts';
-import { loadLc0ModelForOrt, prefetchLc0ModelToCache } from '../src/lc0/modelCache.ts';
+import { LC0_MODEL_DOWNLOAD_NOT_APPROVED, loadLc0ModelForOrt, prefetchLc0ModelToCache } from '../src/lc0/modelCache.ts';
 import { resetWebGpuAdapterProbeForTests, resolveOrtSessionPlacement } from '../src/nn/ortRuntime.ts';
 
 // Phone cold loads: the net is downloaded, verified and cached by a throwaway
@@ -274,4 +274,31 @@ test('the session load waits out the phone reclaim gap counted from the prefetch
   );
   assert.deepEqual(result, { status: 'prefetched' });
   assert.ok(performance.now() - terminatedAt >= 35, 'resolved only after the gap');
+});
+
+// Arena's cache-hit consent approves no download (arenaBrowser.ts bigNetFor).
+test('a noDownload load serves a cache hit but refuses to download a missing or unreadable entry', async (t) => {
+  const env = environment(t);
+  const manifestEntry = { file: 'prefetch.onnx', url: modelUrl, bytes: 3, sha256 };
+  const options = { cache: true, manifestEntry, channelUrl: null, noDownload: true };
+  await assert.rejects(loadLc0ModelForOrt(modelUrl, options), new RegExp(LC0_MODEL_DOWNLOAD_NOT_APPROVED));
+  env.responses.set(modelUrl, { clone: () => ({ arrayBuffer: async () => Promise.reject(new TypeError('body unreadable')) }) });
+  await assert.rejects(loadLc0ModelForOrt(modelUrl, options), new RegExp(LC0_MODEL_DOWNLOAD_NOT_APPROVED));
+  assert.equal(env.counts.downloads, 0);
+  env.responses.set(modelUrl, new Response('abc'));
+  assert.equal((await loadLc0ModelForOrt(modelUrl, options)).cacheStatus, 'hit');
+  assert.equal(env.counts.downloads, 0);
+});
+
+test('a noDownload init skips the prefetch worker and tells the session worker not to download', async (t) => {
+  const env = environment(t);
+  const searcher = new Bt4WorkerSearcher(config);
+  assert.equal(await searcher.init({ noDownload: true }), 'mock-webgpu');
+  assert.deepEqual(env.trace, ['search:spawn', 'search:init'], 'nothing to prefetch');
+  assert.equal(env.workers[0].messages[0].noModelDownload, true);
+  await searcher.dispose();
+  const approved = new Bt4WorkerSearcher(config);
+  await approved.init();
+  assert.equal(env.workers.at(-1).messages[0].noModelDownload, undefined);
+  await approved.dispose();
 });
