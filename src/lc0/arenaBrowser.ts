@@ -3233,7 +3233,16 @@ function buildEngines() {
     };
   const lc0SearchWarmup = (engineId: string) => async (signal: AbortSignal) => {
     const search = lc0SearcherFor(engineId);
-    await search.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
+    // The hybrid runtime downloads its pack inside this first evaluation, which
+    // the search signal cannot reach: Stop cancels that init; the next match retries.
+    const inner = lc0Cache?.inner as { abortPendingInit?: () => void } | undefined;
+    const stopInit = () => inner?.abortPendingInit?.();
+    signal.addEventListener('abort', stopInit, { once: true });
+    try {
+      await search.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
+    } finally {
+      signal.removeEventListener('abort', stopInit);
+    }
     search.resetTree();
     renderCacheInfo();
   };

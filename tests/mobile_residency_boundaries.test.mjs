@@ -433,3 +433,32 @@ for (const canceled of [false, true])
     else await pending;
     assert.equal(starts, canceled ? 0 : 1);
   });
+
+// A first warmup evaluation waiting on the hybrid runtime's pack download.
+const pendingInit = Promise.withResolvers();
+const inner = { abortPendingInit: () => pendingInit.reject(new DOMException('Init cancelled', 'AbortError')) };
+
+test('Arena Stop during a cold hybrid Small warmup cancels the pack init instead of waiting for it', async () => {
+  const text = source('arenaBrowser');
+  const warmup = compile(
+    `const warmupPositions = [];
+    ${extract(text, '  const lc0SearchWarmup = (engineId: string) => async (signal: AbortSignal) => {', '  const lc0BigNetWarmup =')}
+    return lc0SearchWarmup('lc0');`,
+    {
+      lc0Cache: { inner },
+      lc0SearcherFor: () => ({ search: () => pendingInit.promise, resetTree() {} }),
+      renderCacheInfo: () => {},
+    },
+  );
+  const controller = new AbortController();
+  const running = warmup(controller.signal);
+  controller.abort();
+  const settled = await Promise.race([
+    running.then(
+      () => 'done',
+      (error) => error.name,
+    ),
+    new Promise((resolve) => setTimeout(() => resolve('stalled'), 100)),
+  ]);
+  assert.equal(settled, 'AbortError', 'Arena would stay "Stopping…" until the pack request settled');
+});
