@@ -3,18 +3,15 @@ import { trackEngineRetirement } from './engineRetirement.ts';
 /** Immediate logical cancellation; canceled native creation remains owned until released. */
 export function loadRetirableResource<T extends { dispose?: () => unknown }>(create: () => Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) throw new DOMException('Engine load cancelled', 'AbortError');
+  const creating = Promise.resolve().then(() => {
+    signal.throwIfAborted();
+    return create();
+  });
   return new Promise<T>((resolve, reject) => {
-    let settled = false;
-    const creating = Promise.resolve().then(() => {
-      signal.throwIfAborted();
-      return create();
-    });
+    // Whichever settles first owns the resource: an abort detaches it to the
+    // retirement barrier synchronously (before a quick restart or another route
+    // can pass that barrier); a settled creation removes the abort listener.
     const onAbort = () => {
-      if (settled) return;
-      settled = true;
-      signal.removeEventListener('abort', onAbort);
-      // Install the retirement synchronously with cancellation, before a quick
-      // restart or another route can pass the replacement-load barrier.
       trackEngineRetirement(
         creating.then(
           async (resource) => {
@@ -26,20 +23,12 @@ export function loadRetirableResource<T extends { dispose?: () => unknown }>(cre
       reject(new DOMException('Engine load cancelled', 'AbortError'));
     };
     signal.addEventListener('abort', onAbort, { once: true });
-    creating.then(
-      (resource) => {
-        if (settled) return;
-        settled = true;
+    const settle =
+      <V>(done: (value: V) => void) =>
+      (value: V) => {
         signal.removeEventListener('abort', onAbort);
-        resolve(resource);
-      },
-      (error) => {
-        if (settled) return;
-        settled = true;
-        signal.removeEventListener('abort', onAbort);
-        reject(error);
-      },
-    );
-    if (signal.aborted) onAbort();
+        done(value);
+      };
+    creating.then(settle(resolve), settle(reject));
   });
 }
