@@ -43,7 +43,7 @@ const analyzeFunction = slice('async function performAnalysisMaintenance(', 'let
 const schedulerFunctions = slice('function hasActiveAnalysisRun(', 'function hiddenTabActive(');
 const cancelFunctions = slice('function cancelActiveAnalysisRun(', 'function scheduleAnalyzeCurrent(');
 const scheduleFunction = slice('function scheduleAnalyzeCurrent(', 'async function withCpuLease');
-const invalidateFunction = slice('function invalidateAnalysisSettings(', 'function deferAnalysisSettingsRefresh(');
+const invalidateFunction = slice('const ANALYSIS_REFRESH_PENDING_MESSAGE', 'function deferAnalysisSettingsRefresh(');
 const backendFunction = slice('async function loadLc0Backend(', 'async function loadLc0BackendOwned(');
 const reloadFunction = slice('async function reloadLc0Backend(', 'async function init(');
 const hiddenFunctions = slice('function hiddenTabActive(', 'function installHiddenTabPause(');
@@ -420,6 +420,28 @@ test('post-capture controls cannot relabel search arguments, cached rows or comp
       assert.deepEqual([...page.completeAnalysisKeys], [originalKey, nextKey]);
       assert.equal(page.engineLineCache.get(originalKey)[0].searchedMultiPv, 1);
       assert.equal(page.lineCache.get(START_FEN)[0].searchedMultiPv, 3, 'only the current selection publishes');
+    } finally {
+      t3.dispose();
+    }
+  }));
+
+test('Stop clears the queued MultiPV refresh message even after the old search settles', () =>
+  withWorkers({ [T3_ORIGINAL]: [{}] }, async () => {
+    const t3 = new Bt4WorkerSearcher(T3_NET);
+    try {
+      await t3.init({ evalCacheEntries: 0 });
+      const page = analysisPage({ rows: [t3Row], searchers: new Map([['t3', t3]]) });
+      const running = page.analyzeCurrent();
+      await until(() => FakeWorker.searchLog.length === 1);
+      page.setMultiPv(3);
+      assert.ok(page.state().wanted, 'the MultiPV change queued a refresh');
+      assert.match(page.el('message').textContent, /Finishing previous search/);
+      page.stop();
+      await running;
+      assert.equal(page.idle(), true);
+      assert.equal(page.state().wanted, null);
+      assert.equal(FakeWorker.searchLog.length, 1, 'Stop discarded the queued search');
+      assert.equal(page.el('message').textContent, 'Analysis stopped.');
     } finally {
       t3.dispose();
     }

@@ -1078,9 +1078,21 @@ function progressKey(runId: number, label: string): string {
   return `${runId}\u0000${label}`;
 }
 
+function canShowAnalysisSearchProgress(runId: number, fen: string): boolean {
+  const { execution, revision } = analysisRunState;
+  // Settings can replace the cards before the previous search releases the engines.
+  return (
+    !hiddenTab.hidden &&
+    !mountAbort.signal.aborted &&
+    execution.tag === 'running' &&
+    execution.owner.runId === runId &&
+    execution.owner.preparationRevision === revision &&
+    tree.current.fen === fen
+  );
+}
+
 function showAnalysisProgress(runId: number, fen: string, label: string, progress: WorkerSearchProgress): void {
-  if (hiddenTab.hidden || runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analysisIsAnalyzing(analysisRunState) || tree.current.fen !== fen)
-    return;
+  if (!canShowAnalysisSearchProgress(runId, fen)) return;
   analysisUiProgressSamples += 1;
   const completed = progress.completedVisits ?? progress.visits;
   const elapsedMs = progress.elapsedMs ?? 0;
@@ -1118,16 +1130,14 @@ function showMoveSearchProgress(
 }
 
 function showIndeterminateSearchProgress(runId: number, fen: string, label: string): void {
-  if (hiddenTab.hidden || runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analysisIsAnalyzing(analysisRunState) || tree.current.fen !== fen)
-    return;
+  if (!canShowAnalysisSearchProgress(runId, fen)) return;
   searchProgressByEngine.set(progressKey(runId, label), { label, units: 'search', indeterminate: true });
   renderAnalysisSearchProgress();
   renderEngineComparison(lineCache.get(fen) ?? []);
 }
 
 function clearEngineSearchProgress(runId: number, label: string): void {
-  searchProgressByEngine.delete(progressKey(runId, label));
-  renderAnalysisSearchProgress();
+  if (searchProgressByEngine.delete(progressKey(runId, label))) renderAnalysisSearchProgress();
 }
 
 async function workerLc0Lines(
@@ -2548,7 +2558,12 @@ function renderEngineSummaries(lines: AnalysisLine[]): void {
               ? 'Unavailable'
               : `Budget · ${row.strength} ${strengthMeta(row.family).unit}`;
         // One unit in the strip (depth or visits) so it never clips beside the eval; the full string stays in the tooltip.
-        const stats = raw.startsWith('Budget · ') ? raw : raw.split(' · ')[0];
+        const stats =
+          progress && hasBoundedSearchProgress(progress)
+            ? `${progress.completed}/${progress.requested} ${progress.units}`
+            : raw.startsWith('Budget · ')
+              ? raw
+              : raw.split(' · ')[0];
         const engine = line?.engine ?? engineLines[0]?.engine ?? rowLabel(row);
         const swatch = engineBrushes(engine).swatch;
         const pct =
@@ -4097,6 +4112,7 @@ function removeHiddenTabPause(): void {
 }
 
 let analysisReclaimOwner: AbortController | null = null;
+const ANALYSIS_REFRESH_PENDING_MESSAGE = 'Finishing previous search before updating analysis…';
 
 function invalidateAnalysisSettings(
   maintenance: Maintenance = { reloadLc0: false, disposeUnused: false },
@@ -4105,6 +4121,11 @@ function invalidateAnalysisSettings(
   request = request && automaticAnalysisAllowed();
   if (request && hiddenTab.hidden) deferHiddenTabWork('analysis');
   void dispatchAnalysis({ type: 'SETTINGS_CHANGED', revision: analysisRunState.revision + 1, intent: analysisIntent(), maintenance, request });
+  if (analysisRunState.execution.tag === 'running') {
+    clearAnalysisSearchProgress();
+    el('message').textContent = request ? ANALYSIS_REFRESH_PENDING_MESSAGE : 'Engine settings changed.';
+    renderEngineComparison(lineCache.get(tree.current.fen) ?? []);
+  }
   // The scheduler has queued the new intent. No native init has begun, so
   // settle the obsolete reclaim wait now instead of holding up the new rows.
   if (isMemoryConstrainedDevice() && analysisReclaimOwner && analysisReclaimOwner === analysisAbort) cancelAnalysisOperation(activeAnalysisRunId);
@@ -4126,6 +4147,9 @@ function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnu
 
 function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolean } = {}): void {
   void dispatchAnalysis({ type: 'STOP', preserveMaintenance: options.preserveDeferredMaintenance === true });
+  // Stop drops the queued refresh. Keep any more specific message written by cancellation.
+  const message = maybeEl('message');
+  if (message?.textContent === ANALYSIS_REFRESH_PENDING_MESSAGE) message.textContent = 'Analysis stopped.';
 }
 
 function cancelAnalysisOperation(operationId: number): void {
@@ -4577,7 +4601,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         (async () => {
           if (controller.signal.aborted || mountAbort.signal.aborted) return;
           try {
-            const lines = await taskFactory(() => showIndeterminateSearchProgress(runId, fen, label));
+            // Retire the meter before publishing this engine’s result, even if other engines are still searching.
+            const lines = await taskFactory(() => showIndeterminateSearchProgress(runId, fen, label)).finally(() => clearEngineSearchProgress(runId, label));
             if (
               runId !== activeAnalysisRunId ||
               analysisAbort !== controller ||
@@ -4600,8 +4625,6 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
               lineGroups[index] = [{ engine: label, pvUci: [], multipv: 1, scoreText: '—', detail: 'failed', pvSan: '', error: errMsg }];
               publishLines();
             }
-          } finally {
-            clearEngineSearchProgress(runId, label);
           }
         })(),
       );
@@ -4828,7 +4851,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       if (completeAnalysisKeys.size > 512) completeAnalysisKeys.delete(completeAnalysisKeys.values().next().value!);
     }
     const message = maybeEl('message');
-    if (message)
+    if (message && analysisRunState.revision === owner.preparationRevision)
       message.textContent = hadTaskFailure
         ? `Analysis completed with one or more engine failures/timeouts: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}`
         : snapshot.rows.length > 1
