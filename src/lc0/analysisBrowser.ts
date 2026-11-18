@@ -4891,26 +4891,7 @@ function maia3PanelStatus(text: string): void {
 }
 
 function unloadMaia3Panel(message: string): void {
-  maia3PanelLoadGeneration += 1;
-  maia3PanelAbort?.abort();
-  maia3PanelAbort = null;
-  maia3PanelTask?.dispose();
-  maia3PanelTask = null;
-  if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
-  maia3PanelTimer = null;
-  const pending = maia3PanelPending;
-  const evaluator = maia3PanelEvaluator;
-  maia3PanelPending = null;
-  maia3PanelEvaluator = null;
-  maia3PanelLoading = false;
-  if (pending)
-    trackEngineRetirement(
-      pending.then(
-        (loaded) => loaded.dispose(),
-        () => undefined,
-      ),
-    );
-  else if (evaluator) trackEngineRetirement(evaluator.dispose());
+  retireMaia3Panel();
   explorerMaia = null;
   renderExplorerComparison();
   el('maia3Grid').hidden = true;
@@ -4920,6 +4901,28 @@ function unloadMaia3Panel(message: string): void {
   enable.disabled = maia3PanelBlockedByRun !== null;
   maia3PanelStatus(message);
   hideModelProgress();
+}
+
+/** Detach the panel's pending or loaded Maia3 owner to the retirement barrier. */
+function retireMaia3Panel(): void {
+  maia3PanelLoadGeneration += 1;
+  maia3PanelAbort?.abort();
+  maia3PanelAbort = null;
+  maia3PanelTask?.dispose();
+  maia3PanelTask = null;
+  if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
+  maia3PanelTimer = null;
+  const owned = maia3PanelPending ?? (maia3PanelEvaluator && Promise.resolve(maia3PanelEvaluator));
+  maia3PanelPending = null;
+  maia3PanelEvaluator = null;
+  maia3PanelLoading = false;
+  if (owned)
+    trackEngineRetirement(
+      owned.then(
+        (loaded) => loaded.dispose(),
+        () => undefined,
+      ),
+    );
 }
 
 async function enableMaia3Panel(): Promise<void> {
@@ -6233,24 +6236,7 @@ function disposePageResources(): void {
   analysisReloadAbort?.abort();
   analysisReloadAbort = null;
   disposeRuntimeResources();
-  maia3PanelAbort?.abort();
-  maia3PanelAbort = null;
-  if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
-  if (maia3PanelPending)
-    trackEngineRetirement(
-      maia3PanelPending.then(
-        (loaded) => loaded.dispose(),
-        () => undefined,
-      ),
-    );
-  else if (maia3PanelEvaluator) trackEngineRetirement(maia3PanelEvaluator.dispose());
-  maia3PanelPending = null;
-  maia3PanelEvaluator = null;
-  maia3PanelLoading = false;
-  maia3PanelLoadGeneration += 1;
-  maia3PanelTask?.dispose();
-  maia3PanelTask = null;
-  maia3PanelTimer = null;
+  retireMaia3Panel();
   maia3PanelEvaluating = false;
   maia3PanelStatusText = '';
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
