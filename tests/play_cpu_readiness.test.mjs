@@ -27,7 +27,7 @@ for (const move of [null, 'a1a8', 'e2e4']) {
     };
     const deps = {
       ctxSelectedEngine: () => option,
-      releaseUnusedBigNetSearchers: () => {},
+      retireUnusedPlayNeuralEngines: async () => {},
       buttonEl: () => ({}),
       ctxSetEngineNote: (text) => notes.push(text),
       ctxRender: () => {},

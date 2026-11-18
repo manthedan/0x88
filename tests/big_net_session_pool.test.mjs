@@ -226,9 +226,11 @@ test('constrained acquire also clears an inherited idle-TTL net before replaceme
 for (const ack of [true, false]) {
   test(`phone exclusive replacement awaits graceful disposal (${ack ? 'ack' : 'bounded timeout'})`, async () => {
     const events = [];
+    const disposing = Promise.withResolvers();
     class Worker extends EventTarget {
       postMessage(message) {
         events.push(message.type);
+        if (message.type === 'dispose') disposing.resolve();
       }
       terminate() {
         events.push('terminate');
@@ -246,7 +248,7 @@ for (const ack of [true, false]) {
     );
     const first = pool.acquire('bt4');
     const next = pool.acquireAsync('t3', true);
-    await new Promise((resolve) => setImmediate(resolve));
+    await disposing.promise;
     assert.equal(pool.has('bt4'), false, 'detach remains synchronous at retirement');
     assert.equal(pool.has('t3'), false, 'replacement is not constructed while the old worker drains');
     assert.deepEqual(events, ['create:bt4', 'cancel', 'dispose']);
@@ -283,7 +285,7 @@ test('async phone acquire waits for an already released net and preserves active
   assert.equal(pool.peek('t3'), t3);
 });
 
-test('failed or cancelled graceful retirement does not construct a replacement', async () => {
+test('cancelled graceful retirement does not construct a replacement; a failed one ends the wait', async () => {
   for (const cancel of [false, true]) {
     const retirement = Promise.withResolvers();
     const pool = new BigNetSessionPool(
@@ -296,12 +298,18 @@ test('failed or cancelled graceful retirement does not construct a replacement',
     const abort = new AbortController();
     const next = pool.acquireAsync('t3', true, abort.signal);
     await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(pool.has('t3'), false, 'no replacement while the old worker drains');
     if (cancel) {
       abort.abort();
       retirement.resolve();
-    } else retirement.reject(new Error('release failed'));
-    await assert.rejects(next, cancel ? { name: 'AbortError' } : /release failed/);
-    assert.equal(pool.has('t3'), false);
+      await assert.rejects(next, { name: 'AbortError' });
+      assert.equal(pool.has('t3'), false);
+    } else {
+      // Worker disposal terminates even when release reports an error (disposeOrtWorker).
+      retirement.reject(new Error('release failed'));
+      await next;
+      assert.equal(pool.has('t3'), true);
+    }
   }
 });
 

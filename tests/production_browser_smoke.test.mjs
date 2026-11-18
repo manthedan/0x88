@@ -6,11 +6,14 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   actionableErrorEntries,
+  advertisesWorkerRetirement,
+  assertClientDocument,
   browserMaxAge,
   failedRequestEntries,
   isExpectedAppShellCacheControl,
   isExpectedOrtCacheControl,
   parseCacheControl,
+  workerRetirementReport,
 } from '../scripts/production_browser_smoke.mjs';
 
 const script = 'scripts/production_browser_smoke.mjs';
@@ -25,7 +28,41 @@ test('production browser smoke dry-run describes the bounded cross-surface journ
   const report = JSON.parse(result.stdout);
   assert.equal(report.status, 'PRODUCTION_BROWSER_SMOKE_DRY_RUN');
   assert.equal(report.baseUrl, 'https://example.test');
-  assert.deepEqual(report.journey, ['Play/Centipawn', 'Arena', 'Analysis', 'Play/Stormphrax']);
+  assert.deepEqual(report.journey, ['Play/Centipawn', 'Arena', 'Analysis', 'Play/Stormphrax', 'Analysis/return']);
+});
+
+test('document identity is rechecked after controller readiness and worker retirement', async () => {
+  let token = 'original';
+  const session = { documentToken: token, page: { evaluate: async () => token } };
+  await assertClientDocument(session, 'initial path');
+  token = undefined;
+  await assert.rejects(assertClientDocument(session, 'destination ready'), /full navigation instead of client-side navigation/);
+  const source = readFileSync(script, 'utf8');
+  assert.match(source, /async function inspectBrowser\(session, surface\) \{\s*await assertClientDocument\(session, surface\)/);
+  assert.match(source, /await assertClientDocument\(session, 'Worker retirement'\);\s*return workerRetirementReport/);
+});
+
+test('nightly smoke recognizes old and new deployed Play markup during rollout', async () => {
+  const shipped = readFileSync('src/routes/app/play/+page.svelte', 'utf8').match(/data-worker-retirement="([^"]+)"/)?.[1];
+  for (const [advertised, expected] of [
+    [undefined, false],
+    [shipped, true],
+  ]) {
+    const document = { getElementById: (id) => (id === 'main' ? { dataset: { workerRetirement: advertised } } : null) };
+    const session = { page: { evaluate: async (expression) => new Function('document', `return ${expression}`)(document) } };
+    assert.equal(await advertisesWorkerRetirement(session), expected);
+  }
+});
+
+test('navigation guard requires real worker retirement and a lower count on Analysis -> Play', () => {
+  const small = { url: () => 'small-worker' },
+    sf = { url: () => 'sf-worker' },
+    storm = { url: () => 'storm-worker' };
+  assert.deepEqual(workerRetirementReport([small, sf], [storm], true), { before: ['small-worker', 'sf-worker'], after: ['storm-worker'], retired: 2 });
+  assert.throws(() => workerRetirementReport([small, sf], [small], true), /retained 1 previous worker/);
+  assert.throws(() => workerRetirementReport([small], [storm], true), /count did not drop/);
+  assert.throws(() => workerRetirementReport([], [], true), /no live workers/);
+  assert.equal(workerRetirementReport([storm], [small, sf]).retired, 1, 'returning to Analysis may start more workers, but never retain Play');
 });
 
 test('production browser smoke rejects non-HTTP origins before launching a browser', () => {

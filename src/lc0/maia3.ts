@@ -5,6 +5,7 @@ import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { type OrtSessionDiagnostics, ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
+import { terminateEngineWorker } from './engineRetirement.ts';
 import { MAIA3_ORT_DEFAULTS } from './maia3RuntimeConfig.ts';
 import { clearLc0ModelCacheEntry, type Lc0ModelLoadInfo, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
 import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
@@ -352,6 +353,15 @@ export class Maia3BrowserEvaluator {
     const create = async (loaded: Lc0ModelLoadResult) => {
       options.signal?.throwIfAborted();
       const worker = new Worker(new URL('./maia3Worker.ts', import.meta.url), { type: 'module', name: 'maia3-evaluator' });
+      // Publish the close once, synchronously when an abort starts it: an owner's
+      // retirement snapshot taken right after abort() must already include it.
+      let closing: Promise<void> | undefined;
+      const close = () => {
+        if (closing) return closing;
+        closing = disposeOrtWorker(worker);
+        options.onInitCleanup?.(closing);
+        return closing;
+      };
       try {
         const names = await Maia3BrowserEvaluator.postInit(
           worker,
@@ -360,6 +370,7 @@ export class Maia3BrowserEvaluator {
           options.signal,
           options.wasmThreads,
           loaded.sha256Valid === true ? { url: loaded.logicalUrl ?? loaded.url, metadataTrusted: isMetadataTrustedModel(loaded) } : undefined,
+          close,
         );
         options.signal?.throwIfAborted();
         const evaluator = new Maia3BrowserEvaluator(worker, loaded, selfElo, oppoElo, names, options.onFailure);
@@ -368,10 +379,9 @@ export class Maia3BrowserEvaluator {
         evaluator.abortCleanup = () => options.signal?.removeEventListener('abort', abort);
         return evaluator;
       } catch (error) {
-        const closing = disposeOrtWorker(worker);
-        options.onInitCleanup?.(closing);
-        if (options.signal?.aborted) void closing.catch(() => undefined);
-        else await closing;
+        const closed = close();
+        if (options.signal?.aborted) void closed.catch(() => undefined);
+        else await closed;
         throw error;
       }
     };
@@ -379,8 +389,9 @@ export class Maia3BrowserEvaluator {
       return await create(modelLoad);
     } catch (error) {
       options.signal?.throwIfAborted();
-      const failed = (error as { modelLoad?: Lc0ModelLoadInfo } | null)?.modelLoad ?? modelLoad;
-      if (!isOnnxModelParseError(error) || !isMetadataTrustedModel(failed)) throw error;
+      const workerFailure = error as { modelLoad?: Lc0ModelLoadInfo; modelParseError?: boolean } | null;
+      const failed = workerFailure?.modelLoad ?? modelLoad;
+      if (!(workerFailure?.modelParseError ?? isOnnxModelParseError(error)) || !isMetadataTrustedModel(failed)) throw error;
       await modelDeps.clear(failed.url, MAIA3_MODEL_CACHE_NAME);
       options.signal?.throwIfAborted();
       const reloaded = { ...(await load(failed.logicalUrl ?? modelLoad.logicalUrl ?? failed.url, true)), revalidated: true };
@@ -409,6 +420,7 @@ export class Maia3BrowserEvaluator {
     signal?: AbortSignal,
     wasmThreads?: number,
     reloadModel?: { url: string; metadataTrusted: boolean },
+    close: () => Promise<void> = () => disposeOrtWorker(worker),
   ): Promise<{ inputNames: string[]; outputNames: string[]; backend: string; ortRuntime?: OrtSessionDiagnostics }> {
     return new Promise((resolve, reject) => {
       const id = 0;
@@ -420,7 +432,7 @@ export class Maia3BrowserEvaluator {
       };
       const onAbort = () => {
         cleanup();
-        void disposeOrtWorker(worker).catch(() => undefined);
+        void close().catch(() => undefined);
         reject(new DOMException('Maia3 cancelled', 'AbortError'));
       };
       const onError = (event: ErrorEvent) => {
@@ -441,6 +453,7 @@ export class Maia3BrowserEvaluator {
           backend?: string;
           ortRuntime?: OrtSessionDiagnostics;
           modelLoad?: Lc0ModelLoadInfo;
+          modelParseError?: boolean;
         };
         if (data.type === 'deviceLost' || data.id !== id) return;
         if (data.type === 'ready') {
@@ -448,7 +461,12 @@ export class Maia3BrowserEvaluator {
           resolve({ inputNames: data.inputNames ?? [], outputNames: data.outputNames ?? [], backend: data.backend ?? 'unknown', ortRuntime: data.ortRuntime });
         } else if (data.type === 'error') {
           cleanup();
-          reject(Object.assign(new Error(data.message ?? 'Maia3 worker initialization failed'), data.modelLoad ? { modelLoad: data.modelLoad } : {}));
+          reject(
+            Object.assign(new Error(data.message ?? 'Maia3 worker initialization failed'), {
+              modelLoad: data.modelLoad,
+              modelParseError: data.modelParseError,
+            }),
+          );
         }
       };
       worker.addEventListener('message', onMessage);
@@ -578,7 +596,7 @@ export class Maia3BrowserEvaluator {
     this.worker.removeEventListener('error', this.errorListener);
     this.worker.removeEventListener('messageerror', this.messageErrorListener);
     if (!alreadyTerminated && !this.disposing) {
-      if (crashed) this.worker.terminate();
+      if (crashed) terminateEngineWorker(this.worker);
       else {
         this.closing = disposeOrtWorker(this.worker);
         void this.closing.catch(() => undefined);

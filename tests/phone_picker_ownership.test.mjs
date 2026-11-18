@@ -90,74 +90,86 @@ for (const action of ['cpu', 'startup', 'replacement-picker']) {
   });
 }
 
+function arenaPicker(requestConsent, overrides = {}) {
+  const rows = [
+    { family: 'lc0', variant: 'small', strength: 8 },
+    { family: 'sf', variant: 'lite', strength: 8 },
+    { family: 'sf', variant: 'full', strength: 8 },
+  ];
+  const callbacks = new Map();
+  const nodes = new Map();
+  const el = (id) => {
+    if (!nodes.has(id))
+      nodes.set(id, { textContent: '', addEventListener: (event, handler) => callbacks.set(`${id}:${event}`, handler), querySelector: () => null });
+    return nodes.get(id);
+  };
+  const approvals = new Set();
+  const deps = {
+    BIG_NETS,
+    running: false,
+    startPending: false,
+    abort: null,
+    mountAbort: new AbortController(),
+    seatRows: rows,
+    arenaDownloadApprovals: approvals,
+    ARENA_BIG_NET_KEYS: ['bt4', 't3'],
+    el,
+    arenaBigNetSeatBlocked: () => false,
+    isLc0BigNetVariant: (key) => key === 'bt4' || key === 't3',
+    arenaTournamentMode: () => 'match',
+    requestLargeNetDownloadConsent: requestConsent,
+    isMemoryConstrainedDevice: () => true,
+    bigNetSelectableSync: () => true,
+    defaultVariant: () => 'lite',
+    strengthMeta: () => ({ def: 8 }),
+    normalizeSeatRowForDeploy() {},
+    reconcileActiveRuntimeFallbackWarning() {},
+    persistArenaSeatRows() {},
+    activeSeatRows: () => rows,
+    peekBigNetSearcher: () => null,
+    releaseBigNetSearcher() {},
+    buildEngines() {},
+    populateSeats() {},
+    selectedSeatsNeedLc0Evaluator: () => false,
+    loadingLc0: false,
+    setArenaStartDisabled() {},
+    syncArenaPhase() {},
+    syncSeatRowsFromDom() {},
+    isReadyMessage: () => false,
+    refreshSeatControls() {},
+    renderRecklessRuntimeInfo() {},
+    renderViridithasRuntimeInfo() {},
+    renderBerserkRuntimeInfo() {},
+    renderPlentyChessRuntimeInfo() {},
+    renderStormphraxRuntimeInfo() {},
+    // The handler binds these when it is built, so overrides must apply first.
+    ...overrides,
+  };
+  const code =
+    extract(source.arena, 'let arenaPickerConsentAbort:', 'async function bigNetFor(') +
+    extract(source.arena, 'async function startMatchUnchecked(', '  await checkpointWrites;', '  admissions++;\n}') +
+    extract(source.arena, "  el('arenaSeatList').addEventListener('change'", "  el('arenaSeatList').addEventListener('input'") +
+    extract(source.arena, "  el('arenaSeatList').addEventListener('click'", "  el('arenaConcurrencySelect').addEventListener(");
+  const api = new Function(
+    'deps',
+    `let { ${Object.keys(deps)} } = deps; let admissions = 0; ${code}; return {start:startMatchUnchecked, admissions:()=>admissions};`,
+  )(deps);
+  const event = (name, value) => ({ target: { value, dataset: { seat: '0' }, classList: { contains: (entry) => entry === name } } });
+  return { rows, callbacks, approvals, deps, api, pick: (variant) => callbacks.get('arenaSeatList:change')(event('seat-var', variant)), event };
+}
+
 for (const action of ['cpu', 'startup', 'remove', 'add', 'mode']) {
   test(`Arena ${action} aborts obsolete picker metadata without changing the new roster`, async () => {
     const permission = Promise.withResolvers();
-    const rows = [
-      { family: 'lc0', variant: 'small', strength: 8 },
-      { family: 'sf', variant: 'lite', strength: 8 },
-      { family: 'sf', variant: 'full', strength: 8 },
-    ];
-    const callbacks = new Map();
-    const nodes = new Map();
-    const el = (id) => {
-      if (!nodes.has(id)) nodes.set(id, { textContent: '', addEventListener: (event, handler) => callbacks.set(`${id}:${event}`, handler) });
-      return nodes.get(id);
-    };
     let consent;
-    const approvals = new Set();
-    const deps = {
-      BIG_NETS,
-      running: false,
-      startPending: false,
-      abort: null,
-      mountAbort: new AbortController(),
-      seatRows: rows,
-      arenaDownloadApprovals: approvals,
-      ARENA_BIG_NET_KEYS: ['bt4', 't3'],
-      el,
-      arenaBigNetSeatBlocked: () => false,
-      isLc0BigNetVariant: (key) => key === 'bt4' || key === 't3',
-      arenaTournamentMode: () => 'match',
-      requestLargeNetConsent: (_config, signal) => {
+    const { rows, callbacks, approvals, deps, api, pick, event } = arenaPicker(
+      (_config, signal) => {
         consent = signal;
         return permission.promise;
       },
-      bigNetSelectableSync: () => assert.fail('an obsolete picker must never validate or commit its model'),
-      defaultVariant: () => 'lite',
-      strengthMeta: () => ({ def: 8 }),
-      normalizeSeatRowForDeploy() {},
-      reconcileActiveRuntimeFallbackWarning() {},
-      persistArenaSeatRows() {},
-      activeSeatRows: () => rows,
-      peekBigNetSearcher: () => null,
-      releaseBigNetSearcher() {},
-      buildEngines() {},
-      populateSeats() {},
-      selectedSeatsNeedLc0Evaluator: () => false,
-      loadingLc0: false,
-      setArenaStartDisabled() {},
-      syncArenaPhase() {},
-      syncSeatRowsFromDom() {},
-      isReadyMessage: () => false,
-      refreshSeatControls() {},
-      renderRecklessRuntimeInfo() {},
-      renderViridithasRuntimeInfo() {},
-      renderBerserkRuntimeInfo() {},
-      renderPlentyChessRuntimeInfo() {},
-      renderStormphraxRuntimeInfo() {},
-    };
-    const code =
-      extract(source.arena, 'let arenaPickerConsentAbort:', 'async function bigNetFor(') +
-      extract(source.arena, 'async function startMatchUnchecked(', '  await checkpointWrites;', '  admissions++;\n}') +
-      extract(source.arena, "  el('arenaSeatList').addEventListener('change'", "  el('arenaSeatList').addEventListener('input'") +
-      extract(source.arena, "  el('arenaSeatList').addEventListener('click'", "  el('arenaConcurrencySelect').addEventListener(");
-    const api = new Function(
-      'deps',
-      `let { ${Object.keys(deps)} } = deps; let admissions = 0; ${code}; return {start:startMatchUnchecked, admissions:()=>admissions};`,
-    )(deps);
-    const event = (name, value) => ({ target: { value, dataset: { seat: '0' }, classList: { contains: (entry) => entry === name } } });
-    const old = callbacks.get('arenaSeatList:change')(event('seat-var', 'bt4'));
+      { bigNetSelectableSync: () => assert.fail('an obsolete picker must never validate or commit its model') },
+    );
+    const old = pick('bt4');
     assert.equal(consent.aborted, false);
     if (action === 'cpu') await callbacks.get('arenaSeatList:change')(event('seat-fam', 'sf'));
     else if (action === 'startup') await api.start();
@@ -166,7 +178,7 @@ for (const action of ['cpu', 'startup', 'remove', 'add', 'mode']) {
     else callbacks.get('tournamentModeSelect:change')();
     assert.equal(consent.aborted, true, 'roster edits and startup cancel metadata before an obsolete modal can open');
     assert.equal(deps.mountAbort.signal.aborted, false);
-    permission.resolve(true);
+    permission.resolve('download');
     await old;
     assert.equal(
       rows.some((row) => row.variant === 'bt4'),
@@ -174,5 +186,15 @@ for (const action of ['cpu', 'startup', 'remove', 'add', 'mode']) {
     );
     assert.equal(approvals.size, 0, 'stale requests cannot save a startup approval');
     assert.equal(api.admissions(), action === 'startup' ? 1 : 0);
+  });
+}
+
+for (const consent of ['cached', 'download']) {
+  test(`Arena picker consent (${consent}) ${consent === 'cached' ? 'leaves Start to recheck the cache' : 'approves the Start download'}`, async () => {
+    const { rows, approvals, pick } = arenaPicker(async () => consent);
+    await pick('bt4');
+    assert.equal(rows[0].variant, 'bt4');
+    // A cache hit is not download approval: storage can evict the model before Start.
+    assert.deepEqual([...approvals], consent === 'download' ? ['bt4'] : []);
   });
 }

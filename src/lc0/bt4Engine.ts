@@ -24,6 +24,8 @@ import {
 import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
+import { terminateEngineWorker } from './engineRetirement.ts';
+import { type LargeNetPrefetchOptions, type LargeNetPrefetchResult, phoneColdPrefetch } from './largeNetDownload.ts';
 import { lc0SplitKUrl } from './lc0SmallModelSelection.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { PHONE_LARGE_NET_SUFFIX, phoneBigNetBlocked } from './phoneLargeNetPolicy.ts';
@@ -343,8 +345,13 @@ function bigNetDiagnosticRequest(config: BigNetConfig) {
   };
 }
 
+/** Returns undefined when it does not apply, so desktop init adds no await. */
+type ColdPrefetch = (config: BigNetConfig, options: LargeNetPrefetchOptions) => Promise<LargeNetPrefetchResult> | undefined;
+
 export class Bt4WorkerSearcher {
   readonly config: BigNetConfig;
+  private readonly coldPrefetch: ColdPrefetch;
+  private prefetchAbort: AbortController | null = null;
   private worker: Worker | null = null;
   private ready = false;
   private initPromise: Promise<string> | null = null;
@@ -371,21 +378,27 @@ export class Bt4WorkerSearcher {
   /** Model download progress during the first init (not called on reloads). */
   onDownloadProgress: ((loadedBytes: number, totalBytes?: number) => void) | null = null;
 
-  constructor(config: BigNetConfig = BT4_NET) {
+  constructor(config: BigNetConfig = BT4_NET, coldPrefetch: ColdPrefetch = phoneColdPrefetch) {
     this.config = config;
+    this.coldPrefetch = coldPrefetch;
   }
 
   get loaded(): boolean {
     return this.ready;
   }
 
-  private post<T>(message: Record<string, unknown>, onId?: (id: number) => void, onProgress?: (progress: Bt4SearchProgress) => void): Promise<T> {
+  private post<T>(
+    message: Record<string, unknown>,
+    onId?: (id: number) => void,
+    onProgress?: (progress: Bt4SearchProgress) => void,
+    transfer: Transferable[] = [],
+  ): Promise<T> {
     if (!this.worker) return Promise.reject(new Error('Lc0 BT4 worker unavailable'));
     const id = ++this.seq;
     onId?.(id);
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, onProgress });
-      this.worker!.postMessage({ ...message, id });
+      this.worker!.postMessage({ ...message, id }, transfer);
     });
   }
 
@@ -402,8 +415,12 @@ export class Bt4WorkerSearcher {
     );
   }
 
-  /** Create + init the worker on first call (fetches the large net, then cached). */
-  async init(options: { evalCacheEntries?: number } = {}): Promise<string> {
+  /**
+   * Create + init the worker on first call (fetches the large net, then cached).
+   * `noDownload`: a cache-hit approval; a load that needs network bytes fails with
+   * LC0_MODEL_DOWNLOAD_NOT_APPROVED instead. An init already in flight is shared as is.
+   */
+  async init(options: { evalCacheEntries?: number; noDownload?: boolean } = {}): Promise<string> {
     const evalCacheEntries = normalizedEvalCacheEntries(options.evalCacheEntries);
     const diagnostics = bigNetDiagnosticRequest(this.config);
     const diagnosticKey = JSON.stringify(diagnostics);
@@ -422,41 +439,6 @@ export class Bt4WorkerSearcher {
     // Pool/page teardown during the wait must not resurrect an unowned worker.
     if (generation !== this.lifecycleGeneration) throw new Error('Lc0 BT4 worker disposed');
     if (this.initPromise) return this.initPromise;
-    if (!this.worker) {
-      this.deviceLost = null;
-      const worker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
-      this.worker = worker;
-      worker.addEventListener('message', (event: MessageEvent) => {
-        if (this.worker !== worker) return;
-        const message = event.data as { id?: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number; loss?: OrtDeviceLoss };
-        if (message.type === 'deviceLost') {
-          this.deviceLost = message.loss ?? null;
-          return;
-        }
-        if (message.type === 'downloadProgress') {
-          this.onDownloadProgress?.(message.loadedBytes ?? 0, message.totalBytes);
-          return;
-        }
-        if (typeof message.id !== 'number') return;
-        const pending = this.pending.get(message.id);
-        if (!pending) return;
-        if (message.type === 'searchProgress') {
-          const progress = (message as unknown as { progress: Bt4SearchProgress }).progress;
-          pending.onProgress?.(progress);
-          return;
-        }
-        this.pending.delete(message.id);
-        if (message.type === 'error') pending.reject(new Error(message.error ?? 'Lc0 BT4 worker error'));
-        else pending.resolve(message);
-      });
-      worker.addEventListener('error', (event) => {
-        this.invalidate(worker, new Error(event.message || 'Lc0 BT4 worker crashed'));
-      });
-      worker.addEventListener('messageerror', () => {
-        this.invalidate(worker, new Error('Lc0 BT4 worker message could not be decoded'));
-      });
-    }
-    const worker = this.worker;
     const initializing = (async () => {
       // WebGPU-first with wasm-CPU fallback: 'auto' resolves to
       // ['webgpu','wasm'] when an adapter is usable and ['wasm'] otherwise,
@@ -464,6 +446,29 @@ export class Bt4WorkerSearcher {
       // `backend` and scale visit budgets via config.wasmLevels. An explicit
       // ?ortEp=wasm page override forces the CPU path end to end.
       const ep = requestedOrtExecutionProvider() === 'wasm' ? 'wasm' : 'auto';
+      // Phones only: a cold net is fetched into Cache Storage by a throwaway worker
+      // first, so this worker's load is a cached load (largeNetDownload.ts).
+      // A load that may not download has nothing to prefetch.
+      const prefetchAbort = new AbortController();
+      const prefetching = options.noDownload
+        ? undefined
+        : this.coldPrefetch(this.config, {
+            signal: prefetchAbort.signal,
+            ep,
+            onProgress: (loaded, total) => this.onDownloadProgress?.(loaded, total),
+            load: { requestPersistentStorage: true, minimumFreeBytesAfterCache: BIG_NET_MODEL_CACHE_FREE_RESERVE_BYTES },
+          });
+      let prefetched: LargeNetPrefetchResult | undefined;
+      if (prefetching) {
+        this.prefetchAbort = prefetchAbort;
+        // It rejects only when dispose() aborts it, which the generation check below reports.
+        prefetched = await prefetching.catch(() => undefined);
+        if (this.prefetchAbort === prefetchAbort) this.prefetchAbort = null;
+      }
+      if (generation !== this.lifecycleGeneration) throw new Error('Lc0 BT4 worker disposed');
+      // cache.put failed after a verified download: hand the bytes over rather than download twice.
+      const prefetchedModel = prefetched?.status === 'memory' ? { url: prefetched.modelUrl, load: prefetched.load } : undefined;
+      const worker = this.startWorker();
       // Big nets opt into app-owned Cache Storage so immutable model bytes
       // survive route changes even when the browser HTTP cache skips large
       // entries. Quota-limited browsers fall back to URL-loading in the worker.
@@ -473,19 +478,26 @@ export class Bt4WorkerSearcher {
         ortFallback?: OrtRuntimeDiagnostics['fallback'];
         servedModelUrl?: string;
         ortRuntime?: OrtSessionDiagnostics;
-      }>({
-        type: 'init',
-        modelUrl: this.config.modelUrl,
-        // Keep the production device rule for both shipped and lab-selected configs.
-        deviceModelSelection: true,
-        ep,
-        cacheModel: true,
-        ...diagnostics,
-        evalCacheEntries,
-        reportDownloadProgress: this.config.streamDownloadProgress === true,
-        requestPersistentModelStorage: true,
-        minimumFreeBytesAfterModelCache: BIG_NET_MODEL_CACHE_FREE_RESERVE_BYTES,
-      });
+      }>(
+        {
+          type: 'init',
+          modelUrl: this.config.modelUrl,
+          // Keep the production device rule for both shipped and lab-selected configs.
+          deviceModelSelection: true,
+          ep,
+          cacheModel: true,
+          ...diagnostics,
+          evalCacheEntries,
+          reportDownloadProgress: this.config.streamDownloadProgress === true,
+          requestPersistentModelStorage: true,
+          minimumFreeBytesAfterModelCache: BIG_NET_MODEL_CACHE_FREE_RESERVE_BYTES,
+          ...(options.noDownload ? { noModelDownload: true } : {}),
+          ...(prefetchedModel ? { prefetchedModel } : {}),
+        },
+        undefined,
+        undefined,
+        prefetchedModel ? [prefetchedModel.load.model] : [],
+      );
       if (this.worker !== worker) throw new Error('Lc0 BT4 worker invalidated during initialization');
       this.ready = true;
       this.configuredEvalCacheEntries = evalCacheEntries;
@@ -501,15 +513,59 @@ export class Bt4WorkerSearcher {
       return await initializing;
     } catch (error) {
       // A retired init must not invalidate its replacement.
-      if (this.initPromise === initializing) this.invalidate(worker, error instanceof Error ? error : new Error(String(error)));
+      if (this.initPromise === initializing) this.invalidate(this.worker, error instanceof Error ? error : new Error(String(error)));
       throw error;
     }
   }
 
+  private startWorker(): Worker {
+    if (this.worker) return this.worker;
+    this.deviceLost = null;
+    const worker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
+    this.worker = worker;
+    worker.addEventListener('message', (event: MessageEvent) => {
+      if (this.worker !== worker) return;
+      const message = event.data as { id?: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number; loss?: OrtDeviceLoss };
+      if (message.type === 'deviceLost') {
+        this.deviceLost = message.loss ?? null;
+        return;
+      }
+      if (message.type === 'downloadProgress') {
+        this.onDownloadProgress?.(message.loadedBytes ?? 0, message.totalBytes);
+        return;
+      }
+      if (typeof message.id !== 'number') return;
+      const pending = this.pending.get(message.id);
+      if (!pending) return;
+      if (message.type === 'searchProgress') {
+        const progress = (message as unknown as { progress: Bt4SearchProgress }).progress;
+        pending.onProgress?.(progress);
+        return;
+      }
+      this.pending.delete(message.id);
+      if (message.type === 'error') pending.reject(new Error(message.error ?? 'Lc0 BT4 worker error'));
+      else pending.resolve(message);
+    });
+    worker.addEventListener('error', (event) => {
+      this.invalidate(worker, new Error(event.message || 'Lc0 BT4 worker crashed'));
+    });
+    worker.addEventListener('messageerror', () => {
+      this.invalidate(worker, new Error('Lc0 BT4 worker message could not be decoded'));
+    });
+    return worker;
+  }
+
   async search(input: Lc0EvaluatorInput, options: Bt4SearchOptions): Promise<Bt4SearchResult> {
-    if (options.signal?.aborted) return { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
-    await this.init({ evalCacheEntries: options.evalCacheEntries });
-    if (options.signal?.aborted) return { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
+    const cancelled: Bt4SearchResult = { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
+    if (options.signal?.aborted) return cancelled;
+    try {
+      await this.init({ evalCacheEntries: options.evalCacheEntries });
+    } catch (error) {
+      // An owner that stopped may retire a net still loading (Arena Stop): that is a cancellation.
+      if (options.signal?.aborted) return cancelled;
+      throw error;
+    }
+    if (options.signal?.aborted) return cancelled;
     const workerInput = options.swapColors ? swapColorsInput(input) : input;
     let searchId: number | null = null;
     const onAbort = () => {
@@ -573,7 +629,7 @@ export class Bt4WorkerSearcher {
 
   private invalidate(worker: Worker | null, error: Error, terminate = true): void {
     if (this.worker !== worker) return;
-    if (terminate) worker?.terminate();
+    if (terminate) terminateEngineWorker(worker);
     this.worker = null;
     this.ready = false;
     this.initPromise = null;
@@ -591,6 +647,9 @@ export class Bt4WorkerSearcher {
   /** Retire synchronously; release the detached worker's session/device before termination. */
   dispose(): Promise<void> {
     this.lifecycleGeneration++;
+    // Terminates a cold-load prefetch worker (Stop, seat swap, page hide).
+    this.prefetchAbort?.abort();
+    this.prefetchAbort = null;
     const worker = this.worker;
     this.invalidate(worker, new Error('Lc0 BT4 worker disposed'), false);
     if (worker) {

@@ -16,7 +16,15 @@ export type RouteDom<Known extends string> = {
   buttonEl<T extends string>(id: Owned<Known, T>): HTMLButtonElement;
 };
 
-/** The untyped browserDom helpers under a per-route type; no runtime cost beyond one object. */
-export function routeDom<R extends RouteKey>(): RouteDom<RouteId<R>> {
-  return { el, maybeEl, inputEl, selectEl, buttonEl };
+type DomHelpers = {
+  el(id: string): HTMLElement;
+  maybeEl(id: string): HTMLElement | null;
+  inputEl(id: string): HTMLInputElement;
+  selectEl(id: string): HTMLSelectElement;
+  buttonEl(id: string): HTMLButtonElement;
+};
+
+/** Untyped DOM helpers (a controller's scoped createBrowserDom(), or the global ones) under a per-route type; no runtime cost. */
+export function routeDom<R extends RouteKey>(dom: DomHelpers = { el, maybeEl, inputEl, selectEl, buttonEl }): RouteDom<RouteId<R>> {
+  return dom;
 }

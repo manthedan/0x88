@@ -1,3 +1,5 @@
+import { terminateEngineWorker } from './engineRetirement.ts';
+
 /** Terminal worker handshake. Detach the owner synchronously before calling this.
  * The dedicated listener still observes the ack after the owner's transport is retired.
  * Timeout/error means best effort failed; termination remains the hard boundary.
@@ -17,7 +19,7 @@ export function disposeOrtWorker(worker: Worker, timeoutMs = 1500): Promise<void
       worker.removeEventListener('error', failed);
       worker.removeEventListener('messageerror', failed);
       try {
-        worker.terminate();
+        terminateEngineWorker(worker);
         if (failure) reject(failure);
         else resolve();
       } catch (error) {

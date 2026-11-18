@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
+import { LC0_MODEL_DOWNLOAD_NOT_APPROVED } from '../src/lc0/modelCache.ts';
 import { committedPlayOpponent, transitionPlayOpponent } from '../src/lc0/playOpponentState.ts';
 
 const source = Object.fromEntries(
@@ -158,6 +159,7 @@ for (const phase of [
     let revoked = false;
     let admitted = 0;
     let prompts = 0;
+    const presented = [];
     const nodes = new Map();
     const el = (id) => {
       if (!nodes.has(id)) nodes.set(id, { textContent: '', value: '' });
@@ -195,7 +197,8 @@ for (const phase of [
       phoneLargeNetsBlocked: () => revoked,
       ARENA_BIG_NET_KEYS: ['bt4', 't3'],
       arenaDownloadApprovals: new Set(phase === 'save-with-approval' ? ['bt4'] : []),
-      requestLargeNetConsent: (config, signal) => {
+      arenaRunDownloads: new Set(),
+      requestLargeNetDownloadConsent: (config, signal) => {
         prompts++;
         assert.equal(config, BIG_NETS.bt4);
         assert.equal(signal.aborted, false);
@@ -204,7 +207,7 @@ for (const phase of [
           paused = true;
           return gate.promise.then(() => false);
         }
-        return wait('download', true);
+        return wait('download', 'download');
       },
       disposeBigNetSearcherNow() {},
       renderSeatSelectors() {},
@@ -229,6 +232,7 @@ for (const phase of [
       buildSchedule: () => [{ whiteId: '0', blackId: '1', opening: {} }],
       tournamentPairings: () => [],
       selectedOpenings: () => [],
+      selectedSeatsNeedLc0Evaluator: () => false,
       createArenaCheckpoint: () => ({ runId: 'test', revision: 1 }),
       captureCheckpointConfig: () => ({}),
       saveArenaCheckpoint: () => wait('save', undefined),
@@ -238,6 +242,7 @@ for (const phase of [
       checkpoint: null,
       hideEngineWarmupStatus() {},
       renderCheckpointStatus() {},
+      presentSavedCheckpoint: (saved) => presented.push(saved),
       arenaRemainingIndices: () => {
         admitted++;
         throw new Error('cancelled startup entered a live match');
@@ -282,14 +287,242 @@ for (const phase of [
     if (replacement) {
       assert.deepEqual(api.state(), { running: false, startPending: true, abort: replacement, checkpoint: { runId: 'replacement' } });
       assert.deepEqual(api.token(), { runId: 'replacement', revision: 99 });
-    } else assert.deepEqual(api.state(), { running: false, startPending: false, abort: null, checkpoint: null });
+    } else {
+      // A save that lands before the cancellation is observed already replaced the
+      // stored slot: the page must name that checkpoint by both token and value.
+      const saved = phase === 'save' || phase === 'save-with-approval' ? { runId: 'test', revision: 1 } : null;
+      assert.deepEqual(api.state(), { running: false, startPending: false, abort: null, checkpoint: saved });
+      assert.deepEqual(api.token(), saved);
+      // Results, status and PGN export follow the stored run, not the one it replaced.
+      assert.deepEqual(presented, saved ? [saved] : []);
+    }
     assert.equal(admitted, 0);
     assert.doesNotMatch(el('message').textContent, /failed/);
   });
 }
 
+test('Arena Start carries its consent to the load: a cache hit approves no download', async () => {
+  // Startup from the Small load through the checkpoint save.
+  const from = source.arena.indexOf('  // Lazy Small loading is still part of setup.');
+  const to = source.arena.indexOf('  if (startupCancelled()) {\n    // The save replaced', from);
+  assert.ok(from >= 0 && to > from, 'production boundaries: Start setup');
+  const start = stripTypeScriptTypes(`async function start() {\n${source.arena.slice(from, to)}}`);
+  const bigNetFor = extract(source.arena, 'async function bigNetFor(', 'let runtimeIsolation');
+  const prompts = [];
+  const saves = [];
+  let answer = 'cached';
+  let smallLoaded = false;
+  let loaded = false;
+  let configured = true;
+  const matchAbort = new AbortController();
+  const deps = {
+    arenaRunDownloads: new Set(),
+    arenaDownloadApprovals: new Set(),
+    checkedBigNetVariants: new Set(['bt4']),
+    BIG_NETS,
+    startupCancelled: () => false,
+    isMemoryConstrainedDevice: () => true,
+    matchAbort,
+    abort: matchAbort,
+    mountSignal: new AbortController().signal,
+    isStaleMount: () => false,
+    selectedSeatsNeedLc0Evaluator: () => true,
+    loadSmall: async () => {
+      smallLoaded = true;
+    },
+    requestLargeNetDownloadConsent: async (config) => {
+      // Small can evict a cached large net, so the answer must reflect the cache after it loads.
+      assert.equal(smallLoaded, true, 'consent is asked after Lc0 Small loads');
+      prompts.push(config.key);
+      return answer;
+    },
+    clearStartPending() {},
+    resume: null,
+    claimArenaCheckpoint: () => assert.fail('not a resume'),
+    createArenaCheckpoint: () => ({ runId: 'new', revision: 1 }),
+    captureCheckpointConfig: () => ({}),
+    participants: [],
+    compatibility: 'compatible',
+    schedule: [{}],
+    saveArenaCheckpoint: async (saved) => {
+      saves.push(saved.runId);
+    },
+    checkpointToken: { runId: 'old', revision: 3 },
+    checkpoint: { runId: 'old' },
+    checkpointProblem: '',
+    ArenaCheckpointConflictError: class extends Error {},
+    peekBigNetSearcher: () => ({ loaded, isInitializedFor: () => loaded && configured }),
+    preparePhoneBigNet: () => null,
+    arenaCacheEntries: () => 0,
+    disposeArenaCpuEngines() {},
+    el: () => ({}),
+    acquireBigNetSearcherAsync: async () => {
+      loaded = true;
+      return { loaded, isInitializedFor: () => true, init: async () => 'mock' };
+    },
+  };
+  const api = new Function(
+    'deps',
+    `let { ${Object.keys(deps)} } = deps;
+    let lc0Cache = null;
+    async function loadLc0Evaluator() { await deps.loadSmall(); lc0Cache = {}; }
+    ${bigNetFor}
+    ${start}
+    return { start: async () => { lc0Cache = null; await start(); }, bigNetFor, checkpoint: () => [checkpoint, checkpointToken] };`,
+  )(deps);
+  const signal = new AbortController().signal;
+
+  // Declining keeps the previous tournament: nothing is saved over it.
+  answer = false;
+  await api.start();
+  assert.deepEqual(saves, []);
+  assert.deepEqual(api.checkpoint(), [{ runId: 'old' }, { runId: 'old', revision: 3 }]);
+
+  // Cached at Start: the load must ask again, since storage may have evicted it.
+  prompts.length = 0;
+  answer = 'cached';
+  await api.start();
+  assert.deepEqual(saves, ['new']);
+  assert.deepEqual(prompts, ['bt4']);
+  assert.equal(deps.arenaRunDownloads.has('bt4'), false);
+  answer = false;
+  await assert.rejects(api.bigNetFor('bt4', signal), /no longer cached/);
+  assert.equal(loaded, false, 'a declined download never reaches the loader');
+  answer = 'cached';
+  await api.bigNetFor('bt4', signal);
+  assert.equal(loaded, true);
+  assert.equal(prompts.length, 3);
+  await api.bigNetFor('bt4', signal);
+  assert.equal(prompts.length, 3, 'a reusable warm session needs no check');
+  // A warm session configured differently is retired, so its replacement may download.
+  configured = false;
+  answer = 'download';
+  await api.bigNetFor('bt4', signal);
+  assert.equal(prompts.length, 4);
+  loaded = false;
+  await api.bigNetFor('bt4', signal);
+  assert.equal(prompts.length, 4, 'an approved download is not asked again within the run');
+
+  // A picker download approval covers the run's loads.
+  prompts.length = 0;
+  deps.arenaDownloadApprovals.add('bt4');
+  await api.start();
+  loaded = false;
+  await api.bigNetFor('bt4', signal);
+  assert.deepEqual(prompts, []);
+});
+
+for (const answer of [false, 'download']) {
+  test(`Arena cache-hit consent loads cache-only and asks before downloading an evicted net (accepted=${!!answer})`, async () => {
+    const inits = [];
+    const prompts = [];
+    const searcher = {
+      loaded: false,
+      isInitializedFor: () => false,
+      async init(options) {
+        inits.push(options);
+        // The entry was evicted during the reclaim wait (or its body is unreadable).
+        throw new Error(`${LC0_MODEL_DOWNLOAD_NOT_APPROVED}: bt4.onnx`);
+      },
+    };
+    const deps = {
+      BIG_NETS,
+      LC0_MODEL_DOWNLOAD_NOT_APPROVED,
+      isMemoryConstrainedDevice: () => true,
+      arenaRunDownloads: new Set(),
+      arenaCacheEntries: () => 0,
+      peekBigNetSearcher: () => null,
+      inspectLargeNetDownload: async () => ({ url: 'bt4.onnx', cached: true, downloadBytes: 5 }),
+      requestLargeNetDownloadConsent: async (config, _signal, _desktopWarning, _notice, inspect) => {
+        prompts.push(inspect ? await inspect(config) : 'start');
+        return inspect ? answer : 'cached';
+      },
+      preparePhoneBigNet: () => undefined,
+      disposeArenaCpuEngines() {},
+      disposeBigNetSearcherNow() {},
+      el: () => ({}),
+      acquireBigNetSearcherAsync: async () => searcher,
+    };
+    const bigNetFor = new Function(
+      'deps',
+      `const { ${Object.keys(deps)} } = deps;\n${extract(source.arena, 'async function bigNetFor(', 'let runtimeIsolation')}\nreturn bigNetFor;`,
+    )(deps);
+    const loading = bigNetFor('bt4', new AbortController().signal);
+    if (answer) assert.equal((await loading).searcher, searcher);
+    else await assert.rejects(loading, /no longer cached and its download was not approved/);
+    assert.deepEqual(inits, [{ evalCacheEntries: 0, noDownload: true }], 'the cache-hit approval reaches the loader');
+    assert.deepEqual(prompts, ['start', { url: 'bt4.onnx', cached: false, downloadBytes: 5 }], 'the second prompt is a download prompt');
+    assert.equal(deps.arenaRunDownloads.has('bt4'), !!answer, 'only an accepted prompt approves the download');
+  });
+}
+
+test('Arena Stop landing as the pool hands over the searcher skips the cache-only init', async () => {
+  const controller = new AbortController();
+  let inits = 0;
+  const searcher = {
+    loaded: false,
+    isInitializedFor: () => false,
+    init: async () => {
+      inits++;
+    },
+  };
+  const deps = {
+    BIG_NETS,
+    LC0_MODEL_DOWNLOAD_NOT_APPROVED,
+    isMemoryConstrainedDevice: () => true,
+    arenaRunDownloads: new Set(),
+    arenaCacheEntries: () => 0,
+    peekBigNetSearcher: () => null,
+    inspectLargeNetDownload: async () => assert.fail('no prompt'),
+    requestLargeNetDownloadConsent: async () => 'cached',
+    preparePhoneBigNet: () => undefined,
+    disposeArenaCpuEngines() {},
+    disposeBigNetSearcherNow: () => assert.fail('nothing to retire: no listener was registered'),
+    el: () => ({}),
+    acquireBigNetSearcherAsync: async () => {
+      controller.abort(); // Stop between the pool's resolution and bigNetFor resuming
+      return searcher;
+    },
+  };
+  const bigNetFor = new Function(
+    'deps',
+    `const { ${Object.keys(deps)} } = deps;\n${extract(source.arena, 'async function bigNetFor(', 'let runtimeIsolation')}\nreturn bigNetFor;`,
+  )(deps);
+  await assert.rejects(bigNetFor('bt4', controller.signal), { name: 'AbortError' });
+  assert.equal(inits, 0, 'a stopped load must not initialize');
+});
+
+test('a saved Arena run with no games shows its own opening, not the replaced run', () => {
+  const calls = [];
+  const opening = { name: 'new opening' };
+  const charts = { hidden: false };
+  const deps = {
+    showCheckpointResults() {},
+    arenaRemainingIndices: () => [0],
+    arenaMatchState: 'final',
+    el: (id) => (id === 'chartsPanel' ? charts : {}),
+    inputEl: () => ({}),
+    finishedTrails: [],
+    // A finished live tournament: its last game is on the board, not in review.
+    liveTrail: { label: 'old game' },
+    reviewing: false,
+    exitReview: () => calls.push('exitReview'),
+    resetGameCharts: () => calls.push('resetGameCharts'),
+    resultsSchedule: [{ opening }],
+    setOpeningPreview: (shown) => calls.push(shown),
+  };
+  const present = new Function(
+    'deps',
+    `let { ${Object.keys(deps)} } = deps; ${extract(source.arena, 'function presentSavedCheckpoint(', 'function showCheckpointResults(')}; return presentSavedCheckpoint;`,
+  )(deps);
+  present({ completed: [] });
+  // setOpeningPreview resets the board, last move and side labels.
+  assert.deepEqual(calls, ['exitReview', 'resetGameCharts', opening]);
+  assert.equal(charts.hidden, true, "the replaced run's charts are not shown beside the new scoreboard");
+});
+
 const restoreGuard = extract(source.play, 'async function ctxCheckRestoredDownloadConsent(', '/** Imported setup must not make');
-const readinessEntry = extract(source.play, 'async function ctxVerifySelectedEngineReady(', '  releaseUnusedBigNetSearchers(', 'admit();\n}');
+const readinessEntry = extract(source.play, 'async function ctxVerifySelectedEngineReady(', '  const generation =', 'await retirement;\nadmit();\n}');
 const moveEntry = extract(source.play, 'async function ctxEngineTurn(', '  ctxSetEngineThinking(ctx, true);', 'await admit();\n}');
 for (const key of Object.keys(BIG_NETS)) {
   for (const mode of ['readiness', 'engine-first']) {
@@ -323,6 +556,9 @@ for (const key of Object.keys(BIG_NETS)) {
           },
           ctxSetEngineNote() {},
           releaseUnusedBigNetSearchers() {},
+          retireUnusedPlayNeuralEngines: async () => {
+            assert.equal(ctx.restoredDownloadEngineId, null, 'retirement starts only after approval');
+          },
           buttonEl: () => retry,
           ctxRender() {},
           ctxSetEngineFailure: (_ctx, error) => assert.fail(String(error)),

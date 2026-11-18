@@ -16,8 +16,8 @@ import {
 } from '../nn/ortRuntime.ts';
 import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 import type { Lc0WebEncoderKernelVariant, Lc0WebExecutionFootprint, Lc0WebHybridLegalPriorsBackend } from './hybridEvaluator.ts';
-import { createLc0OnnxEvaluatorFromUrl } from './lc0SmallModelSelection.ts';
-import { describeLc0ModelLoad } from './modelCache.ts';
+import { createLc0OnnxEvaluatorFromUrl, DEFAULT_LC0_ORT_EVALUATOR_DEPS } from './lc0SmallModelSelection.ts';
+import { describeLc0ModelLoad, type Lc0ModelLoadResult } from './modelCache.ts';
 import {
   CachedLc0Evaluator,
   defaultLc0OrtIoMode,
@@ -77,6 +77,10 @@ type InitMessage = {
   reportDownloadProgress?: boolean;
   requestPersistentModelStorage?: boolean;
   minimumFreeBytesAfterModelCache?: number;
+  /** Load from Cache Storage only (a cache-hit approval); downloading fails instead (modelCache.ts noDownload). */
+  noModelDownload?: boolean;
+  /** Verified bytes from a phone prefetch whose cache.put failed (largeNetDownload.ts), for one load of `url`. */
+  prefetchedModel?: { url: string; load: Lc0ModelLoadResult };
 };
 
 type SearchMessage = {
@@ -290,6 +294,8 @@ let configuredOrtFallback: OrtRuntimeDiagnostics['fallback'];
 let configuredOrtRuntime: OrtSessionDiagnostics | undefined;
 /** In-flight search abort controllers keyed by request id, so cancel messages can stop them. */
 const activeSearches = new Map<number, AbortController>();
+/** The running model load. Disposal aborts it so release need not wait out a large download. */
+let activeInit: AbortController | null = null;
 /** Cancels whose search message is still queued behind the search that is running. */
 const pendingSearchCancels: number[] = [];
 // This worker owns exactly one ORT session. Queue all model operations so the
@@ -425,26 +431,47 @@ async function handleInit(message: InitMessage): Promise<void> {
   // main thread with one message per network chunk.
   let lastReportedBytes = -Infinity;
   const physicalBatchMode = message.physicalBatchMode === 'logical' ? 'logical' : 'declared';
-  const created = await createLc0OnnxEvaluatorFromUrl(message.modelUrl, {
-    deviceSelection: message.deviceModelSelection === true,
-    evaluator: {
-      physicalBatchMode,
-      ioMode: message.ortIoMode ?? defaultLc0OrtIoMode(message.deviceModelSelection === true),
-      freeDimensionOverrides: message.ortFreeDimensionOverrides,
+  const initAbort = new AbortController();
+  activeInit = initAbort;
+  let prefetched = message.prefetchedModel;
+  message.prefetchedModel = undefined; // Only `prefetched` may keep the bytes alive.
+  const deps = prefetched && {
+    ...DEFAULT_LC0_ORT_EVALUATOR_DEPS,
+    load: (url: string, options: Parameters<typeof DEFAULT_LC0_ORT_EVALUATOR_DEPS.load>[1]) => {
+      if (prefetched?.url !== url) return DEFAULT_LC0_ORT_EVALUATOR_DEPS.load(url, options);
+      const { load } = prefetched;
+      prefetched = undefined; // Reloads (recovery, fallbacks) go through the loader again.
+      return Promise.resolve(load);
     },
-    load: {
-      cache: message.cacheModel,
-      allowUnverified: message.allowUnverifiedModel,
-      requestPersistentStorage: message.requestPersistentModelStorage,
-      minimumFreeBytesAfterCache: message.minimumFreeBytesAfterModelCache,
-      onProgress: message.reportDownloadProgress
-        ? (loadedBytes, totalBytes) => {
-            if (loadedBytes - lastReportedBytes < 2_000_000 && loadedBytes !== totalBytes) return;
-            lastReportedBytes = loadedBytes;
-            post({ type: 'downloadProgress', id: message.id, loadedBytes, totalBytes });
-          }
-        : undefined,
+  };
+  const created = await createLc0OnnxEvaluatorFromUrl(
+    message.modelUrl,
+    {
+      deviceSelection: message.deviceModelSelection === true,
+      evaluator: {
+        physicalBatchMode,
+        ioMode: message.ortIoMode ?? defaultLc0OrtIoMode(message.deviceModelSelection === true),
+        freeDimensionOverrides: message.ortFreeDimensionOverrides,
+      },
+      load: {
+        cache: message.cacheModel,
+        allowUnverified: message.allowUnverifiedModel,
+        requestPersistentStorage: message.requestPersistentModelStorage,
+        minimumFreeBytesAfterCache: message.minimumFreeBytesAfterModelCache,
+        noDownload: message.noModelDownload,
+        signal: initAbort.signal,
+        onProgress: message.reportDownloadProgress
+          ? (loadedBytes, totalBytes) => {
+              if (loadedBytes - lastReportedBytes < 2_000_000 && loadedBytes !== totalBytes) return;
+              lastReportedBytes = loadedBytes;
+              post({ type: 'downloadProgress', id: message.id, loadedBytes, totalBytes });
+            }
+          : undefined,
+      },
     },
+    deps,
+  ).finally(() => {
+    if (activeInit === initAbort) activeInit = null;
   });
   const baseEvaluator = created.evaluator;
   const modelLoad = created.modelLoad;
@@ -602,6 +629,7 @@ function handleCancel(message: CancelMessage): void {
     return;
   }
   for (const controller of activeSearches.values()) controller.abort();
+  activeInit?.abort();
 }
 
 export function startSearchWorker(options: { createHybridEvaluator?: HybridEvaluatorFactory } = {}): void {
@@ -623,6 +651,9 @@ export function startSearchWorker(options: { createHybridEvaluator?: HybridEvalu
     }
     void enqueueModelOperation(async () => {
       try {
+        // Work queued before dispose would only delay release (an init would start a
+        // fresh download that the 1.5 s disposal timeout then waits on).
+        if (retiring && message.type !== 'dispose') throw new Error('LC0 search worker is shutting down');
         if (message.type === 'dispose') {
           deviceLossMonitor.stop();
           const previous = evaluator;

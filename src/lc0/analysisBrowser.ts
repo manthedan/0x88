@@ -42,6 +42,8 @@ import { writeClipboard } from './clipboard.ts';
 import { CriticalAnalysisRefresh } from './criticalMoments.ts';
 import { mountCriticalMomentsPanel } from './criticalMomentsPanel.ts';
 import { criticalPositionLines } from './criticalMomentsPresentation.ts';
+import { deviceMemoryClass, isMemoryConstrainedDevice, shouldAutoAnalyzePosition } from './deviceMemoryClass.ts';
+import { awaitEngineRetirements, hasEngineRetirements, terminateEngineWorker, trackEngineRetirement } from './engineRetirement.ts';
 import { withEngineTimeout } from './engineTimeout.ts';
 import { evalDetailsMarkup, evalEngineTag, evalMarkerMarkup } from './evalBarPresentation.ts';
 import { compactEvalSpread, compareEvals, evalPercent } from './evalCompare.ts';
@@ -100,7 +102,7 @@ import {
 
 type PgnDatabaseSearchResult = Awaited<ReturnType<typeof searchPgnCollectionsByPosition>>[number];
 
-import { el, inputEl, selectEl } from '../features/analysisDom.ts';
+import { routeDom } from '../features/dom.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import {
   analysisAgreementHeadline,
@@ -141,6 +143,7 @@ import {
 } from './analysisRunState.ts';
 import { positionShareUrl } from './analysisShare.ts';
 import { analysisStatus } from './analysisStatus.ts';
+import { loadRetirableResource } from './arenaResourceLoad.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import {
   BERSERK_VARIANTS,
@@ -153,8 +156,15 @@ import {
   normalizeBerserkVariant,
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
-import { acquireBigNetSearcherAsync, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
-import { htmlEscape } from './browserDom.ts';
+import {
+  acquireBigNetSearcherAsync,
+  type BigNetKey,
+  disposeBigNetSearcherNow,
+  peekBigNetSearcher,
+  preparePhoneBigNet,
+  releaseBigNetSearcher,
+} from './bigNetSessionPool.ts';
+import { createBrowserDom, htmlEscape } from './browserDom.ts';
 import {
   type BrowserLc0Runtime,
   lc0EncoderLayers as browserLc0EncoderLayers,
@@ -301,6 +311,8 @@ import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 
 type Ground = ReturnType<typeof Chessground>;
 
+const pageDom = createBrowserDom();
+const { el, inputEl, selectEl, maybeEl } = routeDom<'analysis'>(pageDom);
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 // v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
@@ -501,6 +513,7 @@ function restoreAnalysisWorkspace(): void {
         throw new Error('Could not keep the previous analysis. Export it before replacing it.');
       clearAnalysisWorkspace(false);
       tree = replacement;
+      analysisHasExplicitInput = true;
       tree.toStart();
       analysisGameTree = tree;
       if (parsed) {
@@ -837,10 +850,10 @@ function installRuntimeAuditPanel(): void {
   analysisAuditHandler = (event: Event) => {
     const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
     if (detail.surface && detail.surface !== 'analysis') return;
-    const warningTarget = document.getElementById('runtimeWarning');
+    const warningTarget = maybeEl('runtimeWarning');
     if (warningTarget && activeRuntimeAuditIdentities().has(browserRuntimeAuditIdentity(detail))) updateRuntimeFallbackWarning(warningTarget, detail);
     if (detail.family !== 'lc0') return;
-    const target = document.getElementById('runtimeAudit');
+    const target = maybeEl('runtimeAudit');
     if (!target) return;
     target.textContent = formatBrowserRuntimeAudit(detail);
   };
@@ -915,8 +928,8 @@ function resetSearchWorker(reason: string | Error): void {
   searchWorker = null;
   if (retired) {
     if (reason instanceof Error)
-      retired.terminate(); // A broken transport cannot acknowledge release.
-    else void disposeOrtWorker(retired).catch(() => undefined);
+      terminateEngineWorker(retired); // A broken transport cannot acknowledge release.
+    else trackEngineRetirement(disposeOrtWorker(retired));
   }
   workerReady = false;
   workerBackend = '';
@@ -1036,7 +1049,7 @@ function searchProgressHtml(progress: SearchProgressSnapshot): string {
 }
 
 function renderAnalysisSearchProgress(): void {
-  const node = document.getElementById('analysisSearchProgress');
+  const node = maybeEl('analysisSearchProgress');
   if (!node) return;
   const items = [...searchProgressByEngine.values()];
   node.hidden = items.length === 0;
@@ -1046,8 +1059,8 @@ function renderAnalysisSearchProgress(): void {
 
 /** Live progress on the Stop button, which occupies Analyze's slot while a search runs. */
 function renderStopProgress(items: SearchProgressSnapshot[]): void {
-  const stop = document.getElementById('stop');
-  const label = document.getElementById('stopProgress');
+  const stop = maybeEl('stop');
+  const label = maybeEl('stopProgress');
   if (!stop || !label) return;
   const bounded = items.filter(hasBoundedSearchProgress);
   const completed = bounded.reduce((sum, item) => sum + Math.max(0, item.completed ?? 0), 0);
@@ -1066,9 +1079,21 @@ function progressKey(runId: number, label: string): string {
   return `${runId}\u0000${label}`;
 }
 
+function canShowAnalysisSearchProgress(runId: number, fen: string): boolean {
+  const { execution, revision } = analysisRunState;
+  // Settings can replace the cards before the previous search releases the engines.
+  return (
+    !hiddenTab.hidden &&
+    !mountAbort.signal.aborted &&
+    execution.tag === 'running' &&
+    execution.owner.runId === runId &&
+    execution.owner.preparationRevision === revision &&
+    tree.current.fen === fen
+  );
+}
+
 function showAnalysisProgress(runId: number, fen: string, label: string, progress: WorkerSearchProgress): void {
-  if (hiddenTab.hidden || runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analysisIsAnalyzing(analysisRunState) || tree.current.fen !== fen)
-    return;
+  if (!canShowAnalysisSearchProgress(runId, fen)) return;
   analysisUiProgressSamples += 1;
   const completed = progress.completedVisits ?? progress.visits;
   const elapsedMs = progress.elapsedMs ?? 0;
@@ -1106,16 +1131,14 @@ function showMoveSearchProgress(
 }
 
 function showIndeterminateSearchProgress(runId: number, fen: string, label: string): void {
-  if (hiddenTab.hidden || runId !== activeAnalysisRunId || mountAbort.signal.aborted || !analysisIsAnalyzing(analysisRunState) || tree.current.fen !== fen)
-    return;
+  if (!canShowAnalysisSearchProgress(runId, fen)) return;
   searchProgressByEngine.set(progressKey(runId, label), { label, units: 'search', indeterminate: true });
   renderAnalysisSearchProgress();
   renderEngineComparison(lineCache.get(fen) ?? []);
 }
 
 function clearEngineSearchProgress(runId: number, label: string): void {
-  searchProgressByEngine.delete(progressKey(runId, label));
-  renderAnalysisSearchProgress();
+  if (searchProgressByEngine.delete(progressKey(runId, label))) renderAnalysisSearchProgress();
 }
 
 async function workerLc0Lines(
@@ -1146,16 +1169,21 @@ async function workerLc0Lines(
   }
 }
 
-function modelProgressEl(): HTMLElement {
-  let node = document.getElementById('downloadProgress');
+/** Null once the page is gone (progress can settle after teardown). */
+function modelProgressEl(): HTMLElement | null {
+  let node = maybeEl('downloadProgress');
   if (node) return node;
-  node = document.getElementById('modelLoadProgress');
+  // Created on demand below, so it is not a registry-owned id.
+  const loadProgressId: string = 'modelLoadProgress';
+  node = maybeEl(loadProgressId);
   if (!node) {
+    const message = maybeEl('message');
+    if (!message) return null;
     node = document.createElement('div');
     node.id = 'modelLoadProgress';
     node.className = 'model-load-progress';
     node.hidden = true;
-    el('message').insertAdjacentElement('afterend', node);
+    message.insertAdjacentElement('afterend', node);
   }
   return node;
 }
@@ -1175,6 +1203,7 @@ const cpuSessions = new AnalysisCpuSessions();
 
 function renderLoadingProgressItems(): void {
   const node = modelProgressEl();
+  if (!node) return;
   const items = [...loadingProgressItems.values()];
   if (items.length) renderLoadingProgress(node, items);
   else hideLoadingProgress(node);
@@ -1821,7 +1850,7 @@ function activeRuntimeAuditIdentities(): Set<string> {
 }
 
 function reconcileActiveRuntimeFallbackWarning(): void {
-  const warningTarget = document.getElementById('runtimeWarning');
+  const warningTarget = maybeEl('runtimeWarning');
   if (warningTarget) reconcileRuntimeFallbackWarning(warningTarget, activeRuntimeAuditIdentities());
 }
 
@@ -2185,6 +2214,17 @@ function getStormphraxFor(variantKey: string) {
   return stormphraxEngines.getOrCreate(variant);
 }
 
+function disposeAnalysisCpuEngines(): void {
+  preparedCpuEngineKeys.clear();
+  disposeStockfish('lite');
+  disposeStockfish('full');
+  recklessEngines.disposeAll();
+  viridithasEngines.disposeAll();
+  berserkEngines.disposeAll();
+  plentyChessEngines.disposeAll();
+  stormphraxEngines.disposeAll();
+}
+
 function disposeUnusedEngines(): void {
   for (const key of ANALYSIS_BIG_NET_KEYS) {
     if (usesBigNetRow(key)) continue;
@@ -2194,6 +2234,15 @@ function disposeUnusedEngines(): void {
   }
   disposeUnusedCentipawnEvaluators();
   const activeRows = activeEngineRows();
+  // The eval bar consumes these rows' cached lines; review/retry are CPU-only.
+  // Neither owns an independent Small search once its last row is gone.
+  if (!activeRows.some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant))) {
+    resetSearchWorker('Unused Lc0 Small retired');
+    const retired = mainEvaluator;
+    mainEvaluator = null;
+    searcher = null;
+    if (retired) trackEngineRetirement(Promise.resolve(retired.dispose?.()));
+  }
   // Game review always runs SF Lite, so a running review keeps its rows too.
   const stockfishRows = reviewAbort ? [...activeRows, ...reviewEngineRows()] : activeRows;
   for (const kind of ['lite', 'full'] as const) {
@@ -2443,7 +2492,7 @@ function renderPgnImportNotice(text?: string): void {
 function renderAnalysisStatus(): void {
   renderPgnImportNotice();
   if (retry) return;
-  const status = document.getElementById('analysisStatus');
+  const status = maybeEl('analysisStatus');
   if (!status) return;
   const lines = lineCache.get(tree.current.fen) ?? [];
   const ready = new Set(lines.filter((line) => line.multipv === 1 && !line.error).map((line) => analysisEngineName(line.engine))).size;
@@ -2462,7 +2511,7 @@ function renderAnalysisStatus(): void {
   const overview = status.closest<HTMLElement>('.analysis-overview');
   if (overview && overview.dataset.status !== state) overview.dataset.status = state;
   // The primary action reflects the state: filled "Analyze" when idle, quiet "Re-analyze" once done.
-  const label = document.getElementById('analyzeLabel');
+  const label = maybeEl('analyzeLabel');
   const verb = state === 'done' ? 'Re-analyze' : 'Analyze';
   if (label && label.textContent !== verb) label.textContent = verb;
 }
@@ -2516,7 +2565,12 @@ function renderEngineSummaries(lines: AnalysisLine[]): void {
               ? 'Unavailable'
               : `Budget · ${row.strength} ${strengthMeta(row.family).unit}`;
         // One unit in the strip (depth or visits) so it never clips beside the eval; the full string stays in the tooltip.
-        const stats = raw.startsWith('Budget · ') ? raw : raw.split(' · ')[0];
+        const stats =
+          progress && hasBoundedSearchProgress(progress)
+            ? `${progress.completed}/${progress.requested} ${progress.units}`
+            : raw.startsWith('Budget · ')
+              ? raw
+              : raw.split(' · ')[0];
         const engine = line?.engine ?? engineLines[0]?.engine ?? rowLabel(row);
         const swatch = engineBrushes(engine).swatch;
         const pct =
@@ -3621,7 +3675,7 @@ function startMistakeRetry(): void {
   ]);
   el('retryEntry').hidden = true;
   el('retryActive').hidden = false;
-  document.querySelector<HTMLElement>('.analysis-workspace')!.dataset.retrying = 'true';
+  el('main').dataset.retrying = 'true';
   for (const id of ['movesTab', 'enginesTab', 'comparisonTab', 'humanTab', 'navStart', 'navBack', 'navForward', 'navEnd'])
     el(id).toggleAttribute('disabled', true);
   el('message').textContent = '';
@@ -3757,7 +3811,7 @@ function exitMistakeRetry(render = true): void {
   const savedShapes = retryOriginalShapes;
   retryOriginalShapes = [];
   inputEl('autoAnalyze').checked = retryOriginalAuto;
-  delete document.querySelector<HTMLElement>('.analysis-workspace')!.dataset.retrying;
+  delete el('main').dataset.retrying;
   el('retryActive').hidden = true;
   el('retryEntry').hidden = false;
   for (const id of ['retrySolution', 'retryHumanStatus', 'retryStatus', 'boardAnnouncement']) el(id).textContent = '';
@@ -4013,7 +4067,7 @@ function deferHiddenTabWork(kind: HiddenTabWork): boolean {
   if (!requested.start && kind === 'analysis') {
     // Stop may have disabled the button after the previous run's finally.
     // A new hidden request has no running search to enable it again.
-    document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
+    maybeEl('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
   }
   return !requested.start;
 }
@@ -4035,7 +4089,7 @@ function applyHiddenTab(hidden: boolean): void {
   }
   if (transition.pause.includes('analysis')) {
     void dispatchAnalysis({ type: 'VISIBILITY', visible: false, resumeSearch: false });
-    document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
+    maybeEl('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
     clearAnalysisSearchProgress();
     lineCache.delete(tree.current.fen);
     renderLines();
@@ -4064,12 +4118,39 @@ function removeHiddenTabPause(): void {
   hiddenTabListener = null;
 }
 
+let analysisReclaimOwner: AbortController | null = null;
+const ANALYSIS_REFRESH_PENDING_MESSAGE = 'Finishing previous search before updating analysis…';
+/** The run whose big-net init is in flight, and the nets it is loading. */
+let analysisBigNetInit: { owner: AbortController; keys: AnalysisBigNetKey[] } | null = null;
+
+/**
+ * Stop ends a cold big-net load instead of leaving it to run on, so the run
+ * settles now and Maia3 can reload once the worker retires. Navigation keeps
+ * the load: the next run joins it rather than restarting the download.
+ */
+function stopAnalysisBigNetInit(): void {
+  const init = analysisBigNetInit;
+  if (!init || init.owner !== analysisAbort) return;
+  for (const key of init.keys) if (!peekBigNetSearcher(key)?.loaded) disposeBigNetSearcherNow(key);
+  // The run settles silently once its load is gone; replace "Loading Lc0 …".
+  el('message').textContent = 'Analysis stopped.';
+}
+
 function invalidateAnalysisSettings(
   maintenance: Maintenance = { reloadLc0: false, disposeUnused: false },
   request = analysisIsAnalyzing(analysisRunState) || analysisRunState.wanted !== null,
 ): void {
+  request = request && automaticAnalysisAllowed();
   if (request && hiddenTab.hidden) deferHiddenTabWork('analysis');
   void dispatchAnalysis({ type: 'SETTINGS_CHANGED', revision: analysisRunState.revision + 1, intent: analysisIntent(), maintenance, request });
+  if (analysisRunState.execution.tag === 'running') {
+    clearAnalysisSearchProgress();
+    el('message').textContent = request ? ANALYSIS_REFRESH_PENDING_MESSAGE : 'Engine settings changed.';
+    renderEngineComparison(lineCache.get(tree.current.fen) ?? []);
+  }
+  // The scheduler has queued the new intent. No native init has begun, so
+  // settle the obsolete reclaim wait now instead of holding up the new rows.
+  if (isMemoryConstrainedDevice() && analysisReclaimOwner && analysisReclaimOwner === analysisAbort) cancelAnalysisOperation(activeAnalysisRunId);
 }
 
 function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnusedEngines?: boolean } = {}): void {
@@ -4088,40 +4169,49 @@ function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnu
 
 function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolean } = {}): void {
   void dispatchAnalysis({ type: 'STOP', preserveMaintenance: options.preserveDeferredMaintenance === true });
+  // Stop drops the queued refresh. Keep any more specific message written by cancellation.
+  const message = maybeEl('message');
+  if (message?.textContent === ANALYSIS_REFRESH_PENDING_MESSAGE) message.textContent = 'Analysis stopped.';
 }
 
 function cancelAnalysisOperation(operationId: number): void {
   const controller = analysisOperations.get(operationId);
   if (!controller) return;
   controller.abort();
-  if (analysisAbort === controller) retireAnalysisRunCentipawnKeys();
+  const current = analysisAbort === controller;
+  const reload = analysisReloadAbort === controller || !current;
+  // Engines first: page teardown (DISPOSE) cancels after Svelte has removed the DOM, and a
+  // missing element must not leave a worker search or big-net init running.
+  if (current) retireAnalysisRunCentipawnKeys();
+  if (reload) {
+    analysisReloadAbort = null;
+    disposeRuntimeResources(); // also cancels the worker and big nets, and clears analysisAbort
+  }
+  const stillCurrent = analysisAbort === controller;
+  const hybridInit = stillCurrent && activeWorkerSearchId !== null && !!searchWorker && workerRuntime.startsWith('hybrid-') && !workerSearchWarm;
+  if (hybridInit) resetSearchWorker('LC0 hybrid worker initialization cancelled');
+  else if (stillCurrent && activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
+  if (stillCurrent) for (const key of ANALYSIS_BIG_NET_KEYS) peekBigNetSearcher(key)?.cancel();
+  // Progress state outlives the page; the renders skip a page that is gone.
   clearAnalysisSearchProgress();
   hideModelProgress();
+  if (mountAbort.signal.aborted) return;
   el('analyze').toggleAttribute('disabled', false);
   selectEl('lc0RuntimeSelect').disabled = false;
-  if (analysisReloadAbort === controller || analysisAbort !== controller) {
-    analysisReloadAbort = null;
-    disposeRuntimeResources();
+  if (current) {
+    const message = el('message');
+    if (message.textContent === 'Freeing memory…') message.textContent = 'Analysis stopped.';
+  }
+  if (reload) {
     el('stop').toggleAttribute('disabled', true);
     el('backend').textContent = 'not loaded';
     el('message').textContent = 'Analysis stopped during LC0 backend reload.';
   }
-  if (analysisAbort !== controller) return;
-  if (activeWorkerSearchId !== null && searchWorker) {
-    if (workerRuntime.startsWith('hybrid-') && !workerSearchWarm) {
-      resetSearchWorker('LC0 hybrid worker initialization cancelled');
-      clearAnalysisSearchProgress();
-      hideModelProgress();
-      el('stop').toggleAttribute('disabled', true);
-      el('analyze').toggleAttribute('disabled', false);
-      selectEl('lc0RuntimeSelect').disabled = false;
-      el('backend').textContent = 'not loaded';
-      el('message').textContent = 'Analysis stopped during LC0 hybrid backend initialization.';
-    } else {
-      searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
-    }
+  if (hybridInit) {
+    el('stop').toggleAttribute('disabled', true);
+    el('backend').textContent = 'not loaded';
+    el('message').textContent = 'Analysis stopped during LC0 hybrid backend initialization.';
   }
-  for (const key of ANALYSIS_BIG_NET_KEYS) peekBigNetSearcher(key)?.cancel();
 }
 
 function scheduleAnalyzeCurrent(options: { force?: boolean } = {}, delayMs = 250): void {
@@ -4399,7 +4489,15 @@ async function performAnalysisMaintenance(operationId: number, maintenance: Main
   }
 }
 
+let analysisHasExplicitInput = false;
+
+function automaticAnalysisAllowed(): boolean {
+  return shouldAutoAnalyzePosition(deviceMemoryClass(), analysisHasExplicitInput, tree.root.fen, START_FEN, mainlineNodes().length - 1);
+}
+
 async function analyzeCurrent(options: { force?: boolean } = {}) {
+  if (options.force) analysisHasExplicitInput = true;
+  if (!options.force && !automaticAnalysisAllowed()) return;
   if (mountAbort.signal.aborted || analysisRunState.modes.includes('review') || analysisRunState.modes.includes('retry')) return;
   if (analysisRunState.modes.includes('critical')) {
     criticalAnalysisRefresh.defer(analysisSelectionCacheKey(tree.current.fen), options.force);
@@ -4443,12 +4541,48 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     // rows, runtime/broker settings, served models, keys. A settings change made
     // during init ends this run in favour of the queued one (below). A run with
     // no uninitialized big net does not yield.
-    const uninitializedBigNets = bigNetsAwaitingInit(rows);
-    let bigNetInitErrors = new Map<AnalysisBigNetKey, Error>();
+    const bigNetInitErrors = new Map<AnalysisBigNetKey, Error>();
+    const firstBigNet = rows.find((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant))?.variant;
+    const constrained = isMemoryConstrainedDevice();
+    if (constrained && firstBigNet && isLc0BigNetVariant(firstBigNet)) {
+      maia3PanelBlockedByRun = controller;
+      unloadMaia3Panel('Maia3 unloaded to make room for Lc0. Enable Maia3 after analysis finishes to reload.');
+      for (const key of ANALYSIS_BIG_NET_KEYS) {
+        if (key === firstBigNet) continue;
+        releaseBigNetSearcher(key, 0);
+        if (rows.some((row) => row.family === 'lc0' && row.variant === key)) {
+          bigNetInitErrors.set(key, new Error(`Phones can run one large net at a time. Remove Lc0 ${BIG_NETS[firstBigNet].name} to run this net.`));
+        }
+      }
+    }
+    if (hasEngineRetirements()) await awaitEngineRetirements();
+    if (controller.signal.aborted || mountAbort.signal.aborted || !analysisCanPrepare(analysisRunState, owner)) return;
+    const uninitializedBigNets = bigNetsAwaitingInit(rows).filter((key) => !bigNetInitErrors.has(key));
     if (uninitializedBigNets.length) {
       activeAnalysisSelectionKey = ''; // no keys yet: navigation during init cancels this run
+      const reclaim =
+        constrained &&
+        preparePhoneBigNet(uninitializedBigNets[0], ANALYSIS_BIG_NET_SESSION.evalCacheEntries, controller.signal, disposeAnalysisCpuEngines, () => {
+          el('message').textContent = 'Freeing memory…';
+        });
+      if (reclaim) {
+        analysisReclaimOwner = controller;
+        try {
+          await reclaim;
+        } finally {
+          if (analysisReclaimOwner === controller) analysisReclaimOwner = null;
+        }
+        if (controller.signal.aborted || mountAbort.signal.aborted || !analysisCanPrepare(analysisRunState, owner)) return;
+      }
       el('message').textContent = `Loading ${uninitializedBigNets.map((key) => `Lc0 ${BIG_NETS[key].name}`).join(' + ')}…`;
-      bigNetInitErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted);
+      analysisBigNetInit = { owner: controller, keys: uninitializedBigNets };
+      let initErrors: Map<AnalysisBigNetKey, Error>;
+      try {
+        initErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted);
+      } finally {
+        if (analysisBigNetInit?.owner === controller) analysisBigNetInit = null;
+      }
+      for (const [key, error] of initErrors) bigNetInitErrors.set(key, error);
       if (controller.signal.aborted || mountAbort.signal.aborted) return;
     }
     if (!analysisCanPrepare(analysisRunState, owner)) return;
@@ -4497,7 +4631,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         (async () => {
           if (controller.signal.aborted || mountAbort.signal.aborted) return;
           try {
-            const lines = await taskFactory(() => showIndeterminateSearchProgress(runId, fen, label));
+            // Retire the meter before publishing this engine’s result, even if other engines are still searching.
+            const lines = await taskFactory(() => showIndeterminateSearchProgress(runId, fen, label)).finally(() => clearEngineSearchProgress(runId, label));
             if (
               runId !== activeAnalysisRunId ||
               analysisAbort !== controller ||
@@ -4520,8 +4655,6 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
               lineGroups[index] = [{ engine: label, pvUci: [], multipv: 1, scoreText: '—', detail: 'failed', pvSan: '', error: errMsg }];
               publishLines();
             }
-          } finally {
-            clearEngineSearchProgress(runId, label);
           }
         })(),
       );
@@ -4747,8 +4880,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       completeAnalysisKeys.add(selectionCacheKey);
       if (completeAnalysisKeys.size > 512) completeAnalysisKeys.delete(completeAnalysisKeys.values().next().value!);
     }
-    const message = document.getElementById('message');
-    if (message)
+    const message = maybeEl('message');
+    if (message && analysisRunState.revision === owner.preparationRevision)
       message.textContent = hadTaskFailure
         ? `Analysis completed with one or more engine failures/timeouts: ${(lineCache.get(fen) ?? [])[0]?.scoreText ?? '—'}`
         : snapshot.rows.length > 1
@@ -4756,11 +4889,15 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
           : `Analysis complete · ${selectedLabels}`;
   } catch (error) {
     controller.abort();
-    const message = document.getElementById('message');
+    const message = maybeEl('message');
     if ((error as Error).name !== 'AbortError' && !mountAbort.signal.aborted && message && runId === activeAnalysisRunId && analysisAbort === controller)
       message.textContent = `Analysis failed: ${(error as Error).message}`;
   } finally {
     analysisOperations.delete(runId);
+    if (maia3PanelBlockedByRun === controller) {
+      maia3PanelBlockedByRun = null;
+      maybeEl('maia3Enable')?.toggleAttribute('disabled', false);
+    }
     const owns = analysisOperationId(analysisRunState.execution) === runId;
     const effects = applyAnalysisEvent({ type: 'SETTLED', operationId: runId });
     if (owns && !mountAbort.signal.aborted) {
@@ -4768,8 +4905,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       retireAnalysisRunCentipawnKeys();
       clearAnalysisSearchProgress();
       renderEngineComparison(lineCache.get(tree.current.fen) ?? []);
-      document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
-      document.getElementById('analyze')?.toggleAttribute('disabled', false);
+      maybeEl('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
+      maybeEl('analyze')?.toggleAttribute('disabled', false);
     }
     void executeAnalysisEffects(effects);
   }
@@ -4834,6 +4971,9 @@ function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
 const MAIA3_PANEL_RATINGS = [1100, 1300, 1500, 1700, 1900, 2200];
 let maia3PanelEvaluator: Maia3BrowserEvaluator | null = null;
 let maia3PanelLoading = false;
+let maia3PanelPending: Promise<Maia3BrowserEvaluator> | null = null;
+let maia3PanelAbort: AbortController | null = null;
+let maia3PanelBlockedByRun: AbortController | null = null;
 let maia3PanelLoadGeneration = 0;
 let maia3PanelTask: LatestOnlyTask<string> | null = null;
 let maia3PanelTimer: ReturnType<typeof setTimeout> | null = null;
@@ -4845,16 +4985,60 @@ function maia3PanelStatus(text: string): void {
   el('maia3PanelStatus').textContent = text;
 }
 
+function unloadMaia3Panel(message: string): void {
+  retireMaia3Panel();
+  explorerMaia = null;
+  renderExplorerComparison();
+  el('maia3Grid').hidden = true;
+  el('maia3Caption').hidden = true;
+  const enable = el('maia3Enable') as HTMLButtonElement;
+  enable.hidden = false;
+  enable.disabled = maia3PanelBlockedByRun !== null;
+  maia3PanelStatus(message);
+  hideModelProgress();
+}
+
+/** Detach the panel's pending or loaded Maia3 owner to the retirement barrier. */
+function retireMaia3Panel(): void {
+  maia3PanelLoadGeneration += 1;
+  maia3PanelAbort?.abort();
+  maia3PanelAbort = null;
+  maia3PanelTask?.dispose();
+  maia3PanelTask = null;
+  if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
+  maia3PanelTimer = null;
+  const owned = maia3PanelPending ?? (maia3PanelEvaluator && Promise.resolve(maia3PanelEvaluator));
+  maia3PanelPending = null;
+  maia3PanelEvaluator = null;
+  maia3PanelLoading = false;
+  if (owned)
+    trackEngineRetirement(
+      owned.then(
+        (loaded) => loaded.dispose(),
+        () => undefined,
+      ),
+    );
+}
+
 async function enableMaia3Panel(): Promise<void> {
+  if (maia3PanelBlockedByRun) return;
   if (maia3PanelEvaluator || maia3PanelLoading) return;
   const mountSignal = mountAbort.signal;
   const generation = ++maia3PanelLoadGeneration;
+  const loadAbort = new AbortController();
+  maia3PanelAbort = loadAbort;
   maia3PanelLoading = true;
   (el('maia3Enable') as HTMLButtonElement).disabled = true;
   try {
     maia3PanelStatus('Loading Maia3…');
     showModelProgress('Maia3', undefined, undefined, 'Preparing');
-    const evaluator = await Maia3BrowserEvaluator.create({
+    // A completed or stopped run may still own a pooled large net.
+    if (isMemoryConstrainedDevice()) for (const key of ANALYSIS_BIG_NET_KEYS) releaseBigNetSearcher(key, 0);
+    await awaitEngineRetirements();
+    if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) return;
+    maia3PanelPending = Maia3BrowserEvaluator.create({
+      signal: loadAbort.signal,
+      onInitCleanup: trackEngineRetirement,
       onFailure: (error) => {
         if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) return;
         maia3PanelTask?.dispose();
@@ -4878,6 +5062,7 @@ async function enableMaia3Panel(): Promise<void> {
         }
       },
     });
+    const evaluator = await maia3PanelPending;
     if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) {
       await evaluator.dispose();
       return;
@@ -4902,6 +5087,7 @@ async function enableMaia3Panel(): Promise<void> {
     if (generation === maia3PanelLoadGeneration) {
       hideModelProgress();
       maia3PanelLoading = false;
+      maia3PanelPending = null;
     }
   }
 }
@@ -5041,6 +5227,7 @@ function loadFen() {
     return;
   }
   clearAnalysisWorkspace();
+  analysisHasExplicitInput = true;
   lineCache.clear();
   completeAnalysisKeys.clear();
   el('message').textContent = 'Loaded FEN.';
@@ -5059,6 +5246,7 @@ function loadPgn() {
     workspaceHeaders = tags;
     workspaceResult = result;
     tree = parsed;
+    analysisHasExplicitInput = true;
     tree.toStart();
     reviewMetadata.set(tree, { tags, result, signature: reviewSignature() });
     lineCache.clear();
@@ -5645,6 +5833,7 @@ function wireEvents() {
     clearAnalysisWorkspace();
     inputEl('pgnInput').value = '';
     tree = new GameTree();
+    analysisHasExplicitInput = false;
     lineCache.clear();
     completeAnalysisKeys.clear();
     el('message').textContent = 'Reset.';
@@ -5660,11 +5849,12 @@ function wireEvents() {
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'prefetch');
     cancelAllAnalysisAssetPrefetches();
+    stopAnalysisBigNetInit();
     cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
     if (hiddenTab.hidden) el('message').textContent = 'Analysis stopped.';
     // The paused run's finally already ran and left Stop enabled. Cancelling
     // the suspended search has to disable it here; that finally will not run again.
-    document.getElementById('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
+    maybeEl('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
   });
   window.addEventListener(PHONE_LARGE_NET_CHANGE_EVENT, revokeAnalysisPhoneLargeNets, { signal: mountAbort.signal });
   el('engineList').addEventListener('change', async (event) => {
@@ -5786,6 +5976,7 @@ function wireEvents() {
     deferAnalysisSettingsRefresh();
   });
   criticalPanel = mountCriticalMomentsPanel({
+    dom: pageDom,
     broker: resourceBroker,
     suspended: () => !!retry,
     baseline: () =>
@@ -5805,10 +5996,15 @@ function wireEvents() {
       selectEl('reviewDepth').value,
       resourceBroker.getDial(),
     ],
-    pauseAnalysis: () => {
+    pauseAnalysis: (maiaOwner) => {
       void dispatchAnalysis({ type: 'MODE_ENTER', mode: 'critical' });
       analysisAbort = null;
       clearAnalysisSearchProgress();
+      if (maiaOwner && isMemoryConstrainedDevice()) {
+        maia3PanelBlockedByRun = maiaOwner;
+        unloadMaia3Panel('Maia3 unloaded to make room for the comparison.');
+        for (const key of ANALYSIS_BIG_NET_KEYS) releaseBigNetSearcher(key, 0);
+      }
       // Go through the busy guard so interrupted debounces/inference are hidden
       // and replayed, even when the board does not move during the report.
       scheduleMaia3Panel();
@@ -5816,7 +6012,11 @@ function wireEvents() {
       el('stop').toggleAttribute('disabled', true);
       el('analyze').toggleAttribute('disabled', false);
     },
-    settled: () => {
+    settled: (reportOwner) => {
+      if (maia3PanelBlockedByRun === reportOwner) {
+        maia3PanelBlockedByRun = null;
+        maybeEl('maia3Enable')?.toggleAttribute('disabled', false);
+      }
       const pending = criticalAnalysisRefresh.take(analysisSelectionCacheKey(tree.current.fen));
       if (criticalDeferredMaia) scheduleMaia3Panel();
       void dispatchAnalysis({ type: 'MODE_EXIT', mode: 'critical', resume: !pending });
@@ -6089,13 +6289,13 @@ function disposeRuntimeResources(): void {
   if (reviewWasRunning) {
     void dispatchAnalysis({ type: 'MODE_EXIT', mode: 'review' });
     reviewRunSignature = '';
-    const progress = document.getElementById('reviewProgress');
+    const progress = maybeEl('reviewProgress');
     if (progress) progress.hidden = true;
     // Runtime reload keeps the page mounted. The stale review's identity guard
     // intentionally skips its finally block, so restore controls here.
-    (document.getElementById('reviewGame') as HTMLButtonElement | null)?.toggleAttribute('disabled', false);
-    (document.getElementById('reviewStop') as HTMLButtonElement | null)?.toggleAttribute('disabled', true);
-    const status = document.getElementById('reviewStatus');
+    (maybeEl('reviewGame') as HTMLButtonElement | null)?.toggleAttribute('disabled', false);
+    (maybeEl('reviewStop') as HTMLButtonElement | null)?.toggleAttribute('disabled', true);
+    const status = maybeEl('reviewStatus');
     if (status) status.textContent = 'Review stopped after runtime changed.';
   }
   if (activeWorkerSearchId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
@@ -6104,16 +6304,11 @@ function disposeRuntimeResources(): void {
     peekBigNetSearcher(key)?.cancel();
     releaseBigNetSearcher(key, 0);
   }
-  disposeStockfish('lite');
-  disposeStockfish('full');
   disposeCentipawnEvaluators();
-  recklessEngines.disposeAll();
-  viridithasEngines.disposeAll();
-  berserkEngines.disposeAll();
-  plentyChessEngines.disposeAll();
-  stormphraxEngines.disposeAll();
-  void mainEvaluator?.dispose?.();
+  disposeAnalysisCpuEngines();
+  const retiredMain = mainEvaluator;
   mainEvaluator = null;
+  if (retiredMain) trackEngineRetirement(Promise.resolve(retiredMain.dispose?.()));
   searcher = null;
   lc0ServedModelUrl = '';
 }
@@ -6131,14 +6326,7 @@ function disposePageResources(): void {
   analysisReloadAbort?.abort();
   analysisReloadAbort = null;
   disposeRuntimeResources();
-  if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
-  void maia3PanelEvaluator?.dispose();
-  maia3PanelEvaluator = null;
-  maia3PanelLoading = false;
-  maia3PanelLoadGeneration += 1;
-  maia3PanelTask?.dispose();
-  maia3PanelTask = null;
-  maia3PanelTimer = null;
+  retireMaia3Panel();
   maia3PanelEvaluating = false;
   maia3PanelStatusText = '';
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
@@ -6184,6 +6372,7 @@ async function loadLc0Backend(
         !loadCancelled() &&
         runAutoAnalyze === true &&
         inputEl('autoAnalyze').checked &&
+        automaticAnalysisAllowed() &&
         analysisRunState.execution.tag === 'maintaining' &&
         analysisRunState.execution.operationId === operationId &&
         !analysisRunState.wanted
@@ -6197,6 +6386,8 @@ async function loadLc0Backend(
 }
 
 async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal?: AbortSignal): Promise<boolean> {
+  await awaitEngineRetirements();
+  if (loadCancelled()) return false;
   const runtime = selectedLc0Runtime();
   el('analyze').toggleAttribute('disabled', true);
   selectEl('lc0RuntimeSelect').disabled = true;
@@ -6227,42 +6418,52 @@ async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal
     try {
       let nextEvaluator: Lc0EvaluationProvider | null = null;
       let nextServedModelUrl = '';
-      if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
-        nextEvaluator = await Lc0WholeOnnxWebgpuEvaluator.create({
-          manifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
-          batch: lc0WholeModelPhysicalBatch(),
-          fetchTensorCache: lc0WholeModelTensorCache(),
-          logger: (line) => console.info('[lc0 whole-model analysis]', line),
-          signal: operationSignal,
-        });
-      } else {
-        const created = await createLc0OnnxEvaluatorFromUrl(MODEL_URL, {
-          deviceSelection: LC0_DEVICE_MODEL_SELECTION,
-          load: {
-            cache: true,
-            requestPersistentStorage: true,
-            signal: operationSignal,
-            onProgress: (loaded, total) => {
-              if (!loadCancelled()) showModelProgress('Lc0 small net', loaded, total, 'Downloading');
+      const fallbackSignal = operationSignal ?? mountAbort.signal;
+      const createFallback = async (): Promise<Lc0EvaluationProvider> => {
+        if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
+          return Lc0WholeOnnxWebgpuEvaluator.create({
+            manifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
+            batch: lc0WholeModelPhysicalBatch(),
+            fetchTensorCache: lc0WholeModelTensorCache(),
+            logger: (line) => console.info('[lc0 whole-model analysis]', line),
+            signal: fallbackSignal,
+          });
+        } else {
+          const created = await createLc0OnnxEvaluatorFromUrl(MODEL_URL, {
+            deviceSelection: LC0_DEVICE_MODEL_SELECTION,
+            load: {
+              cache: true,
+              requestPersistentStorage: true,
+              signal: fallbackSignal,
+              onProgress: (loaded, total) => {
+                if (!loadCancelled()) showModelProgress('Lc0 small net', loaded, total, 'Downloading');
+              },
             },
-          },
-        });
-        nextEvaluator = created.evaluator;
-        nextServedModelUrl = created.servedUrl;
-      }
-      if (loadCancelled()) {
-        void nextEvaluator?.dispose?.();
-        return false;
+          });
+          nextServedModelUrl = created.servedUrl;
+          return created.evaluator;
+        }
+      };
+      // Until mainEvaluator owns it, cancellation publishes its release synchronously (as Arena does).
+      let uninstalled: Lc0EvaluationProvider | undefined;
+      const retireUninstalled = () => {
+        if (uninstalled) trackEngineRetirement(Promise.resolve(uninstalled.dispose?.()));
+        uninstalled = undefined;
+      };
+      fallbackSignal.addEventListener('abort', retireUninstalled, { once: true });
+      let diagnostics: Awaited<ReturnType<typeof collectOrtRuntimeDiagnostics>> | undefined;
+      try {
+        nextEvaluator = await loadRetirableResource(async () => (uninstalled = await createFallback()), fallbackSignal);
+        if (!loadCancelled() && runtime === 'onnx') diagnostics = await collectOrtRuntimeDiagnostics();
+        if (loadCancelled()) return false;
+        uninstalled = undefined; // mainEvaluator owns it below.
+      } finally {
+        fallbackSignal.removeEventListener('abort', retireUninstalled);
+        retireUninstalled();
       }
       nextEvaluator = new CachedLc0Evaluator(nextEvaluator, { maxEntries: 2048 });
-      const nextSearcher = new Lc0PuctSearcher(nextEvaluator);
-      const diagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics() : undefined;
-      if (loadCancelled()) {
-        void nextEvaluator.dispose?.();
-        return false;
-      }
       mainEvaluator = nextEvaluator;
-      searcher = nextSearcher;
+      searcher = new Lc0PuctSearcher(nextEvaluator);
       lc0ServedModelUrl = nextServedModelUrl;
       el('backend').textContent = `${diagnostics?.describe ?? 'whole-onnx-webgpu'} (main thread)`;
       publishBrowserRuntimeAudit({
@@ -6304,6 +6505,9 @@ async function reloadLc0Backend(
   criticalPanel?.invalidate();
   disposeRuntimeResources();
   if (operationSignal?.aborted) return false;
+  // Settings invalidate the old backend, not permission to allocate an unused
+  // one. A later admitted Small run requests the backend through NEEDS_BACKEND.
+  if (!automaticAnalysisAllowed() || !activeEngineRows().some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant))) return true;
   reconcileActiveRuntimeFallbackWarning();
   renderRecklessRuntimeInfo();
   const loaded = await loadLc0Backend(
@@ -6389,12 +6593,24 @@ async function init(mountSignal: AbortSignal) {
   void refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
   void refreshBt4Availability();
   if (!isV0DeployProfile()) void refreshCentipawnHybridManifestStatus();
-  await loadLc0Backend(true, mountSignal);
+  const smallLc0 = activeEngineRows().some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant));
+  // Read Auto-analyze only now: it may have been turned off during the startup asset checks.
+  // A Small backend still loads; loadLc0Backend applies the checkbox itself.
+  if (!automaticAnalysisAllowed() || (!smallLc0 && !inputEl('autoAnalyze').checked)) {
+    el('analyze').toggleAttribute('disabled', false);
+    selectEl('lc0RuntimeSelect').disabled = false;
+    el('message').textContent = 'Play a move, load a game/FEN, or tap Analyze to start.';
+    return;
+  }
+  if (smallLc0) await loadLc0Backend(true, mountSignal);
+  else await analyzeCurrent();
 }
 
 let lastAnalysisMountHref: string | null = null;
 
 function resetAnalysisPageState(): void {
+  analysisHasExplicitInput = false;
+  maia3PanelBlockedByRun = null;
   tree = new GameTree(START_FEN);
   workspaceHeaders = {};
   workspaceResult = '*';
@@ -6448,6 +6664,7 @@ export function mountAnalysisBrowser(): () => void {
     return () => undefined;
   }
   lastAnalysisMountHref = href;
+  const releaseDom = pageDom.mount(document.getElementById('main'));
   resetAnalysisPageState();
   pendingAnalysisInput = null;
   workspaceAutosave = createWorkspaceAutosave(
@@ -6496,7 +6713,7 @@ export function mountAnalysisBrowser(): () => void {
       fen: tree.current.fen,
       workerProgressMessages: analysisWorkerProgressMessages,
       uiProgressSamples: analysisUiProgressSamples,
-      message: document.getElementById('message')?.textContent ?? '',
+      message: maybeEl('message')?.textContent ?? '',
     });
   const transitionLogHook = () => analysisTransitionLog;
   const setHiddenHook = (hidden: boolean) => applyHiddenTab(hidden);
@@ -6586,17 +6803,21 @@ export function mountAnalysisBrowser(): () => void {
   );
   void init(controller.signal);
   return () => {
-    pvResize.disconnect();
-    evalResize.disconnect();
-    controller.abort();
-    if (mountAbort === controller) {
-      disposePageResources();
+    try {
+      pvResize.disconnect();
+      evalResize.disconnect();
+      controller.abort();
+      if (mountAbort === controller) {
+        disposePageResources();
+      }
+      // Only clear the test hook if it is still ours (a newer mount may have
+      // installed its own).
+      if (smokeGlobal.__analysisUserMove === hook) delete smokeGlobal.__analysisUserMove;
+      if (smokeGlobal.__analysisSchedulingState === schedulingStateHook) delete smokeGlobal.__analysisSchedulingState;
+      if (smokeGlobal.__analysisTransitionLog === transitionLogHook) delete smokeGlobal.__analysisTransitionLog;
+      if (smokeGlobal.__analysisSetHidden === setHiddenHook) delete smokeGlobal.__analysisSetHidden;
+    } finally {
+      releaseDom();
     }
-    // Only clear the test hook if it is still ours (a newer mount may have
-    // installed its own).
-    if (smokeGlobal.__analysisUserMove === hook) delete smokeGlobal.__analysisUserMove;
-    if (smokeGlobal.__analysisSchedulingState === schedulingStateHook) delete smokeGlobal.__analysisSchedulingState;
-    if (smokeGlobal.__analysisTransitionLog === transitionLogHook) delete smokeGlobal.__analysisTransitionLog;
-    if (smokeGlobal.__analysisSetHidden === setHiddenHook) delete smokeGlobal.__analysisSetHidden;
   };
 }

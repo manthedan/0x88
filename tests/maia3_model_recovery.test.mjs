@@ -97,6 +97,24 @@ test('Maia abort rejects init promptly but publishes its bounded retirement prom
   assert.equal(fake.workers[0].terminated, true);
 });
 
+test('Maia publishes its worker close synchronously at abort, before the owner snapshots retirements', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const fake = setup(t);
+  t.mock.method(Worker.prototype, 'postMessage', () => {}); // Init never acks.
+  const abort = new AbortController();
+  const published = [];
+  const creating = Maia3BrowserEvaluator.create({ modelUrl: URL, signal: abort.signal, onInitCleanup: (cleanup) => published.push(cleanup) }, fake.deps);
+  for (let i = 0; i < 10 && !fake.workers.length; i++) await Promise.resolve();
+  const rejected = assert.rejects(creating, { name: 'AbortError' });
+  abort.abort();
+  assert.equal(published.length, 1, 'Play switching to Lc0 Small snapshots the barrier right after abort()');
+  await rejected;
+  assert.equal(published.length, 1, 'the close is published once');
+  t.mock.timers.tick(1500);
+  await published[0];
+  assert.equal(fake.workers[0].terminated, true);
+});
+
 test('Maia repairs the exact metadata-trusted cache entry once, in a fresh worker', async (t) => {
   const fake = setup(t);
   const evaluator = await Maia3BrowserEvaluator.create({ modelUrl: URL }, fake.deps);
@@ -127,7 +145,7 @@ test('Maia can repair metadata-trusted bytes reacquired by the worker after an i
         new MessageEvent('message', {
           data:
             this.index === 0
-              ? { type: 'error', id: message.id, message: 'INVALID_PROTOBUF', modelLoad: info }
+              ? { type: 'error', id: message.id, message: 'allocation failed (fallback: INVALID_PROTOBUF)', modelLoad: info, modelParseError: true }
               : { type: 'ready', id: message.id, backend: 'test', inputNames: [], outputNames: [] },
         }),
       ),

@@ -24,3 +24,57 @@ export function isMemoryConstrainedDevice(
   const memory = device?.deviceMemory;
   return typeof memory !== 'number' || !Number.isFinite(memory) || memory <= 4;
 }
+
+const RECLAIM_GAP_KEY = '0x88-reclaim-gap-ms';
+const RETIRE_CPU_KEY = '0x88-retire-cpu';
+// iPhone matrix 2026-11-18: retiring CPU engines alone stopped the cold BT4 WebGPU OOM; a 20 s gap added 15-45 s of
+// waiting with no observed benefit. The key stays as a diagnostic override.
+const DEFAULT_RECLAIM_GAP_MS = 0;
+
+export function phoneReclaimSettings(): { reclaimGapMs: number; retireCpu: boolean } {
+  const search = new URLSearchParams(typeof location === 'undefined' ? '' : location.search);
+  const setting = (key: string, valid: (value: string) => boolean): string | null => {
+    const raw = search.get(key);
+    if (raw !== null && valid(raw)) {
+      try {
+        globalThis.localStorage?.setItem(key, raw);
+      } catch {
+        // The URL still works when persistent storage is unavailable.
+      }
+      return raw;
+    }
+    try {
+      const stored = globalThis.localStorage?.getItem(key);
+      return stored != null && valid(stored) ? stored : null;
+    } catch {
+      return null;
+    }
+  };
+  const gap = setting(RECLAIM_GAP_KEY, (value) => {
+    const ms = Number(value);
+    return value.trim() !== '' && ms >= 0 && ms <= 120_000;
+  });
+  return {
+    reclaimGapMs: gap === null ? DEFAULT_RECLAIM_GAP_MS : Number(gap),
+    retireCpu: setting(RETIRE_CPU_KEY, (value) => value === '0' || value === '1') !== '0',
+  };
+}
+
+export type DeviceMemoryClass = 'phone' | 'tablet' | 'desktop';
+
+/** Safari exposes no RAM size; use conservative device classes, with a diagnostic override. */
+export function deviceMemoryClass(
+  search = typeof location === 'undefined' ? '' : location.search,
+  nav = typeof navigator === 'undefined' ? undefined : navigator,
+): DeviceMemoryClass {
+  const override = new URLSearchParams(search).get('memoryClass');
+  if (override === 'phone' || override === 'tablet' || override === 'desktop') return override;
+  const ua = nav?.userAgent ?? '';
+  if (/iPhone|iPod|Android.*Mobile/i.test(ua)) return 'phone';
+  if (/iPad|Android/i.test(ua) || (/Macintosh/i.test(ua) && (nav?.maxTouchPoints ?? 0) > 1)) return 'tablet';
+  return 'desktop';
+}
+
+export function shouldAutoAnalyzePosition(memoryClass: DeviceMemoryClass, hasInput: boolean, rootFen: string, defaultFen: string, moves: number): boolean {
+  return memoryClass !== 'phone' || hasInput || rootFen !== defaultFen || moves > 0;
+}

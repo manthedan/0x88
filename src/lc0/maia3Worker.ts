@@ -18,7 +18,7 @@ import { releaseOrtWorkerResources } from '../nn/ortWorkerDispose.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import { MAIA3_ORT_DEFAULTS } from './maia3RuntimeConfig.ts';
 import { type Lc0ModelLoadInfo, loadLc0ModelForOrt } from './modelCache.ts';
-import { isMetadataTrustedModel } from './onnxModelRecovery.ts';
+import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
 
 type InitMessage = {
   type: 'init';
@@ -192,6 +192,7 @@ async function firstOutput(outputs: Awaited<ReturnType<ort.InferenceSession['run
           type: 'error',
           id: message.id,
           message: error instanceof Error ? error.message : String(error),
+          ...(message.type === 'init' ? { modelParseError: isOnnxModelParseError(error) } : {}),
           ...(fallbackModelLoad ? { modelLoad: fallbackModelLoad } : {}),
         });
       }

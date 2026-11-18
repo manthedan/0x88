@@ -218,7 +218,7 @@ test('whole-model evaluator retains destinations if draining readbacks fails', a
   await assert.rejects(evaluator.evaluateBatchSequence([FENS, FENS]), /device lost/);
   await assert.rejects(evaluator.evaluateBatchSequence([FENS, ['invalid FEN']]), /device lost/);
   assert.equal(state.disposedBeforeReadback, 0);
-  evaluator.dispose();
+  await evaluator.dispose();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(state.runtimeDisposed, 0, 'pending WASM destinations must outlive the runtime too');
   for (const copy of state.pendingCopies.splice(0)) copy();
@@ -234,6 +234,56 @@ function replaceGlobal(name, value) {
     else delete globalThis[name];
   };
 }
+
+test('whole-model cancellation at runtime instantiation retains ownership until cleanup', async (t) => {
+  const controller = new AbortController(),
+    sha256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+  let runtimeDisposed = 0,
+    deviceDestroyed = 0;
+  const runtime = {
+    endScope() {},
+    dispose() {
+      runtimeDisposed++;
+    },
+    initWebGPU() {
+      assert.fail('must stop before GPU initialization');
+    },
+  };
+  const manifest = { models: [{ batch: 4, wasm: 'b4.wasm', bytes: 3, sha256 }], files: [{ path: 'tvmjs.bundle.js', sha256 }] };
+  const restore = [
+    replaceGlobal('location', { href: 'https://lab.test/app/arena', origin: 'https://lab.test' }),
+    replaceGlobal('fetch', async (url) => (String(url).endsWith('/manifest.json') ? Response.json(manifest) : new Response('abc'))),
+    replaceGlobal('navigator', {
+      gpu: {
+        requestAdapter: async () => ({
+          features: { has: () => true },
+          requestDevice: async () => ({
+            destroy() {
+              deviceDestroyed++;
+            },
+          }),
+        }),
+      },
+    }),
+    replaceGlobal('tvmjs', {
+      createPolyfillWASI: () => ({}),
+      instantiate: async () => {
+        controller.abort();
+        return runtime;
+      },
+    }),
+    replaceGlobal('__LC0_TVMJS_BUNDLE_SHA256__', sha256),
+  ];
+  t.after(() => {
+    for (const undo of restore) undo();
+  });
+  await assert.rejects(
+    Lc0WholeOnnxWebgpuEvaluator.create({ manifestUrl: '/runtimes/lc0-tvmjs-webgpu/t1/f16/v1/manifest.json', batch: 4, signal: controller.signal }),
+    { name: 'AbortError' },
+  );
+  assert.equal(runtimeDisposed, 1);
+  assert.equal(deviceDestroyed, 1);
+});
 
 test('whole-model create rejects odd physical batches whose WDL/MLH outputs cannot be read back', async (t) => {
   const manifest = { models: [1, 4, 8].map((batch) => ({ batch, wasm: `b${batch}.wasm` })), files: [] };
@@ -267,15 +317,21 @@ test('whole-model evaluator defers runtime and device release until in-flight wo
   });
   const evaluation = evaluator.evaluateBatch(FENS);
   await started;
-  evaluator.dispose();
-  evaluator.dispose();
+  const retirement = evaluator.dispose();
+  assert.equal(evaluator.dispose(), retirement, 'retirement is idempotent and awaitable');
+  let retired = false;
+  retirement.then(() => {
+    retired = true;
+  });
   await assert.rejects(evaluator.evaluate(FENS[0]), /disposed/);
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(state.runtimeDisposed, 0);
   assert.equal(state.deviceDestroyed, 0);
+  assert.equal(retired, false);
   releaseSync();
   assertDecoded(await evaluation, 4);
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await retirement;
+  assert.equal(retired, true);
   assert.equal(state.runtimeDisposed, 1);
   assert.equal(state.deviceDestroyed, 1);
   assert.equal(state.scopes.length, 0, 'root scope released');

@@ -73,7 +73,8 @@ type HybridRuntimeManifest = {
     files?: Array<{ path: string; bytes?: number; sha256: string }>;
   };
 };
-type ArtifactVerifier = { verify(url: string, bytes: ArrayBuffer): Promise<void> };
+/** Owner cancellation and optional manifest checks for every artifact fetch. */
+type ArtifactSource = { signal?: AbortSignal; verify?(url: string, bytes: ArrayBuffer): Promise<void> };
 type FixtureArrayKey =
   | 'staticAttentionBias'
   | 'attnQkvWeight'
@@ -118,21 +119,21 @@ type FixtureSummary = {
   layerNormEpsilon?: number;
   arrays: Record<FixtureArrayKey, { file: string }>;
 };
-async function loadBytes(url: string, verifier?: ArtifactVerifier): Promise<ArrayBuffer> {
-  const res = await fetch(url);
+async function loadBytes(url: string, source?: ArtifactSource): Promise<ArrayBuffer> {
+  const res = await fetch(url, { signal: source?.signal });
   if (!res.ok) throw new Error(`fetch ${url}: ${res.status} ${res.statusText}`);
   const bytes = await res.arrayBuffer();
-  await verifier?.verify(url, bytes);
+  await source?.verify?.(url, bytes);
   return bytes;
 }
-async function loadText(url: string, verifier?: ArtifactVerifier): Promise<string> {
-  return new TextDecoder().decode(await loadBytes(url, verifier));
+async function loadText(url: string, source?: ArtifactSource): Promise<string> {
+  return new TextDecoder().decode(await loadBytes(url, source));
 }
-async function loadJson<T>(url: string, verifier?: ArtifactVerifier): Promise<T> {
-  return JSON.parse(await loadText(url, verifier)) as T;
+async function loadJson<T>(url: string, source?: ArtifactSource): Promise<T> {
+  return JSON.parse(await loadText(url, source)) as T;
 }
-async function loadF32(url: string, verifier?: ArtifactVerifier): Promise<Float32Array> {
-  return new Float32Array(await loadBytes(url, verifier));
+async function loadF32(url: string, source?: ArtifactSource): Promise<Float32Array> {
+  return new Float32Array(await loadBytes(url, source));
 }
 function stripSlash(path: string): string {
   return path.replace(/\/$/, '');
@@ -165,18 +166,19 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
-async function verifySha256(label: string, url: string, expected: string | undefined): Promise<void> {
+async function verifySha256(label: string, url: string, expected: string | undefined, signal?: AbortSignal): Promise<void> {
   if (!expected) return;
-  const actual = await sha256Hex(await loadBytes(url));
+  const actual = await sha256Hex(await loadBytes(url, { signal }));
   if (actual !== expected) throw new Error(`Hybrid TVM artifact SHA-256 mismatch for ${label}: expected ${expected}, got ${actual}`);
 }
 function artifactUrl(manifestUrl: string, path: string): string {
   return new URL(path, new URL(manifestUrl, typeof location !== 'undefined' ? location.href : 'http://localhost/')).toString();
 }
-function createArtifactVerifier(manifest: HybridRuntimeManifest | undefined, manifestUrl: string | undefined): ArtifactVerifier | undefined {
-  if (!manifest?.artifacts?.files?.length || !manifestUrl) return undefined;
+function createArtifactSource(manifest: HybridRuntimeManifest | undefined, manifestUrl: string | undefined, signal?: AbortSignal): ArtifactSource {
+  if (!manifest?.artifacts?.files?.length || !manifestUrl) return { signal };
   const byUrl = new Map(manifest.artifacts.files.map((file) => [artifactUrl(manifestUrl, file.path), file]));
   return {
+    signal,
     async verify(url: string, bytes: ArrayBuffer): Promise<void> {
       const resolved = new URL(url, typeof location !== 'undefined' ? location.href : 'http://localhost/').toString();
       const expected = byUrl.get(resolved);
@@ -188,11 +190,16 @@ function createArtifactVerifier(manifest: HybridRuntimeManifest | undefined, man
     },
   };
 }
-async function verifyManifestArtifacts(manifest: HybridRuntimeManifest | undefined, kernelBase: string, fixtureRoot: string): Promise<void> {
+async function verifyManifestArtifacts(
+  manifest: HybridRuntimeManifest | undefined,
+  kernelBase: string,
+  fixtureRoot: string,
+  signal?: AbortSignal,
+): Promise<void> {
   if (!manifest?.artifacts || manifest.artifacts.files?.length) return;
   await Promise.all([
-    verifySha256('kernel summary', `${kernelBase}/summary.json`, manifest.artifacts.kernelSummarySha256),
-    verifySha256('fixture summary', `${fixtureRoot}/summary.json`, manifest.artifacts.fixtureSummarySha256),
+    verifySha256('kernel summary', `${kernelBase}/summary.json`, manifest.artifacts.kernelSummarySha256, signal),
+    verifySha256('fixture summary', `${fixtureRoot}/summary.json`, manifest.artifacts.fixtureSummarySha256, signal),
   ]);
 }
 function nowMs(): number {
@@ -208,9 +215,9 @@ function findKernel(summary: KernelSummaryRow[], labelPrefix: string, epilogue: 
   if (!row) throw new Error(`No ${labelPrefix}/${epilogue} kernel in kernel summary`);
   return row;
 }
-async function loadKernels(kernelBase: string, verifier?: ArtifactVerifier): Promise<SquareformerTvmFullLayerKernels & SquareformerTvmPolicyHeadKernels> {
+async function loadKernels(kernelBase: string, source?: ArtifactSource): Promise<SquareformerTvmFullLayerKernels & SquareformerTvmPolicyHeadKernels> {
   const base = stripSlash(kernelBase);
-  const summary = await loadJson<KernelSummaryRow[]>(`${base}/summary.json`, verifier);
+  const summary = await loadJson<KernelSummaryRow[]>(`${base}/summary.json`, source);
   const qkv = findKernel(summary, 'attn_qkv_', 'bias');
   const dense1 = findKernel(summary, 'ffn_dense1_gelu_', 'bias-gelu');
   const dense2 = findKernel(summary, 'ffn_dense2_residual_', 'bias-residual');
@@ -218,18 +225,18 @@ async function loadKernels(kernelBase: string, verifier?: ArtifactVerifier): Pro
   const policyPair = findKernel(summary, 'policy_pair_proj_', 'bias');
   const policyPromo = findKernel(summary, 'policy_proj_', 'bias');
   return {
-    qkvBias: await loadText(`${base}/${qkv.file}`, verifier),
-    dense1Gelu: await loadText(`${base}/${dense1.file}`, verifier),
-    dense2Residual: await loadText(`${base}/${dense2.file}`, verifier),
-    attnOutResidual: await loadText(`${base}/${attnOut.file}`, verifier),
-    policyPairProj: await loadText(`${base}/${policyPair.file}`, verifier),
-    policyPromoProj: await loadText(`${base}/${policyPromo.file}`, verifier),
+    qkvBias: await loadText(`${base}/${qkv.file}`, source),
+    dense1Gelu: await loadText(`${base}/${dense1.file}`, source),
+    dense2Residual: await loadText(`${base}/${dense2.file}`, source),
+    attnOutResidual: await loadText(`${base}/${attnOut.file}`, source),
+    policyPairProj: await loadText(`${base}/${policyPair.file}`, source),
+    policyPromoProj: await loadText(`${base}/${policyPromo.file}`, source),
   };
 }
 
 export class SquareformerTvmHybridEvaluator implements Evaluator {
   private readonly queue = new ExclusiveQueue();
-  private destroyed = false;
+  private destroyed?: Promise<void>;
   private failureReason: string | undefined;
   private device: GPUDevice;
   private meta: SquareFormerMeta;
@@ -270,19 +277,20 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
     device: GPUDevice,
     meta: SquareFormerMeta,
     urls: { kernelBase?: string; fixtureRoot?: string; manifestUrl?: string } = {},
+    signal?: AbortSignal,
   ): Promise<SquareformerTvmHybridEvaluator> {
     let kernelBase = stripSlash(urls.kernelBase ?? '/tvm/squareformer-ffn');
     let fixtureRoot = stripSlash(urls.fixtureRoot ?? '/tvm/ffn-fixtures');
     let manifest: HybridRuntimeManifest | undefined;
     if (urls.manifestUrl) {
-      manifest = await loadJson<HybridRuntimeManifest>(urls.manifestUrl);
+      manifest = await loadJson<HybridRuntimeManifest>(urls.manifestUrl, { signal });
       validateManifest(manifest, meta);
       kernelBase = resolveManifestPath(urls.manifestUrl, urls.kernelBase ?? manifest.kernelBase, kernelBase);
       fixtureRoot = resolveManifestPath(urls.manifestUrl, urls.fixtureRoot ?? manifest.fixtureRoot, fixtureRoot);
-      await verifyManifestArtifacts(manifest, kernelBase, fixtureRoot);
+      await verifyManifestArtifacts(manifest, kernelBase, fixtureRoot, signal);
     }
-    const verifier = createArtifactVerifier(manifest, urls.manifestUrl);
-    const [kernels, root] = await Promise.all([loadKernels(kernelBase, verifier), loadJson<FixtureRootSummary>(`${fixtureRoot}/summary.json`, verifier)]);
+    const source = createArtifactSource(manifest, urls.manifestUrl, signal);
+    const [kernels, root] = await Promise.all([loadKernels(kernelBase, source), loadJson<FixtureRootSummary>(`${fixtureRoot}/summary.json`, source)]);
     if (!root.layers.length) throw new Error(`No layers in ${fixtureRoot}/summary.json`);
     assertExpected('layers', manifest?.expected?.layers, root.layers.length);
     const firstShape = root.layers[0]?.shape;
@@ -292,20 +300,20 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
     const layerFixtures = await Promise.all(
       root.layers.map(async (layerInfo) => {
         const base = `${fixtureRoot}/${layerInfo.path}`;
-        const summary = await loadJson<FixtureSummary>(`${base}/${layerInfo.summary}`, verifier);
+        const summary = await loadJson<FixtureSummary>(`${base}/${layerInfo.summary}`, source);
         const weights: SquareformerTvmFullLayerWeights = {
-          layerNormWeight: await loadF32(`${base}/${summary.arrays.layerNormWeight.file}`, verifier),
-          layerNormBias: await loadF32(`${base}/${summary.arrays.layerNormBias.file}`, verifier),
-          dense1Weight: await loadF32(`${base}/${summary.arrays.dense1Weight.file}`, verifier),
-          dense1Bias: await loadF32(`${base}/${summary.arrays.dense1Bias.file}`, verifier),
-          dense2Weight: await loadF32(`${base}/${summary.arrays.dense2Weight.file}`, verifier),
-          dense2Bias: await loadF32(`${base}/${summary.arrays.dense2Bias.file}`, verifier),
-          attnOutWeight: await loadF32(`${base}/${summary.arrays.attnOutWeight.file}`, verifier),
-          attnOutBias: await loadF32(`${base}/${summary.arrays.attnOutBias.file}`, verifier),
-          qkvWeight: await loadF32(`${base}/${summary.arrays.attnQkvWeight.file}`, verifier),
-          qkvBias: await loadF32(`${base}/${summary.arrays.attnQkvBias.file}`, verifier),
-          n1LayerNormWeight: await loadF32(`${base}/${summary.arrays.n1LayerNormWeight.file}`, verifier),
-          n1LayerNormBias: await loadF32(`${base}/${summary.arrays.n1LayerNormBias.file}`, verifier),
+          layerNormWeight: await loadF32(`${base}/${summary.arrays.layerNormWeight.file}`, source),
+          layerNormBias: await loadF32(`${base}/${summary.arrays.layerNormBias.file}`, source),
+          dense1Weight: await loadF32(`${base}/${summary.arrays.dense1Weight.file}`, source),
+          dense1Bias: await loadF32(`${base}/${summary.arrays.dense1Bias.file}`, source),
+          dense2Weight: await loadF32(`${base}/${summary.arrays.dense2Weight.file}`, source),
+          dense2Bias: await loadF32(`${base}/${summary.arrays.dense2Bias.file}`, source),
+          attnOutWeight: await loadF32(`${base}/${summary.arrays.attnOutWeight.file}`, source),
+          attnOutBias: await loadF32(`${base}/${summary.arrays.attnOutBias.file}`, source),
+          qkvWeight: await loadF32(`${base}/${summary.arrays.attnQkvWeight.file}`, source),
+          qkvBias: await loadF32(`${base}/${summary.arrays.attnQkvBias.file}`, source),
+          n1LayerNormWeight: await loadF32(`${base}/${summary.arrays.n1LayerNormWeight.file}`, source),
+          n1LayerNormBias: await loadF32(`${base}/${summary.arrays.n1LayerNormBias.file}`, source),
         };
         const block = await SquareformerTvmFullLayerWebgpuBlock.create(
           device as never,
@@ -315,7 +323,7 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
           { n1: summary.n1LayerNormEpsilon ?? 1e-5, n2: summary.layerNormEpsilon ?? 1e-5 },
         );
         // The static attention bias is a read-only per-layer buffer: upload it once here, not per evaluation.
-        block.uploadAttentionBias(await loadF32(`${base}/${summary.arrays.staticAttentionBias.file}`, verifier));
+        block.uploadAttentionBias(await loadF32(`${base}/${summary.arrays.staticAttentionBias.file}`, source));
         return { summary, base, block };
       }),
     );
@@ -323,33 +331,33 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
     const first = layerFixtures[0]!;
     const last = layerFixtures[layerFixtures.length - 1]!;
     const stemWeights: SquareformerTvmInputStemWeights = {
-      pieceEmb: await loadF32(`${first.base}/${first.summary.arrays.pieceEmb.file}`, verifier),
-      stmEmb: await loadF32(`${first.base}/${first.summary.arrays.stmEmb.file}`, verifier),
-      flagLinearWeight: await loadF32(`${first.base}/${first.summary.arrays.flagLinearWeight.file}`, verifier),
-      flagLinearBias: await loadF32(`${first.base}/${first.summary.arrays.flagLinearBias.file}`, verifier),
-      rankEmb: await loadF32(`${first.base}/${first.summary.arrays.rankEmb.file}`, verifier),
-      fileEmb: await loadF32(`${first.base}/${first.summary.arrays.fileEmb.file}`, verifier),
-      colorEmb: await loadF32(`${first.base}/${first.summary.arrays.colorEmb.file}`, verifier),
-      squareEmb: await loadF32(`${first.base}/${first.summary.arrays.squareEmb.file}`, verifier),
-      repLinearWeight: await loadF32(`${first.base}/${first.summary.arrays.repLinearWeight.file}`, verifier),
-      attackNormWeight: await loadF32(`${first.base}/${first.summary.arrays.attackNormWeight.file}`, verifier),
-      attackNormBias: await loadF32(`${first.base}/${first.summary.arrays.attackNormBias.file}`, verifier),
-      attackProjWeight: await loadF32(`${first.base}/${first.summary.arrays.attackProjWeight.file}`, verifier),
-      pos: await loadF32(`${first.base}/${first.summary.arrays.pos.file}`, verifier),
+      pieceEmb: await loadF32(`${first.base}/${first.summary.arrays.pieceEmb.file}`, source),
+      stmEmb: await loadF32(`${first.base}/${first.summary.arrays.stmEmb.file}`, source),
+      flagLinearWeight: await loadF32(`${first.base}/${first.summary.arrays.flagLinearWeight.file}`, source),
+      flagLinearBias: await loadF32(`${first.base}/${first.summary.arrays.flagLinearBias.file}`, source),
+      rankEmb: await loadF32(`${first.base}/${first.summary.arrays.rankEmb.file}`, source),
+      fileEmb: await loadF32(`${first.base}/${first.summary.arrays.fileEmb.file}`, source),
+      colorEmb: await loadF32(`${first.base}/${first.summary.arrays.colorEmb.file}`, source),
+      squareEmb: await loadF32(`${first.base}/${first.summary.arrays.squareEmb.file}`, source),
+      repLinearWeight: await loadF32(`${first.base}/${first.summary.arrays.repLinearWeight.file}`, source),
+      attackNormWeight: await loadF32(`${first.base}/${first.summary.arrays.attackNormWeight.file}`, source),
+      attackNormBias: await loadF32(`${first.base}/${first.summary.arrays.attackNormBias.file}`, source),
+      attackProjWeight: await loadF32(`${first.base}/${first.summary.arrays.attackProjWeight.file}`, source),
+      pos: await loadF32(`${first.base}/${first.summary.arrays.pos.file}`, source),
     };
     const policyWeights: SquareformerTvmPolicyHeadWeights = {
-      policyFromWeight: await loadF32(`${last.base}/${last.summary.arrays.policyFromWeight.file}`, verifier),
-      policyFromBias: await loadF32(`${last.base}/${last.summary.arrays.policyFromBias.file}`, verifier),
-      policyToWeight: await loadF32(`${last.base}/${last.summary.arrays.policyToWeight.file}`, verifier),
-      policyToBias: await loadF32(`${last.base}/${last.summary.arrays.policyToBias.file}`, verifier),
-      policyPromoWeight: await loadF32(`${last.base}/${last.summary.arrays.policyPromoWeight.file}`, verifier),
-      policyPromoBias: await loadF32(`${last.base}/${last.summary.arrays.policyPromoBias.file}`, verifier),
+      policyFromWeight: await loadF32(`${last.base}/${last.summary.arrays.policyFromWeight.file}`, source),
+      policyFromBias: await loadF32(`${last.base}/${last.summary.arrays.policyFromBias.file}`, source),
+      policyToWeight: await loadF32(`${last.base}/${last.summary.arrays.policyToWeight.file}`, source),
+      policyToBias: await loadF32(`${last.base}/${last.summary.arrays.policyToBias.file}`, source),
+      policyPromoWeight: await loadF32(`${last.base}/${last.summary.arrays.policyPromoWeight.file}`, source),
+      policyPromoBias: await loadF32(`${last.base}/${last.summary.arrays.policyPromoBias.file}`, source),
     };
     const valueWeights: SquareformerTvmValueHeadWeights = {
-      wdlWeight: await loadF32(`${last.base}/${last.summary.arrays.wdlWeight.file}`, verifier),
-      wdlBias: await loadF32(`${last.base}/${last.summary.arrays.wdlBias.file}`, verifier),
-      qWeight: await loadF32(`${last.base}/${last.summary.arrays.qWeight.file}`, verifier),
-      qBias: await loadF32(`${last.base}/${last.summary.arrays.qBias.file}`, verifier),
+      wdlWeight: await loadF32(`${last.base}/${last.summary.arrays.wdlWeight.file}`, source),
+      wdlBias: await loadF32(`${last.base}/${last.summary.arrays.wdlBias.file}`, source),
+      qWeight: await loadF32(`${last.base}/${last.summary.arrays.qWeight.file}`, source),
+      qBias: await loadF32(`${last.base}/${last.summary.arrays.qBias.file}`, source),
     };
     const [stem, policy, value, legal] = await Promise.all([
       SquareformerTvmInputStemWebgpuBlock.create(device as never, stemWeights),
@@ -357,6 +365,9 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
       SquareformerTvmValueHeadWebgpuBlock.create(device as never, valueWeights, last.summary.shape),
       SquareformerTvmLegalPolicyGatherWebgpuBlock.createDynamic(device as never, Math.max(1, Number(meta.max_legal_moves ?? 256)), meta.policy_size),
     ]);
+    // Shader compilation is not abortable; never hand a cancelled owner an evaluator.
+    // The caller still owns the device here and destroys it, freeing every block.
+    signal?.throwIfAborted();
     return new SquareformerTvmHybridEvaluator(
       device,
       meta,
@@ -442,10 +453,10 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
     return out;
   }
 
-  /** Frees the GPU buffers and the owned device once in-flight evaluations have settled. */
-  destroy(): void {
-    if (this.destroyed) return;
-    this.destroyed = true;
+  /** Frees the GPU buffers and the owned device once in-flight evaluations have
+   * settled; resolves only then, so a retirement barrier holds until the device is gone. */
+  destroy(): Promise<void> {
+    if (this.destroyed) return this.destroyed;
     const release = () => {
       for (const block of [this.stem, ...this.layers, this.policy, this.value, this.legal]) {
         try {
@@ -460,6 +471,7 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
         /* best effort */
       }
     };
-    void this.queue.idle().then(release);
+    this.destroyed = this.queue.idle().then(release);
+    return this.destroyed;
   }
 }

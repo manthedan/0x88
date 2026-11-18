@@ -451,8 +451,15 @@ export const FEATURES = [
     id: 'analysis.engines',
     routes: ['analysis'],
     ids: [
+      'analysisStatus',
       'analyze',
+      'analyzeLabel',
       'stop',
+      'stopProgress',
+      'analysisSearchProgress',
+      'downloadProgress',
+      'runtimeWarning',
+      'runtimeAudit',
       'manageEngines',
       'engineCount',
       'addEngine',
@@ -718,7 +725,7 @@ export const FEATURES = [
   {
     id: 'arena.scoreboard',
     routes: ['arena'],
-    ids: ['editSetup', 'stop', 'matchScore', 'pairing', 'openingPairsSection', 'pairMatchup', 'openingPairs', 'gameChips', 'crosstableSection', 'crosstable'],
+    ids: ['editSetup', 'stop', 'matchScore', 'pairing', 'openingPairsSection', 'pairMatchup', 'openingPairs', 'gameChips', 'crosstableSection', 'crosstable', 'scoreboardTitle', 'engineOutputsSection', 'engineRaw', 'movesBlock'],
     actions: [
       { name: 'stop', when: '#stop', steps: [{ do: 'click', target: '#stop' }], weight: 0.5 },
       { name: 'editSetup', when: '#editSetup', steps: [{ do: 'click', target: '#editSetup' }] },
@@ -756,6 +763,9 @@ export const FEATURES = [
       'arenaConcurrencyNote',
       'startSummary',
       'start',
+      'setupSummaryText',
+      'cancelSetupLoad',
+      'runtimeAuditInfo',
     ],
     actions: [
       { name: 'pickSeat', when: '.seat-fam', steps: [{ do: 'select', target: '.seat-fam', values: ['sf', 'berserk', 'plentychess'], pick: true }] },

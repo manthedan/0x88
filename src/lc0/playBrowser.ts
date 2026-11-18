@@ -8,9 +8,9 @@ import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { sanToMove } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
-import { buttonEl, el, maybeEl, selectEl } from '../features/playDom.ts';
+import { routeDom } from '../features/dom.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
-import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import type { Evaluator } from '../nn/evaluator.ts';
 import {
   BROWSER_RUNTIME_AUDIT_EVENT,
   type BrowserRuntimeAuditDetail,
@@ -23,9 +23,9 @@ import { chooseMove } from '../search/puct.ts';
 import { acknowledgeInputTransfer, takePlayHandoff, writeAnalysisHandoff } from './analysisHandoff.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { acquireBigNetSearcherAsync, type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
+import { acquireBigNetSearcherAsync, type BigNetKey, peekBigNetSearcher, preparePhoneBigNet, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
-import { htmlEscape } from './browserDom.ts';
+import { createBrowserDom, htmlEscape } from './browserDom.ts';
 import {
   BIG_NETS,
   type Bt4SearchOptions,
@@ -39,11 +39,14 @@ import {
   probeBt4Support,
   T3_NET,
 } from './bt4Engine.ts';
+import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
 import { writeClipboard } from './clipboard.ts';
 import { inactiveCpuEnginesToEvict, PendingCpuNewGames } from './cpuEngineResidency.ts';
+import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryClass.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
+import { awaitEngineRetirements, trackEngineRetirement } from './engineRetirement.ts';
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
@@ -75,6 +78,8 @@ import { uciGameHistory } from './uciGameHistory.ts';
 import { createWakeLockManager } from './wakeLock.ts';
 import { createWorkspaceAutosave, decodePlaySnapshot, readWorkspace } from './workspaceAutosave.ts';
 
+const pageDom = createBrowserDom();
+const { buttonEl, el, maybeEl, selectEl } = routeDom<'play'>(pageDom);
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 // v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
@@ -140,15 +145,16 @@ const LQO_WHITE_SEARCH_CONTEMPT_LIMIT = 40;
 const LQO_BLACK_SEARCH_CONTEMPT_LIMIT = 32;
 
 // ---------------------------------------------------------------------------
-// Module-level engine caches (intentionally persistent across mount/unmount
-// to avoid re-downloading engines on navigation)
+// Module-level engine owners. Neural sessions retire on switch/unmount;
+// verified model bytes remain cached independently of native session residency.
 // ---------------------------------------------------------------------------
 const BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3', 'lqo'];
 let lc0Searcher: Lc0PuctSearcher | null = null;
 let lc0LoadPromise: Promise<Lc0PuctSearcher> | null = null;
-let centipawnEvaluator: CachedEvaluator | null = null;
-let centipawnLoadPromise: Promise<Evaluator> | null = null;
-let centipawnEvaluatorGeneration = 0;
+let lc0SmallOwner: { evaluator: CachedLc0Evaluator | null; abort: AbortController } = { evaluator: null, abort: new AbortController() };
+let maia3Abort: AbortController | null = null;
+const PLAY_CENTIPAWN_KEY = 's4fix-v-ema';
+const playCentipawn = createCentipawnEvaluatorCache(createBrowserSquareformerRuntimeEvaluator);
 const playRuntimeFallbackAudits = new Map<string, BrowserRuntimeAuditDetail>();
 const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
 const pendingCpuNewGames = new PendingCpuNewGames();
@@ -558,10 +564,66 @@ function ctxHideDownloadProgress(): void {
   hideLoadingProgress(container);
 }
 
+function retireUnusedPlayNeuralEngines(option?: PlayEngineOption): Promise<void> {
+  if (option?.family !== 'centipawn') playCentipawn.clear();
+  if (option?.family !== 'maia3' && maia3Promise) {
+    const pending = maia3Promise;
+    maia3Abort?.abort();
+    maia3Abort = null;
+    maia3Promise = null;
+    maia3Status = null;
+    // An aborted initialization publishes its worker cleanup through onInitCleanup.
+    trackEngineRetirement(
+      pending.then(
+        (evaluator) => evaluator.dispose(),
+        () => undefined,
+      ),
+    );
+  }
+  if (!(option?.family === 'lc0' && option.variant === 'small') && lc0LoadPromise) {
+    const pending = lc0LoadPromise;
+    const owner = lc0SmallOwner;
+    lc0SmallOwner = { evaluator: null, abort: new AbortController() };
+    lc0LoadPromise = null;
+    lc0Searcher = null;
+    owner.abort.abort();
+    trackEngineRetirement(
+      pending.then(
+        async (searcher) => {
+          searcher.resetTree();
+          await owner.evaluator?.dispose();
+          owner.evaluator = null;
+        },
+        () => undefined,
+      ),
+    );
+  }
+  releaseUnusedBigNetSearchers(option?.family === 'lc0' && option.variant !== 'small' ? [option.variant as BigNetKey] : [], 0);
+  return awaitEngineRetirements();
+}
+
+function disposePlayCpuEngines(): void {
+  for (const id of cpuEnginePromises.keys()) disposeCachedCpuEngine(id, true);
+}
+
+function ctxAcquireBigNet(key: BigNetKey, signal: AbortSignal) {
+  const reclaim = preparePhoneBigNet(key, 2048, signal, disposePlayCpuEngines, () => ctxSetEngineNote('Freeing memory…'));
+  if (!reclaim) return acquireBigNetSearcherAsync(key, false, signal);
+  return reclaim.then(
+    () => acquireBigNetSearcherAsync(key, false, signal),
+    (error: unknown) => {
+      // A cancelled wait (resign, new game, opponent change) must not leave the note on the next screen.
+      if (maybeEl('engineNote')?.textContent === 'Freeing memory…') ctxSetEngineNote('');
+      throw error;
+    },
+  );
+}
+
 function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
   if (lc0Searcher) return Promise.resolve(lc0Searcher);
   if (!lc0LoadPromise) {
     const uiGeneration = ctx.enginePreparationGeneration;
+    const owner = lc0SmallOwner;
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Lc0 small net…');
     lc0LoadPromise = (async () => {
       // Download progress hides only once the session exists: on Apple WebGPU a
@@ -571,17 +633,20 @@ function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
         load: {
           cache: true,
           requestPersistentStorage: true,
+          signal: owner.abort.signal,
           onProgress: (loaded, total) => {
             if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxShowDownloadProgress('Lc0 small net', loaded, total);
           },
         },
       });
       if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxHideDownloadProgress();
-      lc0Searcher = new Lc0PuctSearcher(new CachedLc0Evaluator(evaluator, { maxEntries: 2048 }));
+      owner.evaluator = new CachedLc0Evaluator(evaluator, { maxEntries: 2048 });
+      const loaded = new Lc0PuctSearcher(owner.evaluator);
+      if (owner === lc0SmallOwner) lc0Searcher = loaded;
       if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
-      return lc0Searcher;
+      return loaded;
     })().catch((error: Error) => {
-      lc0LoadPromise = null;
+      if (owner === lc0SmallOwner) lc0LoadPromise = null;
       if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) {
         ctxHideDownloadProgress();
         ctxSetEngineNote(`Lc0 load failed: ${error.message}`, true);
@@ -593,65 +658,52 @@ function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
 }
 
 function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
-  if (centipawnEvaluator) return Promise.resolve(centipawnEvaluator);
-  if (!centipawnLoadPromise) {
-    const evaluatorGeneration = centipawnEvaluatorGeneration;
-    const uiGeneration = ctx.enginePreparationGeneration;
-    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Centipawn…');
-    centipawnLoadPromise = createBrowserSquareformerRuntimeEvaluator(
-      {
-        id: 's4fix-v-ema',
-        modelId: 's4fix-v-ema',
-        label: 'Centipawn',
-        onnx: CENTIPAWN_MODEL_URL,
-        meta: CENTIPAWN_META_URL,
-        runtime: 'ort',
-      },
-      {
-        runtime: 'ort',
-        fallback: true,
-        audit: { surface: 'play' },
-      },
-    )
-      .then((loaded) => {
-        if (ctxIsDisposed(ctx) || evaluatorGeneration !== centipawnEvaluatorGeneration) {
-          (loaded.evaluator as Evaluator & { destroy?: () => void }).destroy?.();
-          const error = new Error('Centipawn load discarded after Play teardown');
-          error.name = 'AbortError';
-          throw error;
-        }
-        centipawnEvaluator = new CachedEvaluator(loaded.evaluator, {
-          maxEntries: 4096,
-          includeHistory: true,
-          includeLegalMoves: true,
-          label: `centipawn-play:${loaded.resolvedRuntime}`,
-        });
-        if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
-        return centipawnEvaluator;
-      })
-      .catch((error: Error) => {
-        if (evaluatorGeneration === centipawnEvaluatorGeneration) centipawnLoadPromise = null;
-        if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote(`Centipawn load failed: ${error.message}`, true);
-        throw error;
-      });
-  }
-  return centipawnLoadPromise;
+  const starting = !playCentipawn.has(PLAY_CENTIPAWN_KEY);
+  const uiGeneration = ctx.enginePreparationGeneration;
+  const loading = playCentipawn.get(
+    PLAY_CENTIPAWN_KEY,
+    {
+      spec: { id: 's4fix-v-ema', modelId: 's4fix-v-ema', label: 'Centipawn', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL, runtime: 'ort' },
+      options: { runtime: 'ort', fallback: true, audit: { surface: 'play' } },
+      maxEntries: 4096,
+      label: 'centipawn-play:ort',
+    },
+    () => !ctxIsDisposed(ctx),
+  );
+  if (!starting) return loading;
+  if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Centipawn…');
+  return loading.then(
+    (evaluator) => {
+      if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
+      return evaluator;
+    },
+    (error: Error) => {
+      if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote(`Centipawn load failed: ${error.message}`, true);
+      throw error;
+    },
+  );
 }
 
 async function ctxEnsureMaia3(ctx: PlayContext): Promise<Maia3BrowserEvaluator> {
   if (maia3Promise) {
     const cached = maia3Promise;
+    const owner = maia3Abort;
     const evaluator = await cached;
+    if (owner?.signal.aborted) throw new DOMException('Maia3 owner retired', 'AbortError');
     if (!evaluator.failure) return evaluator;
     if (maia3Promise === cached) maia3Promise = null;
     return ctxEnsureMaia3(ctx);
   }
   const uiGeneration = ctx.enginePreparationGeneration;
+  const owner = new AbortController();
+  maia3Abort = owner;
   maia3Promise = (async () => {
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Maia3 human model…');
     const evaluator = await Maia3BrowserEvaluator.create({
       selfElo: ctx.opponent.active.maiaElo,
       oppoElo: ctx.opponent.active.maiaElo,
+      signal: owner.signal,
+      onInitCleanup: trackEngineRetirement,
       onProgress: (loaded, total) => {
         if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxShowDownloadProgress('Maia3', loaded, total);
       },
@@ -660,11 +712,11 @@ async function ctxEnsureMaia3(ctx: PlayContext): Promise<Maia3BrowserEvaluator> 
     const load = evaluator.modelLoad;
     const origin = load.cacheStatus === 'hit' ? 'from cache' : load.cacheStatus === 'miss' ? 'downloaded' : 'loaded';
     const integrity = load.sha256Valid === true ? ', sha256 ✓' : load.sha256Valid === false ? ', sha256 MISMATCH' : '';
-    maia3Status = `Model ${origin} (${((load.bytes ?? 0) / 1e6).toFixed(0)}MB${integrity})`;
+    if (owner === maia3Abort) maia3Status = `Model ${origin} (${((load.bytes ?? 0) / 1e6).toFixed(0)}MB${integrity})`;
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
     return evaluator;
   })().catch((error: Error) => {
-    maia3Promise = null;
+    if (owner === maia3Abort) maia3Promise = null;
     if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) {
       ctxHideDownloadProgress();
       ctxSetEngineNote(`Maia3 load failed: ${error.message}`, true);
@@ -720,16 +772,18 @@ function evictInactiveCpuEngines(activeId: string): void {
   for (const evictId of inactiveCpuEnginesToEvict([...cpuEnginePromises.keys()], activeId)) disposeCachedCpuEngine(evictId);
 }
 
-function disposeCachedCpuEngine(id: string): void {
+function disposeCachedCpuEngine(id: string, track = false): void {
   const pending = cpuEnginePromises.get(id);
   if (!pending) return;
   cpuEnginePromises.delete(id);
   pendingCpuNewGames.forget(id);
-  void pending.then((engine) => engine.dispose?.()).catch(() => undefined);
+  const disposal = pending.then((engine) => engine.dispose?.());
+  if (track) trackEngineRetirement(disposal);
+  else void disposal.catch(() => undefined);
 }
 
 async function ctxPreloadLqoAfterBookMove(ctx: PlayContext, signal: AbortSignal): Promise<boolean> {
-  const searcher = await acquireBigNetSearcherAsync('lqo', false, signal);
+  const searcher = await ctxAcquireBigNet('lqo', signal);
   if (searcher.loaded) return false;
   const label = `Lc0 ${searcher.config.name}`;
   ctxShowDownloadProgress(label, undefined, undefined, 'Loading in background');
@@ -753,8 +807,23 @@ async function ctxPreloadLqoAfterBookMove(ctx: PlayContext, signal: AbortSignal)
   return true;
 }
 
+function ctxPreloadLqoInBackground(ctx: PlayContext, signal: AbortSignal): boolean {
+  if (peekBigNetSearcher('lqo')?.isInitializedFor({ evalCacheEntries: 2048 })) return false;
+  // The book has already supplied the answer; reclaim and init need not hold the move.
+  void Promise.resolve()
+    .then(() => {
+      if (!signal.aborted && !ctxIsDisposed(ctx)) return ctxPreloadLqoAfterBookMove(ctx, signal);
+    })
+    .catch((error: Error) => {
+      if (!signal.aborted && !ctxIsDisposed(ctx) && !ctx.engineThinking) ctxSetEngineNote(`LQO background load failed: ${error.message}`, true);
+    });
+  return true;
+}
+
 async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Promise<string | null> {
   const option = ctxSelectedEngine(ctx);
+  await retireUnusedPlayNeuralEngines(option);
+  if (signal.aborted || ctx.disposed) return null;
   const preferences = ctx.opponent.active;
   const level = preferences.level;
   const visitsOrDepth = ctxStrengthFor(option, level);
@@ -763,12 +832,12 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     if (ctx.humanColor === 'w') {
       const bookMove = lqoBlackBookMove(ctx.board, ctx.moves.length, historyUcis);
       if (bookMove) {
-        const preloading = await ctxPreloadLqoAfterBookMove(ctx, signal);
+        const preloading = isMemoryConstrainedDevice() ? ctxPreloadLqoInBackground(ctx, signal) : await ctxPreloadLqoAfterBookMove(ctx, signal);
         ctxSetEngineNote(`LQO opening book: ${bookMove}${preloading ? ' · loading model in background' : ''}`);
         return bookMove;
       }
     } else if (ctx.moves.length === 0) {
-      const searcher = await acquireBigNetSearcherAsync('lqo', false, signal);
+      const searcher = await ctxAcquireBigNet('lqo', signal);
       let progressShown = false;
       if (!searcher.loaded) {
         ctxSetEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
@@ -794,7 +863,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     } else {
       const bookMove = lqoWhiteBookMove(ctx.board, ctx.moves.length, historyUcis);
       if (bookMove) {
-        const preloading = await ctxPreloadLqoAfterBookMove(ctx, signal);
+        const preloading = isMemoryConstrainedDevice() ? ctxPreloadLqoInBackground(ctx, signal) : await ctxPreloadLqoAfterBookMove(ctx, signal);
         ctxSetEngineNote(`LQO opening book: ${bookMove}${preloading ? ' · loading model in background' : ''}`);
         return bookMove;
       }
@@ -871,7 +940,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     }
   }
   if (option.family === 'lc0') {
-    const searcher = await acquireBigNetSearcherAsync(option.variant as BigNetKey, false, signal);
+    const searcher = await ctxAcquireBigNet(option.variant as BigNetKey, signal);
     if (!searcher.loaded && !signal.aborted && !ctxIsDisposed(ctx)) {
       ctxSetEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
       ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, undefined, undefined, 'Preparing');
@@ -929,7 +998,7 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
   const signal = ctx.abort.signal;
   if (ctx.restoredDownloadEngineId && !(await ctxCheckRestoredDownloadConsent(ctx))) return;
   if (signal.aborted || ctx.disposed) return;
-  releaseUnusedBigNetSearchers(option.family === 'lc0' && option.variant !== 'small' ? [option.variant as BigNetKey] : [], 0);
+  const retirement = retireUnusedPlayNeuralEngines(option);
   const generation = ++ctx.enginePreparationGeneration;
   ctx.engineReady = false;
   ctx.preparingEngine = true;
@@ -937,6 +1006,8 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
   ctxSetEngineNote(resumingGame ? `Checking ${option.label} before play resumes…` : `Preparing ${option.label} before the first move…`);
   ctxRender(ctx);
   try {
+    await retirement;
+    if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration) return;
     if (option.family === 'maia3') {
       const player = await ctxEnsureMaia3(ctx);
       await player.chooseMove(
@@ -962,7 +1033,7 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
       if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration || option.id !== ctxSelectedEngine(ctx).id) return;
       searcher.resetTree();
     } else if (option.family === 'lc0') {
-      const searcher = await acquireBigNetSearcherAsync(option.variant as BigNetKey, false, signal);
+      const searcher = await ctxAcquireBigNet(option.variant as BigNetKey, signal);
       const lqoOptions = option.variant === 'lqo' ? ctxLqoSearchOptions(ctx) : null;
       await searcher.search(
         { positions: ctx.positions },
@@ -2318,7 +2389,7 @@ function ctxInit(ctx: PlayContext): void {
   } else if (!ctx.gameOver) ctxPrepareOrStartEngine(ctx);
 }
 
-function hasPlayBrowserDom(): boolean {
+function hasPlayBrowserDom(root: HTMLElement): boolean {
   const required = [
     'positionNotice',
     'positionNoticeText',
@@ -2377,7 +2448,7 @@ function hasPlayBrowserDom(): boolean {
     'moveForm',
     'moveInput',
   ];
-  const missing = required.filter((id) => !document.getElementById(id));
+  const missing = required.filter((id) => root.id !== id && !root.querySelector(`[id=${JSON.stringify(id)}]`));
   if (!missing.length) return true;
   console.warn(`Play browser mount skipped; missing required DOM element(s): ${missing.map((id) => `#${id}`).join(', ')}`);
   return false;
@@ -2386,13 +2457,16 @@ function hasPlayBrowserDom(): boolean {
 let lastPlayMountHref: string | null = null;
 
 export function mountPlayBrowser(): () => void {
-  if (!hasPlayBrowserDom()) return () => undefined;
+  const root = document.getElementById('main');
+  if (!root || !hasPlayBrowserDom(root)) return () => undefined;
   const href = location.href;
   if (lastPlayMountHref !== null && lastPlayMountHref !== href) {
     location.reload();
     return () => undefined;
   }
   lastPlayMountHref = href;
+  const retireCpuOnUnmount = isMemoryConstrainedDevice() && phoneReclaimSettings().retireCpu;
+  const releaseDom = pageDom.mount(root);
   const ctx = createPlayContext();
   ctxInit(ctx);
 
@@ -2402,43 +2476,42 @@ export function mountPlayBrowser(): () => void {
   (globalThis as unknown as { __playUserMove?: (from: string, to: string) => void }).__playUserMove = hook;
 
   return () => {
-    ctx.autosave?.flush();
-    ctx.autosave = null;
-    ctx.disposed = true;
-    ctx.consentAbort.abort();
-    ctxCancelEngineTurn(ctx);
-    ctx.abort.abort();
-    releaseUnusedBigNetSearchers([], 0);
-    centipawnEvaluatorGeneration += 1;
-    centipawnEvaluator?.clear();
-    const destroyCentipawn = (centipawnEvaluator?.inner as (Evaluator & { destroy?: () => void }) | undefined)?.destroy;
-    if (typeof destroyCentipawn === 'function') destroyCentipawn.call(centipawnEvaluator?.inner);
-    centipawnEvaluator = null;
-    centipawnLoadPromise = null;
-    playRuntimeFallbackAudits.clear();
-    // Stormphrax reserves a 512 MiB WASM heap, so unlike the smaller CPU
-    // engines it must not remain cached after this Play route is gone.
-    disposeCachedCpuEngine('stormphrax');
-    if (ctx.resignArmTimer) {
-      clearTimeout(ctx.resignArmTimer);
-      ctx.resignArmTimer = null;
+    try {
+      ctx.autosave?.flush();
+      ctx.autosave = null;
+      ctx.disposed = true;
+      ctx.consentAbort.abort();
+      ctxCancelEngineTurn(ctx);
+      ctx.abort.abort();
+      void retireUnusedPlayNeuralEngines().catch(() => undefined);
+      playRuntimeFallbackAudits.clear();
+      // Stormphrax reserves a 512 MiB WASM heap, so unlike the smaller CPU
+      // engines it must not remain cached after this Play route is gone.
+      if (retireCpuOnUnmount) disposePlayCpuEngines();
+      else disposeCachedCpuEngine('stormphrax');
+      if (ctx.resignArmTimer) {
+        clearTimeout(ctx.resignArmTimer);
+        ctx.resignArmTimer = null;
+      }
+      ctxDisarmNewGame(ctx);
+      ctx.keyboardBoard?.destroy();
+      ctx.keyboardBoard = null;
+      if (ctx.pendingPreferredEngineTimer) {
+        clearTimeout(ctx.pendingPreferredEngineTimer);
+        ctx.pendingPreferredEngineTimer = null;
+      }
+      (ctx.ground as { destroy?: () => void } | null)?.destroy?.();
+      ctx.ground = null;
+      for (const { target, type, fn } of ctx.listeners) {
+        target.removeEventListener(type, fn);
+      }
+      ctx.listeners = [];
+      // Only clear the test hook if it is still ours (a newer re-entrant mount
+      // may have installed its own).
+      const g = globalThis as unknown as { __playUserMove?: (from: string, to: string) => void };
+      if (g.__playUserMove === hook) delete g.__playUserMove;
+    } finally {
+      releaseDom();
     }
-    ctxDisarmNewGame(ctx);
-    ctx.keyboardBoard?.destroy();
-    ctx.keyboardBoard = null;
-    if (ctx.pendingPreferredEngineTimer) {
-      clearTimeout(ctx.pendingPreferredEngineTimer);
-      ctx.pendingPreferredEngineTimer = null;
-    }
-    (ctx.ground as { destroy?: () => void } | null)?.destroy?.();
-    ctx.ground = null;
-    for (const { target, type, fn } of ctx.listeners) {
-      target.removeEventListener(type, fn);
-    }
-    ctx.listeners = [];
-    // Only clear the test hook if it is still ours (a newer re-entrant mount
-    // may have installed its own).
-    const g = globalThis as unknown as { __playUserMove?: (from: string, to: string) => void };
-    if (g.__playUserMove === hook) delete g.__playUserMove;
   };
 }
