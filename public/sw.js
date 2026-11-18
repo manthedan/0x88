@@ -19,8 +19,15 @@
 // /sw.js?v=<SvelteKit build version>; a new version is a new script URL, so
 // each deploy installs a fresh worker whose activate step deletes every older
 // build's cache instead of letting hashed chunks accumulate forever.
-const CACHE_PREFIX = '0x88-app-';
-const LEGACY_CACHE_PREFIXES = ['0x88-app-shell-', 'lc0-app-shell-'];
+//
+// The prefix changes whenever cached pages from earlier builds would break
+// under this script. A worker registered at an old ?v= URL can reinstall
+// with new code under its old version; a new prefix still gives it a fresh
+// cache, and activate drops the old one. '0x88-app-' caches hold pages that
+// link the pre-Vite global stylesheets (/app-shell.css etc.), which this
+// worker no longer serves.
+const CACHE_PREFIX = '0x88-app2-';
+const LEGACY_CACHE_PREFIXES = ['0x88-app-', 'lc0-app-shell-'];
 const APP_SHELL_FALLBACK = '/app/play/';
 const NAVIGATION_TIMEOUT_MS = 3500;
 // Stylesheets are not here: they are Vite build output under /_app/immutable/.

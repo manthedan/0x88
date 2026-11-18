@@ -12,12 +12,12 @@ const repoRoot = process.cwd();
 test('the static adapter writes its fallback shell to 404.html with static not-found content', async (t) => {
   const out = await mkdtemp(join(tmpdir(), 'kit-fallback-'));
   t.after(() => rm(out, { recursive: true, force: true }));
-  // kit.config.js reads the output dir at import time; point it (and the adapter's rmSync) at a temp dir.
-  process.env.NETLIFY_R2_RELEASE_DIST = out;
-  const { default: config, STATIC_NOT_FOUND_ID } = await import('../kit.config.js');
+  // The adapter empties its output dir, so it gets the temp dir explicitly: never the configured
+  // dist-client or release dir, whatever the environment or module cache holds.
+  const { createAdapter, default: config, STATIC_NOT_FOUND_ID } = await import('../kit.config.js');
   const calls = [];
   const log = Object.assign(() => undefined, { info() {}, warn() {}, error() {}, minor() {} });
-  await config.adapter.adapt({
+  await createAdapter(out).adapt({
     config: { kit: {}, router: {} },
     routes: [],
     log,

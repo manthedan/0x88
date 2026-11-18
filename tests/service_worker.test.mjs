@@ -139,20 +139,22 @@ test('only navigations, hashed build output and small shell files are intercepte
 });
 
 test('the cache is named after the build version from the script URL', () => {
-  assert.equal(loadWorker({ version: '1794286670477' }).context.CACHE_NAME, '0x88-app-1794286670477');
-  assert.equal(loadWorker({ version: '../../etc' }).context.CACHE_NAME, '0x88-app-unversioned');
-  assert.equal(loadWorker({ version: '' }).context.CACHE_NAME, '0x88-app-unversioned');
+  assert.equal(loadWorker({ version: '1794286670477' }).context.CACHE_NAME, '0x88-app2-1794286670477');
+  assert.equal(loadWorker({ version: '../../etc' }).context.CACHE_NAME, '0x88-app2-unversioned');
+  assert.equal(loadWorker({ version: '' }).context.CACHE_NAME, '0x88-app2-unversioned');
 });
 
+// '0x88-app-200' is what a worker registered at ?v=200 before the prefix bump left behind: its
+// pages link stylesheets this script no longer serves, so reinstalling under ?v=200 must drop it.
 test('activate deletes earlier builds and the legacy shell caches, never the model cache', async () => {
   const worker = loadWorker({ version: '200', fetch: async () => basic(SHELL_HTML, { contentType: 'text/html' }) });
-  for (const name of ['0x88-app-shell-v2', 'lc0-app-shell-v1', '0x88-app-100', '0x88-app-200', 'lc0-browser-models-v1', 'other-cache']) {
+  for (const name of ['0x88-app-shell-v2', 'lc0-app-shell-v1', '0x88-app-100', '0x88-app-200', '0x88-app2-100', 'lc0-browser-models-v1', 'other-cache']) {
     await worker.caches.open(name);
   }
   await dispatchLifecycle(worker, 'install');
   assert.equal(worker.state.skipped, true);
   await dispatchLifecycle(worker, 'activate');
-  assert.deepEqual(await worker.caches.keys(), ['0x88-app-200', 'lc0-browser-models-v1', 'other-cache']);
+  assert.deepEqual(await worker.caches.keys(), ['lc0-browser-models-v1', 'other-cache', '0x88-app2-200']);
 });
 
 const SHELL_HTML = [
@@ -182,7 +184,7 @@ test('the shell page is precached with its build chunks and shell files', async 
   });
   await dispatchLifecycle(worker, 'install');
   assert.equal(worker.state.skipped, true);
-  const cache = worker.caches.stores.get('0x88-app-300');
+  const cache = worker.caches.stores.get('0x88-app2-300');
   assert.deepEqual([...cache.entries.keys()].sort(), [
     `${ORIGIN}/_app/immutable/assets/2.Cd.css`,
     `${ORIGIN}/_app/immutable/entry/start.C1MMvhS4.js`,
