@@ -10,6 +10,7 @@ export const HELP = `npm run perf:routes -- --baseline <built-dir|commit> --cand
   --driver URL                  existing Safari driver; never started/stopped
   --baseline-url URL --candidate-url URL  use already served build origins (mini transport)
   --journey NAME                repeatable subset (not a full merge gate)
+  --repeats 1                   same-build smoke only; cannot pass the merge gate
   --report DIR                  regenerate summary from runs.jsonl
   --build-only                  prepare archived product builds, no measurements
   --dry-run                     validate/print plan without building or writing
@@ -51,7 +52,9 @@ export function parseArgs(argv) {
     }
   }
   options.repeats = Number(options.repeats);
-  if (!Number.isInteger(options.repeats) || options.repeats < 5) throw Error('--repeats must be an integer >=5');
+  const selfComparison = options.baseline === options.candidate && options['baseline-url'] === options['candidate-url'];
+  if (!Number.isInteger(options.repeats) || (options.repeats < 5 && !(options.repeats === 1 && selfComparison)))
+    throw Error('--repeats must be an integer >=5 (or 1 for a same-build smoke)');
   if (!['chrome', 'safari', 'all'].includes(options.browser)) throw Error('Invalid --browser');
   if (options.benchlock && options['lock-dir']) throw Error('Use --benchlock OR --lock-dir');
   if (options.journeys.some((j) => !JOURNEYS.includes(j))) throw Error('Unknown --journey');
@@ -116,9 +119,11 @@ export const naturalVisibilityValid = (events, finalState) =>
 
 export const previewEnvironment = (port, env = process.env) => ({ ...env, PORT: String(port) });
 
+export const isJsTransfer = (r) => r.method !== 'HEAD' && /\.m?js(?:\?|$)/.test(r.path);
+
 export function jsBytesByRoute(requests, marks) {
   const bytes = Object.fromEntries(marks.map((mark) => [mark.route, 0]));
-  for (const r of requests.filter((r) => /\.(m?js)(?:\?|$)/.test(r.path))) {
+  for (const r of requests.filter(isJsTransfer)) {
     const route = marks.findLast((mark) => mark.at <= r.at)?.route ?? marks[0].route;
     bytes[route] += r.bytes;
   }
@@ -174,9 +179,14 @@ export async function chromeFootprint(discover, read) {
 const cpuProbeFamily = (r) =>
   r.method === 'HEAD' ? /^\/(stockfish|berserk|plentychess|stormphrax|viridithas)\/[^/?]+\.(?:m?js|wasm|data|nnue|nn)(?:\?|$)/.exec(r.path)?.[1] : undefined;
 const absent = (r) => r.complete && !r.failure && [404, 410].includes(r.status);
+const reckless = (r) => ['GET', 'HEAD'].includes(r.method) && r.path.startsWith('/reckless/');
 
-export function requestFailures(requests, journey) {
+export const incompleteJsTransfers = (requests) => requests.filter((r) => isJsTransfer(r) && !r.complete && !reckless(r));
+
+export function requestFailures(requestLog, journey, { routeMarks = [], cutoff } = {}) {
+  const requests = requestLog.slice(0, cutoff?.requestCount);
   const optional = [],
+    teardownAborts = [],
     unexpected = [];
   const missingRuntimeProbes = requests.filter((r) => absent(r) && cpuProbeFamily(r));
   for (const r of requests) {
@@ -186,16 +196,33 @@ export function requestFailures(requests, journey) {
       family ||
       (r.method === 'HEAD' &&
         /^\/(?:models\/lc0\/(?:(?:BT4-|t3-)[^/?]+|lqo_v2\.f16\.qdq8)\.onnx|engine-logos\/[^/?]+\.(?:svg|png|jpe?g))(?:\?|$)/i.test(r.path));
-    const reckless = ['GET', 'HEAD'].includes(r.method) && r.path.startsWith('/reckless/');
-    const temporaryViridithas = journey === 'analysis-four' && r.method === 'GET' && /^\/viridithas\/[^/?]+\.wasm(?:\?|$)/.test(r.path);
-    const siblingCancelled =
-      family &&
-      r.clientAborted &&
-      missingRuntimeProbes.some((p) => cpuProbeFamily(p) === family && p.at <= r.endedAt && r.at <= p.endedAt && p.endedAt <= r.endedAt);
-    if ((probe && absent(r)) || siblingCancelled || (reckless && absent(r)) || ((reckless || temporaryViridithas) && r.clientAborted)) optional.push(r);
-    else unexpected.push(r);
+    if ((probe || reckless(r)) && absent(r)) {
+      optional.push(r);
+      continue;
+    }
+    if (r.clientAborted && (r.status === null || r.status < 400)) {
+      if (r.endedAt >= cutoff?.at || routeMarks.some((m) => r.at < m.at && r.endedAt >= m.at && r.endedAt <= m.readyAt)) {
+        teardownAborts.push(r);
+        continue;
+      }
+      const siblingCancelled =
+        family && missingRuntimeProbes.some((p) => cpuProbeFamily(p) === family && p.at <= r.endedAt && r.at <= p.endedAt && p.endedAt <= r.endedAt);
+      const temporaryViridithas = journey === 'analysis-four' && r.method === 'GET' && /^\/viridithas\/[^/?]+\.wasm(?:\?|$)/.test(r.path);
+      const unselectedMaia3 = journey === 'play-lc0' && r.method === 'GET' && r.path === '/models/maia3/maia3_simplified.qdq8.graph.onnx';
+      // Analysis Four can cancel redundant preparation for this sidecar after a full copy was fetched.
+      const redundantBerserk =
+        journey === 'analysis-four' &&
+        r.method === 'GET' &&
+        r.path === '/berserk/berserk-emscripten.data' &&
+        requests.some((p) => p.method === 'GET' && p.path === r.path && p.complete && !p.failure && p.status === 200 && p.endedAt <= r.at);
+      if (siblingCancelled || reckless(r) || temporaryViridithas || unselectedMaia3 || redundantBerserk) {
+        optional.push(r);
+        continue;
+      }
+    }
+    unexpected.push(r);
   }
-  return { optional, unexpected };
+  return { optional, teardownAborts, unexpected };
 }
 
 export function peakFootprint(browser, samples, navigationPeak = 0) {
@@ -250,7 +277,7 @@ export function compareRuns(runs, options) {
             .map((r) => r.metrics[name])
             .filter(Number.isFinite),
         ),
-        options.repeats,
+        Math.max(5, options.repeats),
       ),
     );
     const missing = metrics.filter((m) => required.includes(m.name) && m.status === 'unavailable');

@@ -1,0 +1,69 @@
+{
+  "analysisFour": {
+    "journey": "analysis-four",
+    "routeMarks": [
+      {
+        "route": "analysis",
+        "at": 1794973240190
+      }
+    ],
+    "firstDocsRequestAt": 1794973360854,
+    "requests": [
+      {
+        "at": 1794973246054,
+        "method": "GET",
+        "path": "/berserk/berserk-emscripten.data",
+        "status": 200,
+        "bytes": 25201924,
+        "complete": true,
+        "failure": null,
+        "clientAborted": false,
+        "endedAt": 1794973246515
+      },
+      {
+        "at": 1794973247813,
+        "method": "GET",
+        "path": "/berserk/berserk-emscripten.data",
+        "status": 200,
+        "bytes": 8912896,
+        "complete": false,
+        "failure": "Browser disconnected before response finished",
+        "clientAborted": true,
+        "endedAt": 1794973247934
+      },
+      {
+        "at": 1794973247960,
+        "method": "GET",
+        "path": "/berserk/berserk-emscripten.data",
+        "status": 200,
+        "bytes": 25201924,
+        "complete": true,
+        "failure": null,
+        "clientAborted": false,
+        "endedAt": 1794973248686
+      }
+    ]
+  },
+  "playLc0": {
+    "journey": "play-lc0",
+    "routeMarks": [
+      {
+        "route": "play",
+        "at": 1794972345945
+      }
+    ],
+    "requests": [
+      {
+        "at": 1794972352086,
+        "method": "GET",
+        "path": "/models/maia3/maia3_simplified.qdq8.graph.onnx",
+        "status": 200,
+        "bytes": 16318464,
+        "complete": false,
+        "failure": "Browser disconnected before response finished",
+        "clientAborted": true,
+        "endedAt": 1794972352232
+      }
+    ]
+  }
+}

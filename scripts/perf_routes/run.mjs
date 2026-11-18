@@ -231,6 +231,8 @@ function report(dir) {
     '',
     `Baseline: \`${options.baseline}\`; candidate: \`${options.candidate}\`.`,
     `Completed attempts: ${runs.length}/${plan(options).length}. Regressed metrics: ${flagged}/${metrics.length} (${fmt(metrics.length ? (flagged / metrics.length) * 100 : 0)}%).`,
+    `Exempted aborts: ${runs.reduce((n, r) => n + (r.teardownAborts?.length ?? 0), 0)} at teardown/transitions; ${runs.reduce((n, r) => n + (r.optionalPrefetchFailures?.filter((entry) => entry.clientAborted).length ?? 0), 0)} optional.`,
+    ...(options.repeats === 1 ? ['Same-build smoke only; at least five repeats per arm are required for a gate verdict.'] : []),
     `Gate: **${summary.some((s) => s.status === 'regressed') ? 'REGRESSED' : summary.some((s) => s.status !== 'clean') ? 'INCOMPLETE / NOISY' : 'CLEAN'}**. A subset is not a full merge gate.`,
     'Memory MB = MiB. Peak total = simultaneous sampled renderer+owned Chrome GPU; independent kernel renderer/GPU peaks are separate. Settled/residual = median final 2s of fixed 20s windows; no forced GC or plateau claim.',
     'UA postResidualGc memory is sampled only after every natural footprint/worker/task/speed observation is frozen; the API-triggered GC cannot affect the natural retention numbers.',

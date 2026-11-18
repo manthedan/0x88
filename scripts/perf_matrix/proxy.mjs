@@ -38,7 +38,10 @@ export async function startCountingProxy(target, { htmlScript } = {}) {
     return artifact !== null && modelHashes.has(artifact[1].toLowerCase());
   };
   const requests = [];
+  const pending = new Set();
+  let closing = false;
   const server = createServer((req, res) => {
+    pending.add(res);
     const entry = { at: Date.now(), method: req.method, path: req.url, status: null, bytes: 0, complete: false, failure: null, clientAborted: false };
     requests.push(entry);
     let upstreamComplete = false;
@@ -95,11 +98,12 @@ export async function startCountingProxy(target, { htmlScript } = {}) {
     );
     up.on('error', (error) => fail(`Upstream request: ${error.message}`));
     res.on('close', () => {
+      pending.delete(res);
       if (res.writableFinished) return;
       entry.endedAt = Date.now();
       if (!entry.failure) {
-        entry.clientAborted = true;
-        entry.failure = 'Browser disconnected before response finished';
+        entry.clientAborted = !closing;
+        entry.failure = closing ? 'Proxy closed before response finished' : 'Browser disconnected before response finished';
       }
       up.destroy();
     });
@@ -113,11 +117,18 @@ export async function startCountingProxy(target, { htmlScript } = {}) {
         requests,
         /** Requests for model-like assets (.onnx and friends) since `since` (epoch ms). */
         modelRequests: (since) => requests.filter((r) => r.at >= since && isModel(r.path ?? '')),
-        close: () =>
-          new Promise((r) => {
-            server.close(() => r());
-            server.closeAllConnections();
-          }),
+        close: async () => {
+          closing = true;
+          // server.close's callback can precede the pending responses' close events.
+          const drained = [...pending].map((res) => new Promise((r) => res.once('close', r)));
+          await Promise.all([
+            ...drained,
+            new Promise((r) => {
+              server.close(() => r());
+              server.closeAllConnections();
+            }),
+          ]);
+        },
       });
     });
   });

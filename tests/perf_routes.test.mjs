@@ -12,6 +12,7 @@ import {
   chromeFootprint,
   compareRuns,
   footprintSum,
+  incompleteJsTransfers,
   JOURNEYS,
   jsBytesByRoute,
   naturalVisibilityValid,
@@ -62,6 +63,21 @@ test('route gate strict parsing, mandatory arms, mutex, URLs, repeats, subsets',
   }
   assert.deepEqual(args('--journey', 'navigation', '--journey', 'navigation').journeys, ['navigation']);
   assert.throws(() => args('--out', 'a', '--out', 'b'), /Duplicate/);
+  assert.throws(() => args('--repeats', '1'), /same-build smoke/);
+});
+
+test('a one-repeat same-build smoke measures sessions without passing the gate', () => {
+  const smokeArgs = ['--baseline', 'main', '--candidate', 'main', '--dry-run', '--browser', 'chrome', '--journey', 'analysis-four', '--repeats', '1'];
+  const options = parseArgs(smokeArgs);
+  assert.equal(plan(options).length, 2);
+  const [summary] = compareRuns(
+    plan(options).map((cell) => ({ ...cell, status: 'ok', metrics: { jsBytes: 10 } })),
+    options,
+  );
+  assert.equal(summary.invalid.length, 0);
+  assert.equal(summary.metrics.find((m) => m.name === 'jsBytes').status, 'insufficient');
+  assert.equal(summary.status, 'incomplete');
+  assert.throws(() => parseArgs([...smokeArgs, '--baseline-url', 'http://localhost:80', '--candidate-url', 'http://localhost:81']));
 });
 
 test('served build URLs must be origins; path prefixes cannot be measured', async () => {
@@ -224,9 +240,34 @@ test('proxy records upstream failure before headers, truncated bodies and downst
     requestFailures([bigNetProbe, queenOdds, ...optionalProbes, recklessCancel, brokenProbe, missingModel, late, recklessBroken, failedDownload]),
     {
       optional: [bigNetProbe, queenOdds, ...optionalProbes, recklessCancel],
+      teardownAborts: [],
       unexpected: [brokenProbe, missingModel, late, recklessBroken, failedDownload],
     },
   );
+});
+
+test('a request the proxy had to close is not a browser teardown abort', async (t) => {
+  const upstream = createServer((req, res) => {
+    if (req.url === '/pending.data') res.writeHead(200).write('partial');
+    else res.writeHead(404).end();
+  });
+  await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
+  t.after(
+    () =>
+      new Promise((r) => {
+        upstream.close(r);
+        upstream.closeAllConnections();
+      }),
+  );
+  const proxy = await startCountingProxy(`http://127.0.0.1:${upstream.address().port}`);
+  const response = await fetch(`${proxy.url}/pending.data`);
+  assert.equal(response.status, 200);
+  const cutoff = { at: Date.now(), requestCount: proxy.requests.length };
+  await proxy.close();
+  const [request] = proxy.requests;
+  assert.ok(request.endedAt >= cutoff.at);
+  assert.equal(request.clientAborted, false);
+  assert.deepEqual(requestFailures(proxy.requests, 'analysis-four', { cutoff }).unexpected, [request]);
 });
 
 test('availability probe cancellation needs a confirmed missing sibling, not merely a client disconnect', () => {
@@ -234,17 +275,93 @@ test('availability probe cancellation needs a confirmed missing sibling, not mer
   const sibling = { ...absent, path: '/berserk/berserk.wasm', at: 2, endedAt: 5, complete: false, status: null, clientAborted: true };
   const notConcurrent = { ...sibling, at: 6, endedAt: 7 };
   const otherFamily = { ...sibling, path: '/stormphrax/stormphrax-emscripten.wasm' };
-  assert.deepEqual(requestFailures([absent, sibling, notConcurrent, otherFamily]), {
+  const httpError = { ...sibling, status: 503 };
+  assert.deepEqual(requestFailures([absent, sibling, notConcurrent, otherFamily, httpError]), {
     optional: [absent, sibling],
-    unexpected: [notConcurrent, otherFamily],
+    teardownAborts: [],
+    unexpected: [notConcurrent, otherFamily, httpError],
   });
 });
 
 test('Analysis Four may cancel its unused Viridithas prefetch, but upstream errors remain fatal', () => {
   const cancelled = { method: 'GET', path: '/viridithas/viridithas.wasm', clientAborted: true, complete: false, status: 200 };
   const truncated = { ...cancelled, clientAborted: false, failure: 'upstream truncated' };
-  assert.deepEqual(requestFailures([cancelled, truncated], 'analysis-four'), { optional: [cancelled], unexpected: [truncated] });
+  const httpError = { ...cancelled, status: 404 };
+  assert.deepEqual(requestFailures([cancelled, truncated, httpError], 'analysis-four'), {
+    optional: [cancelled],
+    teardownAborts: [],
+    unexpected: [truncated, httpError],
+  });
   assert.deepEqual(requestFailures([cancelled], 'analysis-default').unexpected, [cancelled]);
+});
+
+// residency-vs-main sessions 017-chrome-analysis-four-baseline-r1 and 007-chrome-play-lc0-candidate-r0.
+const cancelledRequests = JSON.parse(readFileSync(new URL('./fixtures/perf_routes_cancelled_requests.json', import.meta.url), 'utf8'));
+
+test('recorded mid-route Berserk abort is redundant only with a previously completed GET of its sidecar', () => {
+  const { journey, routeMarks, requests, firstDocsRequestAt } = cancelledRequests.analysisFour;
+  const [prior, aborted, retry] = requests;
+  assert.ok(aborted.endedAt < firstDocsRequestAt);
+  assert.deepEqual(requestFailures(requests, journey, { routeMarks, cutoff: { at: firstDocsRequestAt, requestCount: requests.length } }).optional, [aborted]);
+  for (const earlier of [
+    { ...prior, status: 206 },
+    { ...prior, method: 'HEAD' },
+  ]) {
+    assert.deepEqual(requestFailures([earlier, aborted, retry], journey).unexpected, [aborted]);
+  }
+  const otherAsset = { ...aborted, path: '/berserk/other.data' };
+  assert.deepEqual(requestFailures([prior, otherAsset], journey).unexpected, [otherAsset]);
+});
+
+test('recorded Maia3 prefetch abort is optional in Play Lc0 but not if Maia3 is selected', () => {
+  const { journey, requests } = cancelledRequests.playLc0;
+  assert.deepEqual(requestFailures(requests, journey).optional, requests);
+  assert.deepEqual(requestFailures(requests, 'play-maia3').unexpected, requests);
+});
+
+test('only client aborts from the outgoing route during navigation, or at/after the final cutoff, are teardown', () => {
+  const {
+    journey,
+    routeMarks,
+    requests: [, recorded],
+    firstDocsRequestAt,
+  } = cancelledRequests.analysisFour;
+  const at = firstDocsRequestAt;
+  const readyAt = at + 50;
+  const measuredUntil = readyAt + 20000;
+  const transitionStart = { ...recorded, endedAt: at };
+  const transitionEnd = { ...recorded, endedAt: readyAt };
+  const sessionEnd = { ...recorded, at: readyAt, endedAt: measuredUntil };
+  const close = { ...sessionEnd, status: null, endedAt: measuredUntil + 125 };
+  const fatal = [
+    recorded,
+    { ...recorded, endedAt: at - 1 },
+    { ...recorded, endedAt: readyAt + 1 },
+    { ...recorded, at: at + 1, endedAt: readyAt },
+    { ...sessionEnd, endedAt: measuredUntil - 1 },
+    { ...sessionEnd, status: 503 },
+    { ...transitionStart, status: 404 },
+    { ...sessionEnd, clientAborted: false, failure: 'Truncated upstream response' },
+    { ...sessionEnd, endedAt: undefined, clientAborted: false, failure: null },
+  ];
+  const exempted = [transitionStart, transitionEnd, sessionEnd, close];
+  const cutoff = { at: measuredUntil, requestCount: fatal.length + exempted.length };
+  const postMeasurementError = { ...sessionEnd, at: measuredUntil, endedAt: measuredUntil + 10, status: 503 };
+  assert.deepEqual(
+    requestFailures([...fatal, ...exempted, postMeasurementError], journey, { routeMarks: [...routeMarks, { route: 'docs', at, readyAt }], cutoff }),
+    { optional: [], teardownAborts: exempted, unexpected: fatal },
+  );
+});
+
+test('the JS deadline ignores bodyless probes and optional prefetches, not late or aborted required bodies', () => {
+  const get = { at: 10, method: 'GET', path: '/required.mjs?v=1', status: 200, bytes: 1, complete: false };
+  const head = { ...get, method: 'HEAD', path: '/berserk/probe.js', bytes: 0 };
+  const optional = { ...get, path: '/reckless/prefetch.js' };
+  const done = { ...get, path: '/ready.js', complete: true };
+  const abandoned = { ...get, path: '/other.js', endedAt: 20, clientAborted: true };
+  assert.deepEqual(incompleteJsTransfers([head, optional, done, get, abandoned]), [get, abandoned]);
+  assert.deepEqual(requestFailures([head], 'analysis-four').unexpected, [head]);
+  assert.deepEqual(requestFailures([{ ...head, clientAborted: true, endedAt: 20 }], 'analysis-four', { cutoff: { at: 20, requestCount: 1 } }).unexpected, []);
 });
 
 test('route probes retain original worker payloads, count teardown once and parse both UCI transports', () => {

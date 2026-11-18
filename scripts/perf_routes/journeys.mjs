@@ -148,14 +148,16 @@ export async function requireAnalysisForMove(evaluate, move, timeout = 120000) {
   return observation;
 }
 
-export async function headerNavigate(evaluate, route) {
+export async function headerNavigate(evaluate, route, mark = () => {}) {
   const id = await evaluate(`window.__routePerf.documentId`);
+  mark('route:' + route);
   await click(evaluate, `.site-header nav.primary a[href="/app/${route}/"]`);
   await waitFor(
     evaluate,
     `location.pathname === '/app/${route}/' && !!document.querySelector('#ground cg-board') && ${route === 'analysis' ? '!!window.__analysisSchedulingState' : route === 'play' ? '!!window.__playUserMove' : "!!document.querySelector('#arenaSeatList .seat-fam')"}`,
   );
   if ((await evaluate(`window.__routePerf.documentId`)) !== id) throw Error('Header link caused a full navigation; client-side journey invalid');
+  mark('route-ready');
 }
 
 export async function runJourney(evaluate, name, mark = () => {}, pause = sleep) {
@@ -224,8 +226,7 @@ export async function runJourney(evaluate, name, mark = () => {}, pause = sleep)
     await analysisSetup(evaluate);
     for (let cycle = 0; cycle < 3; cycle++) {
       for (const route of ['play', 'arena', 'analysis']) {
-        mark('route:' + route);
-        await headerNavigate(evaluate, route);
+        await headerNavigate(evaluate, route, mark);
         evidence.navigation.push({ route, workers: await evaluate(`window.__routePerf.workers`) });
         await pause(1000);
       }

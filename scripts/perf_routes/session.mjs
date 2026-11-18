@@ -5,7 +5,17 @@ import { hostname, loadavg, platform, release } from 'node:os';
 import { median } from '../lib/perf_canary_stats.mjs';
 import { pgrep, readFootprint, sleep, WORKER_READY_SCRIPT } from '../perf_matrix/common.mjs';
 import { startCountingProxy } from '../perf_matrix/proxy.mjs';
-import { chromeFootprint, footprintSum, jsBytesByRoute, naturalVisibilityValid, peakFootprint, requestFailures, safariWebContentPid } from './gate.mjs';
+import {
+  chromeFootprint,
+  footprintSum,
+  incompleteJsTransfers,
+  isJsTransfer,
+  jsBytesByRoute,
+  naturalVisibilityValid,
+  peakFootprint,
+  requestFailures,
+  safariWebContentPid,
+} from './gate.mjs';
 import { DOCS_READY, MIDGAME, routeFor, runJourney, waitFor } from './journeys.mjs';
 import { checkSessionCancellation, cleanupMarker, safariCreationRefused, shutdownDelay, waitForCleanup, watchShutdown } from './lifecycle.mjs';
 
@@ -33,6 +43,20 @@ const guarded =
     return value;
   };
 let proxy, browser, sid, cdp, page, evaluate, navigate, close, sampling, safariPid;
+const routeMarks = [{ route: routeFor(spec.journey), at: Date.now() }];
+result.routeMarks = routeMarks;
+const mark = (value) => {
+  if (value === 'route-ready') routeMarks.at(-1).readyAt = Date.now();
+  else {
+    phase = value;
+    if (value.startsWith('route:')) routeMarks.push({ route: value.slice(6), at: Date.now() });
+  }
+};
+const checkJsDeadline = (requests) => {
+  result.incompleteJsTransfers = incompleteJsTransfers(requests);
+  if (result.incompleteJsTransfers.length) throw Error('Required JS did not finish before the measurement deadline; see incompleteJsTransfers');
+};
+let awayAt;
 const wc = 'com.apple.WebKit.WebContent';
 const pendingCleanup = cleanupMarker(outFile);
 const markBrowserStarting = () => {
@@ -206,16 +230,7 @@ try {
   result.context = await evaluate(`({secure:isSecureContext,isolated:crossOriginIsolated,ua:navigator.userAgent,visibility:document.visibilityState})`);
   if (result.context.visibility !== 'visible') throw Error('Benchmark page is hidden: auto-analysis/input timing would be invalid');
   if (!result.context.secure || !result.context.isolated) throw Error('Page is not secure and cross-origin isolated');
-  result.routeMarks = [{ route: routeFor(spec.journey), at: t0 }];
-  result.evidence = await runJourney(
-    evaluate,
-    spec.journey,
-    (value) => {
-      phase = value;
-      if (value.startsWith('route:')) result.routeMarks.push({ route: value.slice(6), at: Date.now() });
-    },
-    pause,
-  );
+  result.evidence = await runJourney(evaluate, spec.journey, mark, pause);
   result.probe = await evaluate(`JSON.parse(JSON.stringify(window.__routePerf))`);
   result.workerReady = await evaluate(`window.__perfWorkerReady`);
   result.transitions = await evaluate(`window.__analysisTransitionLog?.() ?? []`);
@@ -233,10 +248,9 @@ try {
   if (result.evidence.moves.length) result.metrics.inputLatencyMs = median(result.evidence.moves.map((m) => m.latencyMs));
   // Freeze route bytes before navigation away; workers' JS glue is included, model/WASM bytes are not.
   result.requests = proxy.requests.map((r) => ({ ...r }));
-  if (result.requests.some((r) => /\.(m?js)(?:\?|$)/.test(r.path) && !r.complete && !r.failure))
-    throw Error('JS request still in flight at the end of the journey; byte count is incomplete');
-  result.metrics.jsBytes = result.requests.filter((r) => /\.(m?js)(?:\?|$)/.test(r.path)).reduce((n, r) => n + r.bytes, 0);
-  result.jsBytesByRoute = jsBytesByRoute(result.requests, result.routeMarks);
+  checkJsDeadline(result.requests);
+  result.metrics.jsBytes = result.requests.filter(isJsTransfer).reduce((n, r) => n + r.bytes, 0);
+  result.jsBytesByRoute = jsBytesByRoute(result.requests, routeMarks);
   for (const [route, bytes] of Object.entries(result.jsBytesByRoute)) result.metrics[`jsBytes.${route}`] = bytes;
   if (p.errors.length) throw Error(`Worker errors: ${p.errors.join('; ')}`);
   const active = result.samples.filter((s) => s.phase !== 'residual');
@@ -249,16 +263,18 @@ try {
   // Client-side navigation to a non-engine route observes retention without destroying the page process.
   const documentId = await evaluate(`window.__routePerf.documentId`);
   const away = '/docs/';
-  const awayAt = Date.now();
   if (spec.journey.startsWith('play')) {
     // The real leave confirmation is owned by this test flow. Avoid Safari unhandled-prompt deadlocks.
     await evaluate(`(window.confirm = () => true, true)`);
   }
+  mark('route:docs');
+  awayAt = routeMarks.at(-1).at;
   await evaluate(
     `(() => { const a=document.querySelector('.site-header nav.primary a[href="${away}"]'); if(!a) throw Error('Docs link missing'); a.click(); return true; })()`,
   );
   await waitFor(evaluate, DOCS_READY);
   if ((await evaluate(`window.__routePerf.documentId`)) !== documentId) throw Error('Residual navigation destroyed document');
+  mark('route-ready');
   phase = 'residual';
   await pause(20000);
   clearInterval(sampling);
@@ -286,12 +302,8 @@ try {
   ];
   if (result.externalAssetUrls.length)
     throw Error('Unobserved cross-origin assets bypass the JS counting proxy; stage same-origin assets before comparing (see externalAssetUrls).');
-  const requestsThroughResidual = proxy.requests.map((r) => ({ ...r }));
-  result.postNavigationRequests = requestsThroughResidual.filter((r) => r.at >= awayAt);
-  const failures = requestFailures(requestsThroughResidual, spec.journey);
-  result.optionalPrefetchFailures = failures.optional;
-  result.networkFailures = failures.unexpected;
-  if (result.networkFailures.length) throw Error('Failed or incomplete asset request; see networkFailures');
+  result.networkCutoff = { at: Date.now(), requestCount: proxy.requests.length };
+  checkJsDeadline(proxy.requests);
   // UA measurement triggers GC (eager with our Chrome flag). Never request it until
   // ALL natural footprint, worker, speed, input and long-task observations are frozen.
   await uaMemory('postResidualGc');
@@ -301,7 +313,6 @@ try {
     result.diagnostic = await evaluate(
       `({url:location.href,title:document.title,message:document.querySelector('#message')?.textContent,body:document.body?.textContent?.slice(0,1000),probe:window.__routePerf ?? null,hook:typeof window.__analysisUserMove,board:!!document.querySelector('#ground cg-board'),visibility:document.visibilityState,scheduling:window.__analysisSchedulingState?.(),lines:[...document.querySelectorAll('#engineSummaries [data-pv-fen]')].map(el=>({fen:el.dataset.pvFen,engine:el.dataset.engine}))})`,
     ).catch((e) => ({ error: String(e) }));
-  if (proxy) result.requests = proxy.requests.map((r) => ({ ...r }));
   result.error = String(error.stack ?? error);
   console.error(result.error);
 } finally {
@@ -316,7 +327,23 @@ try {
       result.status = 'invalid';
     }
   }
-  if (proxy) await proxy.close();
+  if (proxy) {
+    await proxy.close();
+    // The browser's close can supply the terminal event for requests still open at the cutoff.
+    result.requests ??= proxy.requests;
+    const cutoff = result.networkCutoff;
+    if (awayAt !== undefined) result.postNavigationRequests = proxy.requests.slice(0, cutoff?.requestCount).filter((r) => r.at >= awayAt);
+    if (cutoff) result.postMeasurementRequests = proxy.requests.slice(cutoff.requestCount);
+    const failures = requestFailures(proxy.requests, spec.journey, { routeMarks, cutoff });
+    result.optionalPrefetchFailures = failures.optional;
+    result.teardownAborts = failures.teardownAborts;
+    result.networkFailures = failures.unexpected;
+    if (result.networkFailures.length && result.status === 'ok') {
+      result.status = 'invalid';
+      result.error = 'Failed or incomplete asset request; see networkFailures';
+      console.error(result.error);
+    }
+  }
   if (signal.aborted) {
     result.status = 'invalid';
     result.error = signal.reason.message;
