@@ -92,6 +92,8 @@ export function createPlayEngines(deps: PlayEngineDeps) {
   let lc0Searcher: Lc0PuctSearcher | null = null;
   let lc0LoadPromise: Promise<Lc0PuctSearcher> | null = null;
   let lc0SmallOwner: { evaluator: CachedLc0Evaluator | null; abort: AbortController } = { evaluator: null, abort: new AbortController() };
+  /** The model the cached Lc0 Small searcher was built from; a remount may ask for another (?model=). */
+  let lc0SmallUrl: string | null = null;
   let maia3Abort: AbortController | null = null;
   let maia3Promise: Promise<Maia3BrowserEvaluator> | null = null;
   /** One-line model/cache status shown in the caption once Maia3 has loaded. */
@@ -117,26 +119,30 @@ export function createPlayEngines(deps: PlayEngineDeps) {
         ),
       );
     }
-    if (!(keep?.family === 'lc0' && keep.variant === 'small') && lc0LoadPromise) {
-      const pending = lc0LoadPromise;
-      const owner = lc0SmallOwner;
-      lc0SmallOwner = { evaluator: null, abort: new AbortController() };
-      lc0LoadPromise = null;
-      lc0Searcher = null;
-      owner.abort.abort();
-      trackEngineRetirement(
-        pending.then(
-          async (searcher) => {
-            searcher.resetTree();
-            await owner.evaluator?.dispose();
-            owner.evaluator = null;
-          },
-          () => undefined,
-        ),
-      );
-    }
+    if (!(keep?.family === 'lc0' && keep.variant === 'small')) retireLc0Small();
     releaseUnusedBigNetSearchers(bigNetKeep(keep), 0);
     return awaitEngineRetirements();
+  }
+
+  function retireLc0Small(): void {
+    if (!lc0LoadPromise) return;
+    const pending = lc0LoadPromise;
+    const owner = lc0SmallOwner;
+    lc0SmallOwner = { evaluator: null, abort: new AbortController() };
+    lc0LoadPromise = null;
+    lc0Searcher = null;
+    lc0SmallUrl = null;
+    owner.abort.abort();
+    trackEngineRetirement(
+      pending.then(
+        async (searcher) => {
+          searcher.resetTree();
+          await owner.evaluator?.dispose();
+          owner.evaluator = null;
+        },
+        () => undefined,
+      ),
+    );
   }
 
   function disposeAllCpuEngines(): void {
@@ -157,12 +163,17 @@ export function createPlayEngines(deps: PlayEngineDeps) {
   }
 
   function ensureLc0Small(model: Lc0SmallModel, ui: EngineUiPort): Promise<Lc0PuctSearcher> {
+    // Another model's session must be gone before this one loads: one Lc0 Small resident at a time.
+    const replacing = !!lc0LoadPromise && lc0SmallUrl !== model.modelUrl;
+    if (replacing) retireLc0Small();
     if (lc0Searcher) return Promise.resolve(lc0Searcher);
     if (!lc0LoadPromise) {
       const current = ui.current();
       const owner = lc0SmallOwner;
+      lc0SmallUrl = model.modelUrl;
       if (current()) ui.note('Loading Lc0 small net…');
       lc0LoadPromise = (async () => {
+        if (replacing) await awaitEngineRetirements();
         // Download progress hides only once the session exists: on Apple WebGPU a
         // failed session reloads the original model for its WASM fallback.
         const { evaluator } = await loadLc0Small(model.modelUrl, {
@@ -183,7 +194,10 @@ export function createPlayEngines(deps: PlayEngineDeps) {
         if (current()) ui.note('');
         return loaded;
       })().catch((error: Error) => {
-        if (owner === lc0SmallOwner) lc0LoadPromise = null;
+        if (owner === lc0SmallOwner) {
+          lc0LoadPromise = null;
+          lc0SmallUrl = null;
+        }
         if (current()) {
           ui.hideProgress();
           ui.note(`Lc0 load failed: ${error.message}`, true);
