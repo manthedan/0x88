@@ -38,6 +38,7 @@ import {
   safariCreationRefused,
   waitForCleanup,
 } from '../scripts/perf_routes/lifecycle.mjs';
+import { manifestMismatches, runManifest, selectSessions, sessionId } from '../scripts/perf_routes/resume.mjs';
 
 const args = (...extra) => parseArgs(['--baseline', 'main', '--candidate', 'HEAD', '--dry-run', ...extra]);
 
@@ -809,6 +810,87 @@ test('missing throughput for one selected engine cannot yield a clean comparison
   }));
   assert.equal(compareRuns(rows, options)[0].status, 'incomplete');
   assert.equal(compareRuns(rows, options)[0].metrics.find((m) => m.name === 'speed.berserk-nps').status, 'unavailable');
+});
+
+test('--resume continues an explicit --out directory only', () => {
+  assert.equal(args('--out', 'x', '--resume').resume, true);
+  assert.throws(() => args('--resume'), /--resume needs the --out/);
+  assert.throws(() => args('--out', 'x', '--resume', '--resume'), /Duplicate/);
+});
+
+test('resume manifest names every cohort-defining difference and ignores paths/locks', () => {
+  const arms = {
+    baseline: { kind: 'archived-source', input: 'main', commit: 'a'.repeat(40) },
+    candidate: { kind: 'archived-source', input: 'HEAD', commit: 'b'.repeat(40) },
+  };
+  const extras = { host: 'mac', harness: 'h1' };
+  const saved = runManifest(args('--out', 'one'), arms, extras);
+  assert.deepEqual(
+    manifestMismatches(saved, runManifest(args('--out', 'two', '--resume', '--benchlock', '/l', '--driver', 'http://127.0.0.1:1'), arms, extras)),
+    [],
+  );
+  // JSON round trip (as stored on disk) still matches.
+  assert.deepEqual(manifestMismatches(JSON.parse(JSON.stringify(saved)), runManifest(args(), arms, extras)), []);
+  const moved = { ...arms, candidate: { ...arms.candidate, commit: 'c'.repeat(40) } };
+  assert.deepEqual(manifestMismatches(saved, runManifest(args(), moved, extras)), ['arms.candidate.commit']);
+  assert.deepEqual(manifestMismatches(saved, runManifest(args('--repeats', '6', '--browser', 'chrome'), arms, extras)), ['options.browser', 'options.repeats']);
+  assert.deepEqual(manifestMismatches(saved, runManifest(args('--journey', 'navigation'), arms, extras)), ['options.journeys']);
+  assert.deepEqual(manifestMismatches(saved, runManifest(args(), arms, { host: 'mini', harness: 'h2' })), ['harness', 'host']);
+  const prebuilt = { ...arms, baseline: { kind: 'prebuilt', input: 'dist', dist: '/d', version: '{"version":"1"}' } };
+  assert.deepEqual(manifestMismatches(saved, runManifest(args(), prebuilt, extras)), [
+    'arms.baseline.commit',
+    'arms.baseline.dist',
+    'arms.baseline.input',
+    'arms.baseline.kind',
+    'arms.baseline.version',
+  ]);
+});
+
+test('resume reuses every recorded outcome and reruns only missing or operator-stopped sessions', () => {
+  const options = args('--browser', 'chrome', '--journey', 'navigation');
+  const cells = plan(options);
+  const ids = cells.map(sessionId);
+  assert.equal(ids[0], '000-chrome-navigation-baseline-r0');
+  assert.equal(ids[3], '003-chrome-navigation-baseline-r1');
+  const result = (i, extra) => ({ ...cells[i], base: 'http://127.0.0.1:9', status: 'ok', metrics: { jsBytes: i }, ...extra });
+  const files = new Map([
+    [ids[0], { result: result(0) }],
+    [ids[1], { result: result(1, { status: 'invalid', error: 'Error: board never interactive' }) }],
+    [ids[2], { result: result(2, { status: 'invalid', error: 'Interrupted by SIGINT' }) }],
+    [ids[3], { result: result(3, { status: 'invalid', error: 'Error: Interrupted before browser startup\n    at x' }) }],
+    [ids[4], { result: result(4, { status: 'invalid', error: 'Error: session not created: already paired' }) }],
+    [ids[5], { result: result(5), cancelled: true }],
+    [ids[6], { result: null }], // unreadable / truncated
+  ]);
+  const selected = selectSessions(cells, (id) => files.get(id) ?? { result: null });
+  assert.deepEqual(
+    selected.map((s) => s.id),
+    ids,
+  );
+  assert.deepEqual(
+    selected.map((s) => s.cell),
+    cells,
+  );
+  // A genuine failure stays in the denominator, exactly as in a fresh run.
+  assert.deepEqual(
+    selected.map((s, i) => (s.reuse ? i : null)).filter((i) => i !== null),
+    [0, 1],
+  );
+  assert.equal(selected[1].reuse.error, 'Error: board never interactive');
+  // A fresh run selects every session.
+  assert.ok(selectSessions(cells, () => ({ result: null })).every((s) => s.reuse === null));
+  // Reused rows plus new rows give the same summary shape as a fresh cohort.
+  const rows = selected.map((s, i) => s.reuse ?? result(i));
+  assert.deepEqual(
+    compareRuns(rows, options).map((g) => [g.browser, g.journey, g.invalid.length]),
+    [['chrome', 'navigation', 1]],
+  );
+
+  assert.throws(
+    () => selectSessions(cells, (id) => (id === ids[2] ? { result: result(2), cleanupPending: true } : { result: null })),
+    /cleanup unconfirmed for 002/,
+  );
+  assert.throws(() => selectSessions(cells, (id) => (id === ids[0] ? { result: result(1) } : { result: null })), /different arm/);
 });
 
 test('arm builds link ignored local assets instead of copying them, never replacing tracked bytes', () => {
