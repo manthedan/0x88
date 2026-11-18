@@ -176,7 +176,8 @@ export function createPlayEngines(deps: PlayEngineDeps) {
       lc0SmallModel = model;
       if (current()) ui.note('Loading Lc0 small net…');
       lc0LoadPromise = (async () => {
-        await predecessor;
+        // Only a replacement yields here; a first load starts synchronously, before any retirement can abort it.
+        if (predecessor) await predecessor;
         // Download progress hides only once the session exists: on Apple WebGPU a
         // failed session reloads the original model for its WASM fallback.
         const { evaluator } = await loadLc0Small(model.modelUrl, {
