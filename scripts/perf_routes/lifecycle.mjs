@@ -81,6 +81,20 @@ export async function acquireLock(dir, signal) {
 
 export const cleanupMarker = (resultFile) => `${resultFile}.cleanup-pending`;
 export const cancellationMarker = (resultFile) => `${resultFile}.cancelled`;
+// PID of the detached session/benchlock wrapper, recorded before it waits for the mutex. It outlives a
+// SIGKILLed coordinator, so a resume must not start the same cell while that process is alive.
+export const ownerRecord = (resultFile) => `${resultFile}.owner`;
+
+export function liveOwner(resultFile) {
+  const pid = Number.parseInt(existsSync(ownerRecord(resultFile)) ? readFileSync(ownerRecord(resultFile), 'utf8') : '', 10);
+  if (!(pid > 0)) return null;
+  try {
+    process.kill(pid, 0);
+    return pid;
+  } catch (error) {
+    return error.code === 'EPERM' ? pid : null;
+  }
+}
 
 export function checkSessionCancellation(resultFile, signal) {
   signal.throwIfAborted();
@@ -121,10 +135,11 @@ export async function shutdownDelay(ms, signal) {
   });
 }
 
-export async function runOwnedSession(bin, argv, signal, wrappedResultFile) {
+export async function runOwnedSession(bin, argv, signal, wrappedResultFile, ownedResultFile) {
   signal.throwIfAborted();
   // Separate from terminal Ctrl-C; don't interrupt a benchlock wrapper that holds a live session's mutex.
   const child = spawn(bin, argv, { stdio: 'inherit', detached: true });
+  if (ownedResultFile && child.pid) writeFileSync(ownerRecord(ownedResultFile), `${child.pid}\n`);
   const stop = () => {
     if (!wrappedResultFile) child.kill('SIGTERM');
     else {
@@ -138,6 +153,7 @@ export async function runOwnedSession(bin, argv, signal, wrappedResultFile) {
   signal.addEventListener('abort', stop, { once: true });
   try {
     const [status] = await once(child, 'close');
+    if (ownedResultFile) rmSync(ownerRecord(ownedResultFile), { force: true });
     return status;
   } finally {
     signal.removeEventListener('abort', stop);

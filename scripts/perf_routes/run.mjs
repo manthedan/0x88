@@ -13,6 +13,7 @@ import {
   cancellationMarker,
   claimOutput,
   cleanupMarker,
+  liveOwner,
   lockRun,
   releaseAfterSession,
   runOwnedSession,
@@ -187,7 +188,7 @@ async function run(signal) {
 async function measure(signal, out, sources, resuming) {
   const cells = selectSessions(plan(args), (id) => {
     const file = join(out, 'sessions', `${id}.json`);
-    return { result: readJson(file), cleanupPending: existsSync(cleanupMarker(file)) };
+    return { result: readJson(file), cleanupPending: existsSync(cleanupMarker(file)), owner: liveOwner(file) };
   });
   if (resuming) console.log(`resume ${out}: reusing ${cells.filter((c) => c.reuse).length}/${cells.length} sessions`);
   const servers = [];
@@ -231,7 +232,13 @@ async function measure(signal, out, sources, resuming) {
         try {
           const commandArgs = [join(root, 'scripts/perf_routes/session.mjs'), specFile, resultFile];
           const bin = args.benchlock ?? process.execPath;
-          status = await runOwnedSession(bin, args.benchlock ? [process.execPath, ...commandArgs] : commandArgs, signal, args.benchlock ? resultFile : null);
+          status = await runOwnedSession(
+            bin,
+            args.benchlock ? [process.execPath, ...commandArgs] : commandArgs,
+            signal,
+            args.benchlock ? resultFile : null,
+            resultFile,
+          );
         } finally {
           cleanupConfirmed = releaseAfterSession(resultFile, release);
         }

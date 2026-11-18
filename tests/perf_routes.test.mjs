@@ -33,7 +33,9 @@ import {
   checkSessionCancellation,
   claimOutput,
   cleanupMarker,
+  liveOwner,
   lockRun,
+  ownerRecord,
   releaseAfterSession,
   runOwnedSession,
   safariCreationRefused,
@@ -846,6 +848,13 @@ test('resume manifest names every cohort-defining difference and ignores paths/l
   const bySha = { baseline: { ...arms.baseline, input: arms.baseline.commit }, candidate: { ...arms.candidate, input: arms.candidate.commit } };
   assert.deepEqual(manifestMismatches(saved, runManifest(args(), bySha, extras)), []);
   assert.equal(saved.inputs.baseline, 'main');
+  // A served arm's only identity is the operator's build identifier: same origin, new SHA is a new cohort.
+  const served = (candidate) => ({
+    baseline: { kind: 'externally-served', input: 'a1', url: 'http://127.0.0.1:1' },
+    candidate: { kind: 'externally-served', input: candidate, url: 'http://127.0.0.1:2' },
+  });
+  assert.deepEqual(manifestMismatches(runManifest(args(), served('b1'), extras), runManifest(args(), served('b1'), extras)), []);
+  assert.deepEqual(manifestMismatches(runManifest(args(), served('b1'), extras), runManifest(args(), served('b2'), extras)), ['arms.candidate.input']);
   const moved = { ...arms, candidate: { ...arms.candidate, commit: 'c'.repeat(40) } };
   assert.deepEqual(manifestMismatches(saved, runManifest(args(), moved, extras)), ['arms.candidate.commit']);
   assert.deepEqual(manifestMismatches(saved, runManifest(args('--repeats', '6', '--browser', 'chrome'), arms, extras)), ['options.browser', 'options.repeats']);
@@ -907,6 +916,8 @@ test('resume reuses every recorded outcome and reruns only missing or operator-s
     /cleanup unconfirmed for 002/,
   );
   assert.throws(() => selectSessions(cells, (id) => (id === ids[0] ? { result: result(1) } : { result: null })), /different arm/);
+  // An orphaned wrapper from a SIGKILLed coordinator may still start this cell's browser.
+  assert.throws(() => selectSessions(cells, (id) => (id === ids[6] ? { result: null, owner: 4242 } : { result: null })), /006.*live process 4242/);
 });
 
 test('arm builds link ignored local assets instead of copying them, never replacing tracked bytes', () => {
@@ -1084,4 +1095,25 @@ test('harness identity covers every measuring dependency, including move choice 
   ])
     assert.ok(files.includes(file), file);
   for (const file of ['scripts/perf_routes/run.mjs', 'scripts/perf_routes/resume.mjs', 'scripts/nope.mjs']) assert.equal(files.includes(file), false, file);
+});
+
+test('a session wrapper records its PID before waiting and clears it on exit; only live owners count', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'perf-routes-owner-'));
+  try {
+    const resultFile = join(dir, '000.json');
+    const signal = new AbortController().signal;
+    const running = runOwnedSession(process.execPath, ['-e', 'setTimeout(() => {}, 300)'], signal, null, resultFile);
+    const pid = Number(readFileSync(ownerRecord(resultFile), 'utf8'));
+    assert.equal(liveOwner(resultFile), pid);
+    assert.equal(await running, 0);
+    assert.equal(existsSync(ownerRecord(resultFile)), false);
+    assert.equal(liveOwner(resultFile), null);
+    // A record left by a SIGKILLed coordinator whose wrapper has since exited is not an owner.
+    const exited = spawn(process.execPath, ['-e', '']);
+    await once(exited, 'close');
+    writeFileSync(ownerRecord(resultFile), `${exited.pid}\n`);
+    assert.equal(liveOwner(resultFile), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

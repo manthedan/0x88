@@ -22,7 +22,8 @@ export function writeJsonAtomic(file, value) {
 // Everything that changes which sessions exist or what they measure. Lock/driver/output paths do not.
 // Arms are identified by resolved bytes (SHA, prebuilt version, URL); the typed ref is provenance only.
 export function runManifest(options, arms, { host, harness }) {
-  const identity = ({ input, ...rest }) => rest;
+  // An externally served arm has no resolvable bytes: its operator-supplied identifier is the identity.
+  const identity = ({ input, ...rest }) => (rest.kind === 'externally-served' ? { input, ...rest } : rest);
   return {
     version: 1,
     options: { browser: options.browser, repeats: options.repeats, journeys: options.journeys },
@@ -77,7 +78,11 @@ const notAnOutcome = (result) => result.status !== 'ok' && /^(?:Error: )?Interru
 export function selectSessions(cells, inspect) {
   return cells.map((cell, i) => {
     const id = sessionId(cell, i);
-    const { result, cleanupPending } = inspect(id);
+    const { result, cleanupPending, owner } = inspect(id);
+    if (owner)
+      throw Error(
+        `Session ${id} is still owned by live process ${owner} (orphaned by an earlier coordinator); stop it before resuming, or delete its .owner record if that PID is unrelated`,
+      );
     if (cleanupPending)
       throw Error(`Browser cleanup unconfirmed for ${id}; confirm the browser is closed and remove its .cleanup-pending marker before resuming`);
     if (!result || notAnOutcome(result)) return { cell, id, reuse: null };
