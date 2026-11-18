@@ -51,8 +51,19 @@ function resolveLiteral(text, testDir, base) {
 }
 
 /** 'file' inside `new URL(<node>, import.meta.url)`, 'cwd' as a direct fs-read argument, else null (unknown). */
-function resolutionBase(node) {
+function resolutionBase(node, depth = 0) {
   const parent = node.parent;
+  // `const fixturePath = './src/x.ts'`: the base is decided where the variable is used.
+  if (ts.isVariableDeclaration(parent) && parent.initializer === node && ts.isIdentifier(parent.name) && depth < MAX_DEPTH) {
+    const bases = new Set();
+    const name = parent.name.text;
+    const visit = (child) => {
+      if (ts.isIdentifier(child) && child.text === name && child !== parent.name) bases.add(resolutionBase(child, depth + 1));
+      ts.forEachChild(child, visit);
+    };
+    visit(node.getSourceFile());
+    return bases.size === 1 ? [...bases][0] : null;
+  }
   if (ts.isNewExpression(parent) && parent.expression.getText() === 'URL' && parent.arguments?.[0] === node) {
     return parent.arguments[1]?.getText() === 'import.meta.url' ? 'file' : null;
   }
@@ -84,6 +95,7 @@ const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const HOLE = '\u0000';
 const ARRAY_CALLBACKS = new Set(['map', 'flatMap', 'forEach', 'filter', 'some', 'every']);
 const MAX_DEPTH = 8;
+const MAX_EXPANSIONS = 10_000;
 
 const isFunctionLike = (node) => ts.isArrowFunction(node) || ts.isFunctionExpression(node) || ts.isFunctionDeclaration(node);
 const union = (sets) => (sets.some((set) => set === null) ? null : new Set(sets.flatMap((set) => [...set])));
@@ -194,7 +206,9 @@ export function scanTestSource(text, testFile, tree) {
     if (!parts.join('').includes('src/')) continue;
     const base = resolutionBase(node);
     const holeValues = node.templateSpans.map((span) => valuesOf(span.expression));
-    if (holeValues.every((values) => values !== null)) {
+    // Expansion is a cartesian product; past MAX_EXPANSIONS fall through to the pattern match below instead.
+    const combinations = holeValues.reduce((product, values) => product * (values === null ? Number.POSITIVE_INFINITY : values.size), 1);
+    if (combinations <= MAX_EXPANSIONS) {
       // Every hole traced to literals (which may hold '/', e.g. file = 'lc0/maia3.ts'): expand and resolve each.
       let expansions = [parts[0]];
       holeValues.forEach((values, i) => {

@@ -76,6 +76,23 @@ test('plain fs paths resolve from the repo root, URL paths from the test file', 
   assert.deepEqual(scan("import { readFileSync } from 'node:fs';\nreadFileSync(new URL('./src/fake/util.ts', import.meta.url));"), []);
 });
 
+test('a variable holding a path takes its base from where it is used', () => {
+  const viaUrl = "import { readFileSync } from 'node:fs';\nconst fixturePath = './src/fake/util.ts';\nreadFileSync(new URL(fixturePath, import.meta.url));";
+  assert.deepEqual(scan(viaUrl), []);
+  const viaFs = "import { readFileSync } from 'node:fs';\nconst fixturePath = './src/fake/util.ts';\nreadFileSync(fixturePath, 'utf8');";
+  assert.deepEqual(scan(viaFs), ['src/fake/util.ts']);
+});
+
+test('a huge cartesian product of traced holes falls back to pattern matching', () => {
+  const values = Array.from({ length: 10 }, (_, i) => `'x${i}'`).join(', ');
+  const text = holes(
+    `import { readFileSync } from 'node:fs';\nfor (const h of [${values}]) readFileSync(new URL(\`../src/fake/#{h}#{h}#{h}#{h}#{h}#{h}#{h}#{h}.ts\`, import.meta.url));`,
+  );
+  const started = performance.now();
+  assert.deepEqual(scan(text), []);
+  assert.ok(performance.now() - started < 2000);
+});
+
 test('traced hole values containing a slash expand before matching', () => {
   const text = holes(
     "import { readFileSync } from 'node:fs';\nfor (const file of ['fake/util.ts', 'fake/playBrowser.ts']) readFileSync(new URL(`../src/#{file}`, import.meta.url));",
