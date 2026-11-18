@@ -157,7 +157,7 @@ import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
-import { requestLargeNetConsent, requestLargeNetDownloadConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
+import { requestLargeNetDownloadConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { untilAborted } from './modelCache.ts';
@@ -511,6 +511,8 @@ let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown'
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
 // A picker acceptance approves its next startup, not every future uncached run.
 const arenaDownloadApprovals = new Set<BigNetKey>();
+/** Big nets the current run may download. A Start check that found one cached approved no download. */
+const arenaRunDownloads = new Set<BigNetKey>();
 let arenaPickerConsentAbort: AbortController | null = null;
 function abortArenaPickerConsent(): void {
   arenaPickerConsentAbort?.abort();
@@ -518,6 +520,14 @@ function abortArenaPickerConsent(): void {
 }
 async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
   const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
+  // Storage can evict a model that was cached at Start (loading Lc0 Small into a
+  // full cache is enough), so a load not covered by a download approval asks again.
+  if (isMemoryConstrainedDevice() && !arenaRunDownloads.has(key) && !peekBigNetSearcher(key)?.loaded) {
+    const consent = await requestLargeNetDownloadConsent(BIG_NETS[key], signal);
+    signal.throwIfAborted();
+    if (!consent) throw new Error(`Lc0 ${BIG_NETS[key].name} is no longer cached and its download was not approved.`);
+    if (consent === 'download') arenaRunDownloads.add(key);
+  }
   const reclaim =
     isMemoryConstrainedDevice() &&
     preparePhoneBigNet(
@@ -4342,6 +4352,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     return;
   }
   const checkedBigNetVariants = new Set<string>();
+  arenaRunDownloads.clear();
   for (const row of bigNetRows) {
     if (!isLc0BigNetVariant(row.variant) || checkedBigNetVariants.has(row.variant)) continue;
     checkedBigNetVariants.add(row.variant);
@@ -4356,13 +4367,14 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       return;
     }
     // URL/restored rosters and resumed checkpoints never imply download approval.
-    if (isMemoryConstrainedDevice() && !arenaDownloadApprovals.delete(row.variant)) {
-      const approved = await requestLargeNetConsent(config, matchAbort.signal);
+    if (isMemoryConstrainedDevice()) {
+      const consent = arenaDownloadApprovals.delete(row.variant) ? 'download' : await requestLargeNetDownloadConsent(config, matchAbort.signal);
       if (startupCancelled()) return;
-      if (!approved) {
+      if (!consent) {
         clearStartPending();
         return;
       }
+      if (consent === 'download') arenaRunDownloads.add(row.variant);
     }
   }
   const engineA = participants[0].engine!;

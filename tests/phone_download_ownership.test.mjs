@@ -196,7 +196,8 @@ for (const phase of [
       phoneLargeNetsBlocked: () => revoked,
       ARENA_BIG_NET_KEYS: ['bt4', 't3'],
       arenaDownloadApprovals: new Set(phase === 'save-with-approval' ? ['bt4'] : []),
-      requestLargeNetConsent: (config, signal) => {
+      arenaRunDownloads: new Set(),
+      requestLargeNetDownloadConsent: (config, signal) => {
         prompts++;
         assert.equal(config, BIG_NETS.bt4);
         assert.equal(signal.aborted, false);
@@ -205,7 +206,7 @@ for (const phase of [
           paused = true;
           return gate.promise.then(() => false);
         }
-        return wait('download', true);
+        return wait('download', 'download');
       },
       disposeBigNetSearcherNow() {},
       renderSeatSelectors() {},
@@ -298,6 +299,75 @@ for (const phase of [
     assert.doesNotMatch(el('message').textContent, /failed/);
   });
 }
+
+test('Arena Start carries its consent to the load: a cache hit approves no download', async () => {
+  const loopStart = source.arena.indexOf('  const checkedBigNetVariants = new Set<string>();');
+  const loopEnd = source.arena.indexOf('  const engineA = participants[0].engine!;', loopStart);
+  assert.ok(loopStart >= 0 && loopEnd > loopStart, 'production boundaries: Start consent loop');
+  const start = stripTypeScriptTypes(`async function start() {\n${source.arena.slice(loopStart, loopEnd)}}`);
+  const bigNetFor = extract(source.arena, 'async function bigNetFor(', 'let runtimeIsolation');
+  const prompts = [];
+  let answer = 'cached';
+  let loaded = false;
+  const deps = {
+    arenaRunDownloads: new Set(),
+    arenaDownloadApprovals: new Set(),
+    bigNetRows: [{ family: 'lc0', variant: 'bt4' }],
+    isLc0BigNetVariant: (key) => key === 'bt4' || key === 't3',
+    BIG_NETS,
+    checkBigNetAsset: async () => 'present',
+    whileArenaMounted: (fn) => fn,
+    renderSeatSelectors() {},
+    startupCancelled: () => false,
+    isMemoryConstrainedDevice: () => true,
+    matchAbort: new AbortController(),
+    requestLargeNetDownloadConsent: async (config) => {
+      prompts.push(config.key);
+      return answer;
+    },
+    clearStartPending() {},
+    peekBigNetSearcher: () => ({ loaded }),
+    preparePhoneBigNet: () => null,
+    arenaCacheEntries: () => 0,
+    disposeArenaCpuEngines() {},
+    el: () => ({}),
+    acquireBigNetSearcherAsync: async () => {
+      loaded = true;
+      return { loaded };
+    },
+  };
+  const api = new Function(
+    'deps',
+    `let { ${Object.keys(deps)} } = deps;
+    ${bigNetFor}
+    ${start}
+    return { start, bigNetFor };`,
+  )(deps);
+  const signal = new AbortController().signal;
+
+  // Cached at Start: the load must ask again, since storage may have evicted it.
+  await api.start();
+  assert.deepEqual(prompts, ['bt4']);
+  assert.equal(deps.arenaRunDownloads.has('bt4'), false);
+  answer = false;
+  await assert.rejects(api.bigNetFor('bt4', signal), /no longer cached/);
+  assert.equal(loaded, false, 'a declined download never reaches the loader');
+  answer = 'download';
+  await api.bigNetFor('bt4', signal);
+  assert.equal(loaded, true);
+  assert.deepEqual(prompts, ['bt4', 'bt4', 'bt4']);
+  loaded = false;
+  await api.bigNetFor('bt4', signal);
+  assert.equal(prompts.length, 3, 'an approved download is not asked again within the run');
+
+  // A picker or Start download approval covers the run's loads.
+  prompts.length = 0;
+  deps.arenaDownloadApprovals.add('bt4');
+  await api.start();
+  loaded = false;
+  await api.bigNetFor('bt4', signal);
+  assert.deepEqual(prompts, []);
+});
 
 const restoreGuard = extract(source.play, 'async function ctxCheckRestoredDownloadConsent(', '/** Imported setup must not make');
 const readinessEntry = extract(source.play, 'async function ctxVerifySelectedEngineReady(', '  const generation =', 'await retirement;\nadmit();\n}');

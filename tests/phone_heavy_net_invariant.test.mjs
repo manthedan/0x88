@@ -313,6 +313,8 @@ function arenaOwner(disposeArenaCpuEngines = nop) {
     {
       row,
       ARENA_BIG_NET_KEYS: keys,
+      arenaRunDownloads: new Set(),
+      requestLargeNetDownloadConsent: async () => 'cached',
       disposeArenaCpuEngines,
       arenaCacheEntries: () => 2048,
       showDownloadProgress: nop,
