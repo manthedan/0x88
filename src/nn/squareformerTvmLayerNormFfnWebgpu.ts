@@ -116,14 +116,16 @@ export class SquareformerTvmLayerNormFfnWebgpuBlock {
   private layerNormBias: GPUBuffer;
   private podArgs: GPUBuffer;
   private ffn: SquareformerTvmFfnWebgpuBlock;
+  private readonly device: GPUDevice;
 
   private constructor(
-    private device: GPUDevice,
+    device: GPUDevice,
     shape: SquareformerTvmFfnShape,
     layerNormPipeline: GPUComputePipeline,
     ffn: SquareformerTvmFfnWebgpuBlock,
     buffers: { residual: GPUBuffer; normalized: GPUBuffer; layerNormWeight: GPUBuffer; layerNormBias: GPUBuffer; podArgs: GPUBuffer },
   ) {
+    this.device = device;
     this.shape = shape;
     this.layerNormPipeline = layerNormPipeline;
     this.ffn = ffn;

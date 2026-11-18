@@ -96,9 +96,10 @@ export class SquareformerTvmValueHeadWebgpuBlock {
   private wdlBias: GPUBuffer;
   private qWeight: GPUBuffer;
   private qBias: GPUBuffer;
+  private readonly device: GPUDevice;
 
   private constructor(
-    private device: GPUDevice,
+    device: GPUDevice,
     shape: SquareformerTvmFfnShape,
     pipeline: GPUComputePipeline,
     buffers: {
@@ -113,6 +114,7 @@ export class SquareformerTvmValueHeadWebgpuBlock {
       qBias: GPUBuffer;
     },
   ) {
+    this.device = device;
     this.shape = shape;
     this.pipeline = pipeline;
     this.input = buffers.input;

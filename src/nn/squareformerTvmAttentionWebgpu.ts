@@ -118,13 +118,15 @@ export class SquareformerTvmAttentionWebgpuBlock {
   private output: GPUBuffer;
   private readback: GPUBuffer;
   private podArgs: GPUBuffer;
+  private readonly device: GPUDevice;
 
   private constructor(
-    private device: GPUDevice,
+    device: GPUDevice,
     shape: SquareformerTvmAttentionShape,
     pipeline: GPUComputePipeline,
     buffers: { qkv: GPUBuffer; bias: GPUBuffer; output: GPUBuffer; readback: GPUBuffer; podArgs: GPUBuffer },
   ) {
+    this.device = device;
     this.shape = shape;
     this.pipeline = pipeline;
     this.qkv = buffers.qkv;

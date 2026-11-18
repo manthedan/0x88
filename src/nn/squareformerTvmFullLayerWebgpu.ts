@@ -36,14 +36,16 @@ export class SquareformerTvmFullLayerWebgpuBlock {
   private qkv: SquareformerTvmLayerNormQkvWebgpuBlock;
   private attention: SquareformerTvmAttentionWebgpuBlock;
   private output: SquareformerTvmAttnOutLnFfnWebgpuBlock;
+  private readonly device: GPUDevice;
 
   private constructor(
-    private device: GPUDevice,
+    device: GPUDevice,
     shape: SquareformerTvmFullLayerShape,
     qkv: SquareformerTvmLayerNormQkvWebgpuBlock,
     attention: SquareformerTvmAttentionWebgpuBlock,
     output: SquareformerTvmAttnOutLnFfnWebgpuBlock,
   ) {
+    this.device = device;
     this.shape = shape;
     this.qkv = qkv;
     this.attention = attention;

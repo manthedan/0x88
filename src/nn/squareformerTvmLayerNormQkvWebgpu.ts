@@ -104,9 +104,10 @@ export class SquareformerTvmLayerNormQkvWebgpuBlock {
   private qkvBias: GPUBuffer;
   private layerNormPodArgs: GPUBuffer;
   private qkvPodArgs: GPUBuffer;
+  private readonly device: GPUDevice;
 
   private constructor(
-    private device: GPUDevice,
+    device: GPUDevice,
     shape: SquareformerTvmFfnShape,
     layerNormPipeline: GPUComputePipeline,
     qkvPipeline: GPUComputePipeline,
@@ -123,6 +124,7 @@ export class SquareformerTvmLayerNormQkvWebgpuBlock {
       qkvPodArgs: GPUBuffer;
     },
   ) {
+    this.device = device;
     this.shape = shape;
     this.layerNormPipeline = layerNormPipeline;
     this.qkvPipeline = qkvPipeline;

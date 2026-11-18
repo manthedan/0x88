@@ -105,9 +105,10 @@ export class SquareformerTvmPolicyHeadWebgpuBlock {
   private policyPromoBias: GPUBuffer;
   private matmulPodArgs: GPUBuffer;
   private concatPodArgs: GPUBuffer;
+  private readonly device: GPUDevice;
 
   private constructor(
-    private device: GPUDevice,
+    device: GPUDevice,
     shape: SquareformerTvmPolicyHeadShape,
     pipelines: { pair: GPUComputePipeline; promo: GPUComputePipeline; concat: GPUComputePipeline },
     buffers: {
@@ -127,6 +128,7 @@ export class SquareformerTvmPolicyHeadWebgpuBlock {
       concatPodArgs: GPUBuffer;
     },
   ) {
+    this.device = device;
     this.shape = shape;
     this.pairPipeline = pipelines.pair;
     this.promoPipeline = pipelines.promo;

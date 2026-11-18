@@ -68,15 +68,17 @@ export class SquareformerTvmLegalPolicyGatherWebgpuBlock {
   private output: GPUBuffer;
   private readback: GPUBuffer;
   private podArgs: GPUBuffer;
+  private readonly device: GPUDevice;
 
   private constructor(
-    private device: GPUDevice,
+    device: GPUDevice,
     pipeline: GPUComputePipeline,
     legalCount: number,
     maxLegalCount: number,
     policySize: number,
     buffers: { policy: GPUBuffer; indices: GPUBuffer; output: GPUBuffer; readback: GPUBuffer; podArgs: GPUBuffer },
   ) {
+    this.device = device;
     this.pipeline = pipeline;
     this.legalCount = legalCount;
     this.maxLegalCount = maxLegalCount;

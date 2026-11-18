@@ -156,9 +156,10 @@ export class SquareformerTvmFfnWebgpuBlock {
   private hidden: GPUBuffer;
   private output: GPUBuffer;
   private readback: GPUBuffer;
+  private readonly device: GPUDevice;
 
   private constructor(
-    private device: GPUDevice,
+    device: GPUDevice,
     shape: SquareformerTvmFfnShape,
     dense1Pipeline: GPUComputePipeline,
     dense2Pipeline: GPUComputePipeline,
@@ -175,6 +176,7 @@ export class SquareformerTvmFfnWebgpuBlock {
       readback: GPUBuffer;
     },
   ) {
+    this.device = device;
     this.shape = shape;
     this.dense1Pipeline = dense1Pipeline;
     this.dense2Pipeline = dense2Pipeline;

@@ -62,9 +62,10 @@ export class SquareformerTvmAttnOutLnFfnWebgpuBlock {
   private attnOutBias: GPUBuffer;
   private podArgs: GPUBuffer;
   private lnFfn: SquareformerTvmLayerNormFfnWebgpuBlock;
+  private readonly device: GPUDevice;
 
   private constructor(
-    private device: GPUDevice,
+    device: GPUDevice,
     shape: SquareformerTvmFfnShape,
     attnOutPipeline: GPUComputePipeline,
     lnFfn: SquareformerTvmLayerNormFfnWebgpuBlock,
@@ -77,6 +78,7 @@ export class SquareformerTvmAttnOutLnFfnWebgpuBlock {
       podArgs: GPUBuffer;
     },
   ) {
+    this.device = device;
     this.shape = shape;
     this.attnOutPipeline = attnOutPipeline;
     this.lnFfn = lnFfn;

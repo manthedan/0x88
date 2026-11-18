@@ -202,12 +202,14 @@ export class SquareformerTvmInputStemWebgpuBlock {
   private weights: GPUBuffer;
   private output: GPUBuffer;
   private readback: GPUBuffer;
+  private readonly device: GPUDevice;
 
   private constructor(
-    private device: GPUDevice,
+    device: GPUDevice,
     pipeline: GPUComputePipeline,
     buffers: { tokens: GPUBuffer; attackSummary: GPUBuffer; weights: GPUBuffer; output: GPUBuffer; readback: GPUBuffer },
   ) {
+    this.device = device;
     this.pipeline = pipeline;
     this.tokens = buffers.tokens;
     this.attackSummary = buffers.attackSummary;
