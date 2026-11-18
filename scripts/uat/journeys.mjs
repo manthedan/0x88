@@ -17,6 +17,9 @@ const SAN_COUNT = `document.querySelectorAll('#moveList .san').length`;
 const MANAGER_OPEN = `!!document.querySelector('#engineManager')?.open`;
 const STOP_ENABLED = `!!document.querySelector('#stop') && !document.querySelector('#stop').disabled`;
 const ANALYZE_ENABLED = `!!document.querySelector('#analyze') && !document.querySelector('#analyze').disabled`;
+// Either backend's progress (worker or main-thread fallback) shows as a searching card or a result line.
+const SEARCH_VISIBLE = `window.__analysisSchedulingState().workerProgressMessages > 0 || !!document.querySelector('#engineSummaries .engine-card.searching, #engineSummaries .result-line[data-pv]')`;
+const VISIBLE = (selector) => `(() => { const e = document.querySelector('${selector}'); return !!e && e.getBoundingClientRect().width > 0; })()`;
 // BT4's card: a principal variation for the position on the board, or the engine's error line.
 const BT4_CARD = `[...document.querySelectorAll('#engineSummaries .engine-card')].find(c => /BT4/.test(c.getAttribute('aria-label') ?? ''))`;
 const BT4_RESULT = `(() => { const card = ${BT4_CARD}; if (!card) return null; const error = card.querySelector('.line-error'); if (error) return { error: error.textContent }; const fen = window.__analysisSchedulingState().fen; return [...card.querySelectorAll('.result-line[data-pv]')].some(r => r.dataset.pv && r.dataset.pvFen === fen) ? { pv: true } : null; })()`;
@@ -90,6 +93,12 @@ async function playPromotion(ctx) {
     await ctx.pause(2000);
   });
   await ctx.step('Play from here', async () => {
+    // Up to 600 px the action lives in the closed Board tools disclosure.
+    if (await ctx.evaluate(`${VISIBLE('#boardToolsButton')} && document.querySelector('#boardToolsButton').getAttribute('aria-expanded') !== 'true'`)) {
+      await ctx.click('#boardToolsButton');
+      await waitFor(ctx.evaluate, VISIBLE('#playFromHere'), 10000);
+      await ctx.pause(600); // let the reviewer see the open menu
+    }
     await ctx.click('#playFromHere');
     await waitFor(ctx.evaluate, `location.pathname === '/app/play/' && ${PLAY_READY}`, 60000);
   });
@@ -140,11 +149,14 @@ async function ensureActiveSearch(ctx) {
 async function analysisEngines(ctx) {
   await ctx.step('two engines streaming', async () => {
     await waitFor(ctx.evaluate, `${ANALYSIS_READY} && document.querySelectorAll('#engineList .engine-row').length >= 2`, 120000);
+    // Below 768 px only one results view shows; the steps below are about the engine cards.
+    if (await ctx.evaluate(`innerWidth < 768 && ${VISIBLE('#enginesTab')} && document.querySelector('#enginesTab').getAttribute('aria-selected') !== 'true'`))
+      await ctx.click('#enginesTab');
     ctx.note('info', `default rows ${JSON.stringify(await ctx.evaluate(ROWS))}`);
     // Analyze stays disabled while the first backend loads; auto-analysis may start on its own.
     await waitFor(ctx.evaluate, `window.__analysisSchedulingState().analyzing || ${ANALYZE_ENABLED}`, 180000);
     if (!(await ctx.evaluate(`window.__analysisSchedulingState().analyzing`))) await ctx.click('#analyze');
-    await waitFor(ctx.evaluate, `window.__analysisSchedulingState().workerProgressMessages > 0`, 180000);
+    await waitFor(ctx.evaluate, SEARCH_VISIBLE, 180000);
     await ctx.pause(5000);
   });
   await ctx.step('open engine manager', () => openManager(ctx));
