@@ -115,7 +115,8 @@ The queue holds `SP/benchlock` for nominal 16-minute chunks (13 minutes active d
 
 ```sh
 # Never npm install/ci in this worktree (node_modules is shared).
-BUILD_SCOPE=product npm run build:client
+# Plain build: BUILD_SCOPE=product omits /lab/ routes (2026-11-18).
+npm run build:client
 PORT=5187 npm run web:isolated:static
 # The script obtains benchlock itself. B2 is no longer in its default queue.
 zsh scripts/batching_strength_queue.sh b1-v100 lqo-v256 b1-v400 lqo-time

@@ -51,7 +51,8 @@ On the four fixture histories, batch 4 differs from batch 1 by at most **0.00244
 ## Reproduction and limitations
 
 ```sh
-BUILD_SCOPE=product npm run build:client
+# Plain build: BUILD_SCOPE=product omits /lab/ routes (2026-11-18).
+npm run build:client
 node scripts/serve_isolated_static.mjs dist-client 5198
 # Open /lab/arena-simul/, keep 8 visits / 160 plies, Run N=2 then N=4.
 # N=8 is enabled only if the matching N=4 gate helps. Export evidence before leaving.
