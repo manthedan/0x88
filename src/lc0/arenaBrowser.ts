@@ -4152,6 +4152,31 @@ function applyCheckpointConfig(saved: ArenaCheckpoint): void {
   refreshSeatControls();
 }
 
+/** Results, match status and PGN export of a saved run that is not playing. */
+function presentSavedCheckpoint(saved: ArenaCheckpoint): void {
+  showCheckpointResults(saved);
+  arenaMatchState = arenaRemainingIndices(saved).length ? 'stopped' : 'final';
+  el('message').textContent = arenaMatchState === 'final' ? 'Saved tournament results.' : 'A saved tournament is ready to resume.';
+  inputEl('pgnOut').value = '';
+  inputEl('pgnOut').hidden = true;
+  // Inspect results without loading engines or changing the saved configuration.
+  const last = saved.completed.at(-1);
+  if (last) {
+    const trail = finishedTrails[last.scheduleIndex];
+    liveTrail = trail;
+    historyBoards = trail.entries.map((entry) => parseFen(entry.fen));
+    board = historyBoards[historyBoards.length - 1];
+    lastUci = trail.entries.at(-1)?.uci ?? null;
+    const scheduled = saved.schedule[last.scheduleIndex];
+    setBoardSideEngines(null, resultsNames.get(scheduled.whiteId)!, null, resultsNames.get(scheduled.blackId)!);
+    enterReview(trail, trail.entries.length - 1);
+  } else if (reviewing || liveTrail) {
+    // The replaced run's game must not stay on the board as this run's.
+    liveTrail = null;
+    exitReview();
+  }
+}
+
 function showCheckpointResults(saved: ArenaCheckpoint): void {
   resultsSchedule = hydrateArenaSchedule(saved);
   resultsNames = new Map(saved.config.seats.map((seat) => [seat.id, seat.name]));
@@ -4401,7 +4426,11 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     if (error instanceof ArenaCheckpointConflictError) throw error;
     checkpointProblem = `Not saved: ${error instanceof Error ? error.message : String(error)} Keep this tab open and export PGN before leaving.`;
   }
-  if (startupCancelled()) return;
+  if (startupCancelled()) {
+    // The save replaced the stored run, so show that run's results, not the replaced one's.
+    if (checkpoint === runCheckpoint && abort === matchAbort && !isStaleMount(mountSignal)) presentSavedCheckpoint(runCheckpoint);
+    return;
+  }
   checkpoint = runCheckpoint;
   const pendingIndices = arenaRemainingIndices(runCheckpoint);
   startPending = false;
@@ -5508,21 +5537,7 @@ async function init(mountSignal: AbortSignal) {
     checkpoint = saved;
     checkpointToken = saved ? { runId: saved.runId, revision: saved.revision } : null;
     if (saved) {
-      showCheckpointResults(saved);
-      arenaMatchState = arenaRemainingIndices(saved).length ? 'stopped' : 'final';
-      el('message').textContent = arenaMatchState === 'final' ? 'Saved tournament results.' : 'A saved tournament is ready to resume.';
-      // Inspect results without loading engines or changing the saved configuration.
-      const last = saved.completed.at(-1);
-      if (last) {
-        const trail = finishedTrails[last.scheduleIndex];
-        liveTrail = trail;
-        historyBoards = trail.entries.map((entry) => parseFen(entry.fen));
-        board = historyBoards[historyBoards.length - 1];
-        lastUci = trail.entries.at(-1)?.uci ?? null;
-        const scheduled = saved.schedule[last.scheduleIndex];
-        setBoardSideEngines(null, resultsNames.get(scheduled.whiteId)!, null, resultsNames.get(scheduled.blackId)!);
-        enterReview(trail, trail.entries.length - 1);
-      }
+      presentSavedCheckpoint(saved);
       setArenaStartDisabled(false);
       syncArenaPhase();
     }

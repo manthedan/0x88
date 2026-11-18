@@ -158,6 +158,7 @@ for (const phase of [
     let revoked = false;
     let admitted = 0;
     let prompts = 0;
+    const presented = [];
     const nodes = new Map();
     const el = (id) => {
       if (!nodes.has(id)) nodes.set(id, { textContent: '', value: '' });
@@ -239,6 +240,7 @@ for (const phase of [
       checkpoint: null,
       hideEngineWarmupStatus() {},
       renderCheckpointStatus() {},
+      presentSavedCheckpoint: (saved) => presented.push(saved),
       arenaRemainingIndices: () => {
         admitted++;
         throw new Error('cancelled startup entered a live match');
@@ -289,6 +291,8 @@ for (const phase of [
       const saved = phase === 'save' || phase === 'save-with-approval' ? { runId: 'test', revision: 1 } : null;
       assert.deepEqual(api.state(), { running: false, startPending: false, abort: null, checkpoint: saved });
       assert.deepEqual(api.token(), saved);
+      // Results, status and PGN export follow the stored run, not the one it replaced.
+      assert.deepEqual(presented, saved ? [saved] : []);
     }
     assert.equal(admitted, 0);
     assert.doesNotMatch(el('message').textContent, /failed/);
