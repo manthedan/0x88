@@ -60,6 +60,21 @@ For different builds, run `up` with **two distinct local state directories, loca
 
 Safari needs only Node, clang/pidfp and the existing driver (`4446` on the mini); no browser is installed or driver started. It must have an **unlocked, visible automation window**. The harness activates Safari only after acquiring its own session, records visibility changes, and rejects any hidden interval throughout the natural journey/settle/residual windows, even if visibility is restored before the final poll. A locked console is an external blocker; do not falsify visibility, disable the app's hidden-tab pause, or unlock it unattended. Headless Chrome can run on the locked mini: provision `playwright` and `playwright-core` matching the worktree under the isolated workspace's `node_modules`, and use `--browser chrome`. It launches its own installed Google Chrome, never a user's browser/profile. Chrome and Safari both hold the same machine mutex for the entire measured session. Capture laptop load as well when it serves mini assets.
 
+### Linux / NVIDIA second datapoint
+
+A Linux box with an NVIDIA GPU (Yukon: RTX 3090) approximates Windows/NVIDIA Chrome users. It is a separate datapoint: it never replaces the macOS gate, and `compareRuns` refuses any cohort that mixes platforms (each session records `platform`). Only `--browser chrome` runs there.
+
+```sh
+PERF_ROUTES_CHROMIUM=~/.cache/ms-playwright/chromium-1228/chrome-linux64/chrome \
+npm run perf:routes -- --baseline main --candidate HEAD --browser chrome --repeats 5 \
+  --lock-dir ~/perf-routes.lock --out .local-dev-artifacts/perf-routes/linux-main-vs-branch
+```
+
+- **Browser:** Playwright's Chromium in new-headless mode with `--enable-unsafe-webgpu --enable-features=Vulkan --use-angle=vulkan --disable-vulkan-surface` (Linux only). No display or Xvfb is needed. Without these flags WebGPU is blocklisted and WebGL falls back to SwiftShader. Headless `requestAdapter()` with no options returns null, but the app always requests `high-performance`, which returns the NVIDIA Vulkan adapter. After all natural observations the session asserts a hardware adapter (`webgpuAdapter`), so a SwiftShader/llvmpipe fallback is invalid instead of being measured. `PERF_ROUTES_CHROMIUM` selects a binary when the installed Playwright expects a Chromium revision that is not downloaded.
+- **Memory:** per process, `/proc/<pid>/smaps_rollup` `Pss_Dirty + SwapPss` (Linux ≥ 6.0). This is the closest match to `phys_footprint`. Plain PSS would add clean shared-library pages (~130 MiB in the GPU process). Private_Dirty would drop dirty memory shared between the renderer and GPU process (WebGPU transfer/mapping buffers). Proportional dirty memory counts each shared page once in the renderer+GPU sum. The GPU process also adds its `nvidia-smi --query-compute-apps` VRAM, because Metal allocations are part of the GPU process footprint on Apple unified memory. `memory.gpuVramPeakMb` reports VRAM alone. NVIDIA reports VRAM per process context at driver granularity, not WebGPU buffer sizes. Pinned host staging memory is in device mappings that smaps does not count.
+- **Peaks are sampled:** Linux has no kernel high-water mark for these counters, so interval/lifetime peaks are maxima of the ~100 ms reads, unlike `pidfp`.
+- **Prerequisites:** NVIDIA driver with `nvidia-smi`, the worktree's `node_modules`, and the same staged local assets (models, engines) that a Mac run needs.
+
 ## Journeys (fresh browser session/origin each time)
 
 1. **Analysis default:** cold mid-game FEN URL, Lc0 Small + SF Lite default rows; auto-analysis on, real user-move hook while analyzing, then a 60 s observation window starting at the move. Defaults are finite search budgets, not an artificial infinite search. Within that window require a worker progress message or result for the exact post-move FEN and visible PVs for every selected engine (a zero-new-visit reused-root response proves the request but adds no speed sample).
