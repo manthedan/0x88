@@ -2,11 +2,11 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sleep } from '../perf_matrix/common.mjs';
 import { compareRuns, HELP, parseArgs, plan, previewEnvironment } from './gate.mjs';
+import { acquireLock, claimOutput, runOwnedSession, shutdownDelay, watchShutdown } from './lifecycle.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 // Build/archive/git/file operations are confined to the calling worktree's ignored output tree.
@@ -21,7 +21,18 @@ if (args.report) {
   report(resolve(args.report));
   process.exitCode = exitFor(resolve(args.report));
 } else if (args['dry-run']) console.log(JSON.stringify(plan(args), null, 2));
-else await run();
+else {
+  const { signal, dispose } = watchShutdown();
+  try {
+    await run(signal);
+  } catch (error) {
+    if (error !== signal.reason) throw error;
+    console.error(error.message);
+    process.exitCode = error.exitCode;
+  } finally {
+    dispose();
+  }
+}
 
 function command(bin, argv, cwd = root) {
   console.log(`pwd: ${process.cwd()}; ${bin} ${argv.join(' ')}`);
@@ -113,33 +124,17 @@ async function serve(dist, out, arm) {
   child.kill('SIGTERM'); // this exact child was started here
   throw Error('Static server did not become ready');
 }
-async function lock(dir) {
-  const owner = `${hostname()} ${process.pid} ${new Date().toISOString()}`;
-  for (;;) {
-    try {
-      mkdirSync(dir);
-      writeFileSync(join(dir, 'owner'), `${owner}\n`);
-      break;
-    } catch (e) {
-      if (e.code !== 'EEXIST') throw e;
-    }
-    console.log(`Waiting for shared mutex ${dir}; no stale/foreign lock is removed`);
-    await sleep(5000);
-  }
-  return () => {
-    if (readFileSync(join(dir, 'owner'), 'utf8').trim() === owner) rmSync(dir, { recursive: true });
-  };
-}
-async function run() {
+async function run(signal) {
   const out = resolve(args.out ?? `.local-dev-artifacts/perf-routes/${new Date().toISOString().replace(/[:.]/g, '-')}`);
-  if (existsSync(join(out, 'plan.json'))) throw Error('Use a new --out directory; completed/failed attempts are immutable');
   if (args.benchlock && !existsSync(args.benchlock)) throw Error('benchlock does not exist');
-  mkdirSync(join(out, 'sessions'), { recursive: true });
+  claimOutput(out);
+  mkdirSync(join(out, 'sessions'));
   writeFileSync(join(out, 'plan.json'), JSON.stringify(args, null, 2));
   const servers = [];
   try {
     const builds = {};
     for (const arm of ['baseline', 'candidate']) {
+      signal.throwIfAborted();
       if (args[`${arm}-url`]) builds[arm] = { input: args[arm], base: args[`${arm}-url`], kind: 'externally-served' };
       else {
         // Self comparisons share identical bytes, but use separate origins/sessions.
@@ -149,34 +144,37 @@ async function run() {
         builds[arm].base = server.base;
       }
     }
+    signal.throwIfAborted();
     writeFileSync(join(out, 'builds.json'), JSON.stringify(builds, null, 2));
     if (args['build-only']) return;
-    for (const [i, cell] of plan(args).entries()) {
+    const cells = plan(args);
+    for (const [i, cell] of cells.entries()) {
+      signal.throwIfAborted();
       const id = `${String(i).padStart(3, '0')}-${cell.browser}-${cell.journey}-${cell.arm}-r${cell.repeat}`;
       const specFile = join(out, 'sessions', `${id}.spec.json`),
         resultFile = join(out, 'sessions', `${id}.json`);
       writeFileSync(specFile, JSON.stringify({ ...cell, base: builds[cell.arm].base, source: builds[cell.arm], driver: args.driver }, null, 2));
-      console.log(`[${i + 1}/${plan(args).length}] ${id}`);
+      console.log(`[${i + 1}/${cells.length}] ${id}`);
       let status;
       do {
-        const release = args['lock-dir'] ? await lock(resolve(args['lock-dir'])) : () => {};
+        const release = args['lock-dir'] ? await acquireLock(resolve(args['lock-dir']), signal) : () => {};
         try {
           const commandArgs = [join(root, 'scripts/perf_routes/session.mjs'), specFile, resultFile];
           const bin = args.benchlock ?? process.execPath;
-          const proc = spawnSync(bin, args.benchlock ? [process.execPath, ...commandArgs] : commandArgs, { stdio: 'inherit' });
-          status = proc.status;
+          status = await runOwnedSession(bin, args.benchlock ? [process.execPath, ...commandArgs] : commandArgs, signal, !!args.benchlock);
         } finally {
           release();
         }
-        if (status === 75) {
+        if (status === 75 && !signal.aborted) {
           console.log('Shared Safari busy; mutex released; retry in 30s');
-          await sleep(30000);
+          await shutdownDelay(30000, signal);
         }
-      } while (status === 75);
+      } while (status === 75 && !signal.aborted);
       const row = existsSync(resultFile)
         ? JSON.parse(readFileSync(resultFile, 'utf8'))
         : { ...cell, status: 'invalid', error: `session process exited ${status}` };
       appendFileSync(join(out, 'runs.jsonl'), `${JSON.stringify(row)}\n`);
+      signal.throwIfAborted();
       report(out);
     }
   } finally {

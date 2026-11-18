@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer, get } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { startCountingProxy } from '../scripts/perf_matrix/proxy.mjs';
 import {
   compareRuns,
+  footprintSum,
   JOURNEYS,
   jsBytesByRoute,
   naturalVisibilityValid,
@@ -13,11 +18,14 @@ import {
   peakFootprint,
   plan,
   previewEnvironment,
+  requestFailures,
+  safariWebContentPid,
   stats,
   verdict,
 } from '../scripts/perf_routes/gate.mjs';
 import { chooseHumanMove, playHumanTurn } from '../scripts/perf_routes/human.mjs';
 import { arenaGameFailed, DOCS_READY, requireAnalysisForMove } from '../scripts/perf_routes/journeys.mjs';
+import { acquireLock, claimOutput } from '../scripts/perf_routes/lifecycle.mjs';
 
 const args = (...extra) => parseArgs(['--baseline', 'main', '--candidate', 'HEAD', '--dry-run', ...extra]);
 
@@ -44,6 +52,17 @@ test('route gate strict parsing, mandatory arms, mutex, URLs, repeats, subsets',
   }
   assert.deepEqual(args('--journey', 'navigation', '--journey', 'navigation').journeys, ['navigation']);
   assert.throws(() => args('--out', 'a', '--out', 'b'), /Duplicate/);
+});
+
+test('served build URLs must be origins; path prefixes cannot be measured', async () => {
+  const withUrls = (baseline, candidate) => args('--baseline-url', baseline, '--candidate-url', candidate);
+  const origin = 'http://127.0.0.1:1234';
+  assert.equal(withUrls(origin, `${origin}/`)['baseline-url'], origin);
+  for (const suffix of ['/branch/', '/index.html', '/?ref=main', '/#candidate']) {
+    assert.throws(() => withUrls(origin + suffix, origin), /origin-only/);
+    assert.throws(() => withUrls(origin, origin + suffix), /origin-only/);
+  }
+  await assert.rejects(startCountingProxy(`${origin}/branch/`), /origin-only/);
 });
 
 test('route plan interleaves >=5 repeats and alternates arm order, no grouped A then B drift', () => {
@@ -138,6 +157,47 @@ test('proxy prepends early route probes only to identity HTML, preserving script
   assert.match(await htmlResponse.text(), /<head><script>probe\(\)<\/script><script>app/);
   assert.equal(await (await fetch(proxy.url + '/app.js')).text(), 'hello');
   assert.equal(proxy.requests.find((r) => r.path === '/app.js').bytes, 5);
+  assert.ok(proxy.requests.every((r) => r.complete && !r.failure));
+});
+
+test('proxy records upstream failure before headers, truncated bodies and downstream aborts', async (t) => {
+  const upstream = createServer((req, res) => {
+    if (req.url === '/no-headers.js') res.destroy();
+    else if (req.url === '/truncated.js' || req.url === '/disconnect.js') {
+      res.writeHead(200, { 'content-length': 999 });
+      res.write('partial', () => {
+        if (req.url === '/truncated.js') res.destroy();
+      });
+    } else res.writeHead(404).end();
+  });
+  await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
+  const proxy = await startCountingProxy(`http://127.0.0.1:${upstream.address().port}`);
+  t.after(async () => {
+    await proxy.close();
+    await new Promise((r) => {
+      upstream.close(r);
+      upstream.closeAllConnections();
+    });
+  });
+  assert.equal((await fetch(`${proxy.url}/no-headers.js`)).status, 502);
+  await assert.rejects(fetch(`${proxy.url}/truncated.js`).then((r) => r.text()));
+  await new Promise((r) => {
+    get(`${proxy.url}/disconnect.js`, (res) => {
+      res.once('data', () => res.destroy());
+      res.once('close', r);
+    });
+  });
+  await fetch(`${proxy.url}/reckless/optional.js`, { method: 'HEAD' });
+  const failures = requestFailures(proxy.requests);
+  for (const path of ['/no-headers.js', '/truncated.js', '/disconnect.js']) {
+    const entry = failures.unexpected.find((r) => r.path === path);
+    assert.ok(entry?.failure, `${path} must have a transport failure`);
+    assert.equal(entry.complete, false);
+  }
+  assert.equal(failures.unexpected.find((r) => r.path === '/truncated.js').status, 200);
+  assert.equal(failures.optional[0].path, '/reckless/optional.js');
+  const late = { at: 10, path: '/docs/chunk.js', status: 200, complete: false, failure: null };
+  assert.deepEqual(requestFailures([late]).unexpected, [late]);
 });
 
 test('route probes retain original worker payloads, count teardown once and parse both UCI transports', () => {
@@ -305,8 +365,6 @@ test('residual Docs readiness rejects an error page with a matching pathname', (
   const location = { pathname: '/docs/' };
   assert.equal(ready({ querySelector: () => null }, location), false);
   assert.equal(ready({ querySelector: (selector) => (selector === '#doc-h1' ? { textContent: 'Using 0x88' } : {}) }, location), true);
-  const source = readFileSync(new URL('../scripts/perf_routes/session.mjs', import.meta.url), 'utf8');
-  assert.match(source, /result\.requests,\s*\.\.\.result\.postNavigationRequests/);
 });
 
 test('visited routes with cached JS are explicit zero baselines, not missing samples', () => {
@@ -339,23 +397,51 @@ test('Safari peaks use kernel intervals; Chrome totals never sum independent pro
   assert.throws(() => peakFootprint('chrome', []), /No footprint/);
 });
 
-test('Analysis requires post-move FEN-associated worker progress plus every rendered engine PV', async () => {
-  const window = { __routePerf: { analysisProgress: [{ fen: 'old', at: 20 }] } };
+test('Chrome GPU and renderer sums reject missing or invalid reads instead of reducing the total', () => {
+  const readings = new Map([[100, { cur: 5, life: 10, interval: 8 }]]);
+  assert.throws(() => footprintSum([100, 101], readings, 'Chrome GPU'), /Chrome GPU footprint for PID 101/);
+  assert.throws(() => footprintSum([], readings, 'Chrome GPU'), /No Chrome GPU PID/);
+  readings.set(101, { cur: 3, life: 7, interval: NaN });
+  assert.throws(() => footprintSum([100, 101], readings, 'Chrome GPU'), /Chrome GPU footprint for PID 101/);
+  assert.throws(() => footprintSum([999], readings, 'renderer'), /renderer footprint for PID 999/);
+  readings.get(101).interval = 4;
+  assert.deepEqual(footprintSum([100, 101], readings, 'Chrome GPU'), { cur: 8, life: 17, interval: 12 });
+});
+
+test('Safari requires exactly one new WebContent PID without ranking by footprint', () => {
+  const before = new Set([10, 12]);
+  assert.throws(() => safariWebContentPid(before, [10, 12]), /found 0/);
+  assert.throws(() => safariWebContentPid(before, [10, 12, 14, 16]), /found 2/);
+  assert.equal(safariWebContentPid(before, [10, 12, 14]), 14);
+});
+
+test('Analysis requires current-FEN worker and UI progress and all PVs inside the move window', async () => {
+  const move = { fen: 'new', started: 10, scheduling: { workerProgressMessages: 19, uiProgressSamples: 18 } };
+  const state = { fen: 'new', workerProgressMessages: 20, uiProgressSamples: 19 };
+  const window = { __routePerf: { analysisProgress: [{ fen: 'old', at: 10 }] }, __analysisSchedulingState: () => state };
   let rowCount = 2;
+  let now = 11;
   const document = {
     querySelectorAll: (selector) =>
       selector.includes('engineSummaries')
         ? ['Lc0', 'SF'].slice(0, rowCount).map((engine) => ({ dataset: { pvFen: 'new', engine }, querySelector: () => true }))
         : [1, 2],
   };
-  const evaluate = async (expression) => new Function('window', 'document', `return (${expression});`)(window, document);
-  await assert.rejects(requireAnalysisForMove(evaluate, { fen: 'new', started: 10 }, 1), /Timed out/);
+  const evaluate = async (expression) => new Function('window', 'document', 'performance', `return (${expression});`)(window, document, { now: () => now });
+  const observe = () => requireAnalysisForMove(evaluate, move, 1, true);
+  await assert.rejects(observe(), /Timed out/);
   window.__routePerf.analysisProgress = [{ fen: 'new', at: 9 }];
-  await assert.rejects(requireAnalysisForMove(evaluate, { fen: 'new', started: 10 }, 1), /Timed out/);
-  window.__routePerf.analysisProgress = [{ fen: 'new', at: 20 }];
-  assert.equal(await requireAnalysisForMove(evaluate, { fen: 'new', started: 10 }, 1), true);
+  await assert.rejects(observe(), /Timed out/);
+  window.__routePerf.analysisProgress = [{ fen: 'new', at: 11 }];
+  assert.deepEqual(await observe(), { at: 11, state });
+  now = 12;
+  await assert.rejects(observe(), /within 1ms of user move/);
+  now = 11;
   rowCount = 1;
-  await assert.rejects(requireAnalysisForMove(evaluate, { fen: 'new', started: 10 }, 1), /Timed out/);
+  await assert.rejects(observe(), /Timed out/);
+  rowCount = 2;
+  state.uiProgressSamples = move.scheduling.uiProgressSamples;
+  await assert.rejects(observe(), /Timed out/);
 });
 
 test('Arena rejects illegal/missing moves even when a finished-game chip exists', () => {
@@ -369,6 +455,70 @@ test('UA collection runs only after natural footprint and worker observations ar
   assert.ok(source.indexOf('await uaMemory(') > source.indexOf("result.metrics['workers.residual'] ="));
   assert.ok(source.indexOf('await uaMemory(') > source.indexOf("result.metrics['memory.residualMb'] ="));
 });
+
+function scratch(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'route-gate-test-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+test('output claim rejects any existing directory, even before the winner writes its plan', (t) => {
+  const out = join(scratch(t), 'nested', 'cohort');
+  claimOutput(out);
+  assert.throws(() => claimOutput(out), /already exists/);
+  assert.equal(existsSync(join(out, 'plan.json')), false);
+});
+
+test('interrupted mutex wait and release cannot remove another owner', async (t) => {
+  const lock = join(scratch(t), 'mutex');
+  const controller = new AbortController();
+  const release = await acquireLock(lock, controller.signal);
+  const owner = join(lock, 'owner');
+  writeFileSync(owner, 'replacement owner\n');
+  release();
+  const waiting = acquireLock(lock, controller.signal);
+  controller.abort(Error('test interrupt'));
+  await assert.rejects(waiting, /test interrupt/);
+  assert.equal(readFileSync(owner, 'utf8'), 'replacement owner\n');
+});
+
+for (const [signal, code] of [
+  ['SIGINT', 130],
+  ['SIGTERM', 143],
+]) {
+  test(`${signal} waits for owned session cleanup before releasing mutex`, { timeout: 5000 }, async (t) => {
+    const lock = join(scratch(t), 'mutex');
+    const module = new URL('../scripts/perf_routes/lifecycle.mjs', import.meta.url).href;
+    const session = `
+      process.on('SIGTERM', () => setTimeout(() => {
+        if (require('fs').existsSync(${JSON.stringify(join(lock, 'owner'))})) console.log('cleaned up under mutex');
+        process.exit(2);
+      }, 25));
+      console.log('ready');
+      setInterval(() => {}, 1000);`;
+    const coordinator = spawn(process.execPath, [
+      '--input-type=module',
+      '-e',
+      `
+      import { acquireLock, runOwnedSession, watchShutdown } from ${JSON.stringify(module)};
+      const { signal, dispose } = watchShutdown();
+      const release = await acquireLock(${JSON.stringify(lock)}, signal);
+      try {
+        await runOwnedSession(process.execPath, ['-e', ${JSON.stringify(session)}], signal, false);
+        process.exitCode = signal.reason?.exitCode;
+      } finally { release(); dispose(); }`,
+    ]);
+    const closed = once(coordinator, 'close');
+    let output = '';
+    coordinator.stdout.on('data', (data) => {
+      output += data;
+      if (String(data).includes('ready')) coordinator.kill(signal);
+    });
+    assert.deepEqual(await closed, [code, null]);
+    assert.match(output, /cleaned up under mutex/);
+    assert.equal(existsSync(lock), false);
+  });
+}
 
 test('missing throughput for one selected engine cannot yield a clean comparison', () => {
   const options = args('--browser', 'safari', '--journey', 'arena-cpu');

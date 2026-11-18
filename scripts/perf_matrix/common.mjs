@@ -57,10 +57,11 @@ export function readFootprint(pids, { reset = false, threads = false } = {}) {
   return out;
 }
 
-export function pgrep(pattern) {
+export function pgrep(pattern, { strict = false } = {}) {
   try {
     return execFileSync('pgrep', ['-f', pattern], { encoding: 'utf8' }).trim().split('\n').filter(Boolean).map(Number);
-  } catch {
+  } catch (error) {
+    if (strict && error.status !== 1) throw error;
     return [];
   }
 }

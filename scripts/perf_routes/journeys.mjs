@@ -85,12 +85,14 @@ export async function userMove(evaluate, analysis, index = 0, preferredMove = ''
       const from = source.dataset.square;
       if (preferred && !dests.some(c => c.dataset.square === preferred.slice(2,4))) throw Error('Legal chooser move is not interactive on the board: '+preferred);
       const to = preferred ? preferred.slice(2,4) : dests[${index} % dests.length].dataset.square;
-      const start = performance.now();
-      window.__routeMove = {from,to,start,done:false};
+      const queuedAt = performance.now();
+      window.__routeMove = {from,to,done:false};
       setTimeout(() => {
+        window.__routeMove.start = performance.now();
+        if (${analysis}) window.__routeMove.scheduling = window.__analysisSchedulingState();
         window[${JSON.stringify(analysis ? '__analysisUserMove' : '__playUserMove')}](from,to);
         requestAnimationFrame(() => requestAnimationFrame(() => {
-          window.__routeMove.ms = performance.now()-start; window.__routeMove.done = true;
+          window.__routeMove.ms = performance.now()-queuedAt; window.__routeMove.done = true;
         }));
       }, 0);
       return {from,to};
@@ -104,9 +106,9 @@ export async function userMove(evaluate, analysis, index = 0, preferredMove = ''
   );
   return {
     ...result,
-    latencyMs: await evaluate(`window.__routeMove.ms`),
-    started: await evaluate(`window.__routeMove.start`),
-    ...(analysis ? { fen: await evaluate(`window.__analysisSchedulingState().fen`) } : {}),
+    ...(await evaluate(
+      `({latencyMs:window.__routeMove.ms,started:window.__routeMove.start${analysis ? ',fen:window.__analysisSchedulingState().fen,scheduling:window.__routeMove.scheduling' : ''}})`,
+    )),
   };
 }
 
@@ -114,20 +116,29 @@ export function arenaGameFailed(log) {
   return /forfeit|failed|error|timeout|\billegal\b|\bresigned\b|\bcancelled\b/i.test(log);
 }
 
-export async function requireAnalysisForMove(evaluate, move, timeout = 120000) {
-  // Cumulative counters can include late progress from the position just cancelled.
-  // Require a response for this exact post-move FEN and visible PVs for every selected row.
-  return waitFor(
-    evaluate,
-    `(() => {
-    const fen=${JSON.stringify(move.fen)};
-    const worker=window.__routePerf.analysisProgress.some(p => p.fen===fen && p.at>=${move.started});
-    const rows=[...document.querySelectorAll('#engineSummaries [data-pv-fen]')].filter(el=>el.dataset.pvFen===fen && el.querySelector('.pv-move'));
-    const count=document.querySelectorAll('#engineList .engine-row').length;
-    return worker && new Set(rows.map(el=>el.dataset.engine)).size>=count;
-  })()`,
-    timeout,
-  );
+export function analysisMoveObservation(move, deadline, requireProgress) {
+  const at = performance.now();
+  if (at > deadline) return { expired: true };
+  const worker = window.__routePerf.analysisProgress.some((p) => p.fen === move.fen && p.at >= move.started && p.at <= at);
+  const rows = [...document.querySelectorAll('#engineSummaries [data-pv-fen]')].filter((el) => el.dataset.pvFen === move.fen && el.querySelector('.pv-move'));
+  const count = document.querySelectorAll('#engineList .engine-row').length;
+  if (!worker || !count || new Set(rows.map((el) => el.dataset.engine)).size < count) return null;
+  const state = window.__analysisSchedulingState();
+  if (
+    state.fen !== move.fen ||
+    (requireProgress &&
+      (state.workerProgressMessages <= move.scheduling.workerProgressMessages || state.uiProgressSamples <= move.scheduling.uiProgressSamples))
+  )
+    return null;
+  return { at, state };
+}
+
+export async function requireAnalysisForMove(evaluate, move, timeout = 120000, requireProgress = false) {
+  // Check all evidence on the same page clock as the move, even if the first poll is delayed.
+  const deadline = move.started + timeout;
+  const observation = await waitFor(evaluate, `(${analysisMoveObservation.toString()})(${JSON.stringify(move)},${deadline},${requireProgress})`, timeout);
+  if (observation.expired) throw Error(`No current-FEN worker/PV${requireProgress ? '/UI progress' : ''} observed within ${timeout}ms of user move`);
+  return observation;
 }
 
 export async function headerNavigate(evaluate, route) {
@@ -140,22 +151,19 @@ export async function headerNavigate(evaluate, route) {
   if ((await evaluate(`window.__routePerf.documentId`)) !== id) throw Error('Header link caused a full navigation; client-side journey invalid');
 }
 
-export async function runJourney(evaluate, name, mark = () => {}) {
+export async function runJourney(evaluate, name, mark = () => {}, pause = sleep) {
   const evidence = { moves: [], navigation: [] };
   if (name.startsWith('analysis')) {
     await analysisSetup(evaluate, name === 'analysis-four');
-    const start = await evaluate(`window.__analysisSchedulingState()`);
     mark('analysis');
-    if (!start.analyzing) await click(evaluate, '#analyze');
+    if (!(await evaluate(`window.__analysisSchedulingState().analyzing`))) await click(evaluate, '#analyze');
     await waitFor(evaluate, `window.__analysisSchedulingState().analyzing`);
     const firstMove = await userMove(evaluate, true);
     evidence.moves.push(firstMove);
-    await requireAnalysisForMove(evaluate, firstMove);
-    await sleep(60000);
-    const end = await evaluate(`window.__analysisSchedulingState()`);
-    if (end.workerProgressMessages <= start.workerProgressMessages || end.uiProgressSamples <= start.uiProgressSamples)
-      throw Error('Auto-analysis produced no new worker/UI progress during the 60s window');
-    evidence.scheduling = { start, end };
+    const windowMs = 60000;
+    const observed = await requireAnalysisForMove(evaluate, firstMove, windowMs, true);
+    await waitFor(evaluate, `performance.now() >= ${firstMove.started + windowMs}`, windowMs);
+    evidence.scheduling = { start: firstMove.scheduling, observed };
     if (name === 'analysis-four') {
       for (let i = 0; i < 10; i++) {
         const move = await userMove(evaluate, true, i);
@@ -213,11 +221,11 @@ export async function runJourney(evaluate, name, mark = () => {}) {
         mark('route:' + route);
         await headerNavigate(evaluate, route);
         evidence.navigation.push({ route, workers: await evaluate(`window.__routePerf.workers`) });
-        await sleep(1000);
+        await pause(1000);
       }
     }
   }
   mark('settle');
-  await sleep(20000);
+  await pause(20000);
   return evidence;
 }

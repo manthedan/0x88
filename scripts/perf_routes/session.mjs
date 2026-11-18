@@ -5,8 +5,9 @@ import { hostname, loadavg, platform, release } from 'node:os';
 import { median } from '../lib/perf_canary_stats.mjs';
 import { pgrep, readFootprint, sleep, WORKER_READY_SCRIPT } from '../perf_matrix/common.mjs';
 import { startCountingProxy } from '../perf_matrix/proxy.mjs';
-import { jsBytesByRoute, naturalVisibilityValid, peakFootprint } from './gate.mjs';
+import { footprintSum, jsBytesByRoute, naturalVisibilityValid, peakFootprint, requestFailures, safariWebContentPid } from './gate.mjs';
 import { DOCS_READY, MIDGAME, routeFor, runJourney, waitFor } from './journeys.mjs';
+import { shutdownDelay, watchShutdown } from './lifecycle.mjs';
 
 const [specFile, outFile] = process.argv.slice(2);
 const spec = JSON.parse(readFileSync(specFile, 'utf8'));
@@ -21,11 +22,19 @@ const result = {
   limitations: [],
   externalRequests: [],
 };
-let proxy, browser, sid, cdp, page, evaluate, navigate, close, sampling;
+const { signal, dispose } = watchShutdown();
+const pause = (ms) => shutdownDelay(ms, signal);
+const guarded =
+  (fn) =>
+  async (...args) => {
+    signal.throwIfAborted();
+    const value = await fn(...args);
+    signal.throwIfAborted();
+    return value;
+  };
+let proxy, browser, sid, cdp, page, evaluate, navigate, close, sampling, safariPid;
 const wc = 'com.apple.WebKit.WebContent';
-let rendererPids = [],
-  gpuPids = [],
-  phase = 'journey',
+let phase = 'journey',
   busy = false,
   samplingError;
 const t0 = Date.now();
@@ -57,25 +66,25 @@ const quantile = (xs, q) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.ceil
 async function sample() {
   if (busy) return;
   busy = true;
+  const sampledPhase = phase;
   try {
+    let rendererPids = [safariPid],
+      gpuPids = [];
     if (cdp) {
       const procs = (await bounded(cdp.send('SystemInfo.getProcessInfo'), 'Chrome process discovery')).processInfo;
       rendererPids = procs.filter((p) => p.type === 'renderer').map((p) => p.id);
       gpuPids = procs.filter((p) => ['GPU', 'gpu-process'].includes(p.type)).map((p) => p.id);
     }
     const fp = readFootprint([...rendererPids, ...gpuPids], { reset: true });
-    if (!rendererPids.length) return;
-    const render = rendererPids.map((pid) => fp.get(pid)).filter(Boolean);
-    if (!render.length) throw Error('Owned page process disappeared');
-    const gpu = gpuPids.map((pid) => fp.get(pid)).filter(Boolean);
-    const sum = (rows, key) => rows.reduce((n, v) => n + v[key], 0);
+    const render = footprintSum(rendererPids, fp, 'renderer');
+    const gpu = cdp ? footprintSum(gpuPids, fp, 'Chrome GPU') : null;
     result.samples.push({
       ms: Date.now() - t0,
-      phase,
-      rendererMb: sum(render, 'cur'),
-      gpuMb: gpu.length ? sum(gpu, 'cur') : null,
-      rendererIntervalMb: sum(render, 'interval'),
-      gpuIntervalMb: gpu.length ? sum(gpu, 'interval') : null,
+      phase: sampledPhase,
+      rendererMb: render.cur,
+      gpuMb: gpu?.cur ?? null,
+      rendererIntervalMb: render.interval,
+      gpuIntervalMb: gpu?.interval ?? null,
     });
   } catch (e) {
     samplingError ??= e;
@@ -99,9 +108,16 @@ async function uaMemory(label) {
 try {
   if (platform() !== 'darwin') throw Error('OS footprint gate currently requires macOS pidfp; no RSS substitution');
   proxy = await startCountingProxy(spec.base, { htmlScript: probe });
+  signal.throwIfAborted();
   if (spec.browser === 'chrome') {
     const { chromium } = await import('playwright');
-    browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--enable-blink-features=ForceEagerMeasureMemory'] });
+    browser = await chromium.launch({
+      channel: 'chrome',
+      headless: true,
+      handleSIGINT: false,
+      handleSIGTERM: false,
+      args: ['--enable-blink-features=ForceEagerMeasureMemory'],
+    });
     close = () => browser.close();
     cdp = await browser.newBrowserCDPSession();
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -112,8 +128,8 @@ try {
     page = await context.newPage();
     page.on('dialog', (dialog) => dialog.accept()); // only local journey leave confirmations
     page.setDefaultTimeout(120000);
-    evaluate = (expression) => bounded(page.evaluate(expression), 'Chrome page evaluation');
-    navigate = (url) => page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    evaluate = guarded((expression) => bounded(page.evaluate(expression), 'Chrome page evaluation'));
+    navigate = guarded((url) => page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 }));
     result.browserVersion = browser.version();
     sampling = setInterval(sample, 100);
     await sample();
@@ -129,30 +145,30 @@ try {
       }),
     );
     if (Object.values(result.jscFlags).some(Boolean)) throw Error('Normal-JSC cohort refuses launchctl overrides');
-    const before = readFootprint(pgrep(wc));
+    const before = new Set(pgrep(wc, { strict: true }));
+    signal.throwIfAborted();
     const session = await wd('POST', '/session', { capabilities: { alwaysMatch: { browserName: 'safari' } } });
     sid = session.sessionId;
     close = () => wd('DELETE', `/session/${sid}`);
+    signal.throwIfAborted();
     result.browserVersion = session.capabilities?.browserVersion;
     await wd('POST', `/session/${sid}/timeouts`, { pageLoad: 90000, script: 120000 });
     await wd('POST', `/session/${sid}/window/rect`, { width: 1280, height: 900 });
     // Safari's automation window can be occluded by other mini apps: background rAF and
     // auto-analysis are paused. Foreground Safari only after acquiring our owned session.
     execFileSync('osascript', ['-e', 'tell application "Safari" to activate']);
-    evaluate = (expression) => wd('POST', `/session/${sid}/execute/sync`, { script: `return (${expression});`, args: [] });
-    navigate = (url) => wd('POST', `/session/${sid}/url`, { url });
+    evaluate = guarded((expression) => wd('POST', `/session/${sid}/execute/sync`, { script: `return (${expression});`, args: [] }));
+    navigate = guarded((url) => wd('POST', `/session/${sid}/url`, { url }));
     result.limitations.push(
       'Safari longtask and UA memory APIs unavailable if absent; worker counts are main-realm-created workers, not nested workers. GPU process is shared and deliberately not attributed.',
     );
     await navigate(entryUrl());
-    const after = readFootprint(pgrep(wc));
-    const candidates = [...after].filter(([pid]) => !before.has(pid) || before.get(pid).cur < 40).sort((a, b) => b[1].cur - a[1].cur);
-    result.candidatePids = candidates.map(([pid, v]) => [pid, v.cur]);
-    if (!candidates.length || candidates.filter(([, v]) => v.cur > 40).length > 1) throw Error('Ambiguous/missing fresh Safari WebContent process');
-    rendererPids = [candidates[0][0]];
+    const after = pgrep(wc, { strict: true });
+    result.candidatePids = after.filter((pid) => !before.has(pid));
+    safariPid = safariWebContentPid(before, after);
     // Navigation may already have allocated before discovery. A fresh process's lifetime high-water covers that gap.
-    result.navigationPeakMb = candidates[0][1].life;
-    result.pid = rendererPids[0];
+    result.navigationPeakMb = footprintSum([safariPid], readFootprint([safariPid]), 'Safari WebContent').life;
+    result.pid = safariPid;
     sampling = setInterval(sample, 100);
     await sample();
   }
@@ -162,10 +178,15 @@ try {
   if (result.context.visibility !== 'visible') throw Error('Benchmark page is hidden: auto-analysis/input timing would be invalid');
   if (!result.context.secure || !result.context.isolated) throw Error('Page is not secure and cross-origin isolated');
   result.routeMarks = [{ route: routeFor(spec.journey), at: t0 }];
-  result.evidence = await runJourney(evaluate, spec.journey, (value) => {
-    phase = value;
-    if (value.startsWith('route:')) result.routeMarks.push({ route: value.slice(6), at: Date.now() });
-  });
+  result.evidence = await runJourney(
+    evaluate,
+    spec.journey,
+    (value) => {
+      phase = value;
+      if (value.startsWith('route:')) result.routeMarks.push({ route: value.slice(6), at: Date.now() });
+    },
+    pause,
+  );
   result.probe = await evaluate(`JSON.parse(JSON.stringify(window.__routePerf))`);
   result.workerReady = await evaluate(`window.__perfWorkerReady`);
   result.transitions = await evaluate(`window.__analysisTransitionLog?.() ?? []`);
@@ -183,13 +204,15 @@ try {
   if (result.evidence.moves.length) result.metrics.inputLatencyMs = median(result.evidence.moves.map((m) => m.latencyMs));
   // Freeze route bytes before navigation away; workers' JS glue is included, model/WASM bytes are not.
   result.requests = proxy.requests.map((r) => ({ ...r }));
+  if (result.requests.some((r) => /\.(m?js)(?:\?|$)/.test(r.path) && !r.complete && !r.failure))
+    throw Error('JS request still in flight at the end of the journey; byte count is incomplete');
   result.metrics.jsBytes = result.requests.filter((r) => /\.(m?js)(?:\?|$)/.test(r.path)).reduce((n, r) => n + r.bytes, 0);
   result.jsBytesByRoute = jsBytesByRoute(result.requests, result.routeMarks);
   for (const [route, bytes] of Object.entries(result.jsBytesByRoute)) result.metrics[`jsBytes.${route}`] = bytes;
   if (p.errors.length) throw Error(`Worker errors: ${p.errors.join('; ')}`);
   const active = result.samples.filter((s) => s.phase !== 'residual');
   result.metrics['memory.rendererPeakMb'] = Math.max(result.navigationPeakMb ?? 0, ...active.map((s) => s.rendererIntervalMb));
-  if (gpuPids.length) result.metrics['memory.gpuPeakMb'] = Math.max(...active.map((s) => s.gpuIntervalMb ?? 0));
+  if (cdp) result.metrics['memory.gpuPeakMb'] = Math.max(...active.map((s) => s.gpuIntervalMb));
   // Total is the simultaneous sampled sum, NOT the sum of independent high-water marks.
   result.metrics['memory.peakMb'] = peakFootprint(spec.browser, active, result.navigationPeakMb ?? 0);
   const settled = active.filter((s) => s.ms >= active.at(-1).ms - 2000);
@@ -208,8 +231,11 @@ try {
   await waitFor(evaluate, DOCS_READY);
   if ((await evaluate(`window.__routePerf.documentId`)) !== documentId) throw Error('Residual navigation destroyed document');
   phase = 'residual';
-  await sleep(20000);
+  await pause(20000);
+  clearInterval(sampling);
+  while (busy) await sleep(10);
   await sample();
+  if (samplingError) throw samplingError;
   const residual = result.samples.filter((s) => s.phase === 'residual' && s.ms >= result.samples.at(-1).ms - 2000);
   result.metrics['memory.residualMb'] = median(residual.map((s) => s.rendererMb + (s.gpuMb ?? 0)));
   result.metrics['workers.residual'] = await evaluate(`window.__routePerf.workers`);
@@ -217,7 +243,6 @@ try {
   // the worker and leaves a superficially healthy zero-worker residual count.
   result.finalWorkerErrors = await evaluate(`[...window.__routePerf.errors]`);
   if (result.finalWorkerErrors.length) throw Error(`Worker errors through residual teardown: ${result.finalWorkerErrors.join('; ')}`);
-  result.postNavigationRequests = proxy.requests.filter((request) => request.at >= awayAt).map((request) => ({ ...request }));
   result.naturalVisibility = await evaluate(`({events:window.__routePerf.visibility,final:document.visibilityState})`);
   if (!naturalVisibilityValid(result.naturalVisibility.events, result.naturalVisibility.final))
     throw Error('Page became hidden during natural measurement windows; see naturalVisibility.');
@@ -232,20 +257,18 @@ try {
   ];
   if (result.externalAssetUrls.length)
     throw Error('Unobserved cross-origin assets bypass the JS counting proxy; stage same-origin assets before comparing (see externalAssetUrls).');
+  const requestsThroughResidual = proxy.requests.map((r) => ({ ...r }));
+  result.postNavigationRequests = requestsThroughResidual.filter((r) => r.at >= awayAt);
+  const failures = requestFailures(requestsThroughResidual);
+  result.optionalPrefetchFailures = failures.optional;
+  result.networkFailures = failures.unexpected;
+  if (result.networkFailures.length) throw Error('Failed or incomplete asset request; see networkFailures');
   // UA measurement triggers GC (eager with our Chrome flag). Never request it until
   // ALL natural footprint, worker, speed, input and long-task observations are frozen.
-  phase = 'ua-after-natural';
   await uaMemory('postResidualGc');
-  if (samplingError) throw samplingError;
-  const failed = [...result.requests, ...result.postNavigationRequests].filter((r) => r.method !== 'HEAD' && r.status >= 400);
-  // Adding a row speculatively prefetches the next suggested family before the user changes
-  // it. Reckless is not selected in any gate journey; its absent optional local assets must
-  // not invalidate four successfully searched engines. Keep those failures as evidence.
-  result.optionalPrefetchFailures = failed.filter((r) => r.path.startsWith('/reckless/'));
-  if (failed.some((r) => !r.path.startsWith('/reckless/'))) throw Error('Failed asset request; see requests');
   result.status = 'ok';
 } catch (error) {
-  if (evaluate)
+  if (evaluate && !signal.aborted)
     result.diagnostic = await evaluate(
       `({url:location.href,title:document.title,message:document.querySelector('#message')?.textContent,body:document.body?.textContent?.slice(0,1000),probe:window.__routePerf ?? null,hook:typeof window.__analysisUserMove,board:!!document.querySelector('#ground cg-board'),visibility:document.visibilityState,scheduling:window.__analysisSchedulingState?.(),lines:[...document.querySelectorAll('#engineSummaries [data-pv-fen]')].map(el=>({fen:el.dataset.pvFen,engine:el.dataset.engine}))})`,
     ).catch((e) => ({ error: String(e) }));
@@ -261,6 +284,11 @@ try {
       result.status = 'invalid';
     });
   if (proxy) await proxy.close();
+  if (signal.aborted) {
+    result.status = 'invalid';
+    result.error = signal.reason.message;
+  }
+  dispose();
   result.host.loadAfter = loadavg();
   result.durationMs = Date.now() - t0;
   writeFileSync(outFile, JSON.stringify(result, null, 2));

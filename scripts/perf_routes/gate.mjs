@@ -1,5 +1,6 @@
 // Pure route-gate planning/statistics. Never round before making a verdict.
 import { mad, median } from '../lib/perf_canary_stats.mjs';
+import { buildOrigin } from '../perf_matrix/proxy.mjs';
 
 export const JOURNEYS = ['analysis-default', 'analysis-four', 'play-maia3', 'play-lc0', 'arena-cpu', 'arena-lc0', 'navigation'];
 export const HELP = `npm run perf:routes -- --baseline <built-dir|commit> --candidate <built-dir|commit>
@@ -7,9 +8,9 @@ export const HELP = `npm run perf:routes -- --baseline <built-dir|commit> --cand
   --benchlock PATH              machine-wide laptop timing mutex
   --lock-dir PATH               shared mini mutex (instead of --benchlock)
   --driver URL                  existing Safari driver; never started/stopped
-  --baseline-url URL --candidate-url URL  use already served builds (mini transport)
+  --baseline-url URL --candidate-url URL  use already served build origins (mini transport)
   --journey NAME                repeatable subset (not a full merge gate)
-  --report DIR                  regenerate summary from raw sessions
+  --report DIR                  regenerate summary from runs.jsonl
   --build-only                  prepare archived product builds, no measurements
   --dry-run                     validate/print plan without building or writing
 Full gate: seven journeys, >=5 interleaved repeats, 60s analysis, 20s settle.
@@ -55,11 +56,9 @@ export function parseArgs(argv) {
   if (options.benchlock && options['lock-dir']) throw Error('Use --benchlock OR --lock-dir');
   if (options.journeys.some((j) => !JOURNEYS.includes(j))) throw Error('Unknown --journey');
   options.journeys = options.journeys.length ? [...new Set(options.journeys)] : [...JOURNEYS];
-  for (const key of ['driver', 'baseline-url', 'candidate-url'])
-    if (options[key]) {
-      const u = new URL(options[key]);
-      if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password) throw Error(`Invalid --${key}`);
-    }
+  const driver = new URL(options.driver);
+  if (!['http:', 'https:'].includes(driver.protocol) || driver.username || driver.password) throw Error('Invalid --driver');
+  for (const key of ['baseline-url', 'candidate-url']) if (options[key]) buildOrigin(options[key]);
   if (!!options['baseline-url'] !== !!options['candidate-url']) throw Error('Both served build URLs are required');
   if (!options.help && !options.report && (!options.baseline || !options.candidate)) throw Error('--baseline and --candidate are required');
   if (!options.help && !options.report && !options['dry-run'] && !options['build-only'] && !options.benchlock && !options['lock-dir'])
@@ -124,6 +123,33 @@ export function jsBytesByRoute(requests, marks) {
     bytes[route] += r.bytes;
   }
   return bytes;
+}
+
+export function safariWebContentPid(before, after) {
+  const fresh = after.filter((pid) => !before.has(pid));
+  if (fresh.length !== 1) throw Error(`Require exactly one fresh Safari WebContent PID; found ${fresh.length}`);
+  return fresh[0];
+}
+
+export function footprintSum(pids, readings, label) {
+  if (!pids.length) throw Error(`No ${label} PID`);
+  return pids.reduce(
+    (sum, pid) => {
+      const row = readings.get(pid);
+      if (!row || ![row.cur, row.life, row.interval].every((n) => Number.isFinite(n) && n > 0))
+        throw Error(`Missing/invalid ${label} footprint for PID ${pid}`);
+      return { cur: sum.cur + row.cur, life: sum.life + row.life, interval: sum.interval + row.interval };
+    },
+    { cur: 0, life: 0, interval: 0 },
+  );
+}
+
+export function requestFailures(requests) {
+  const failures = requests.filter((r) => !r.complete || r.failure || r.status >= 400);
+  return {
+    optional: failures.filter((r) => r.path.startsWith('/reckless/') && (r.complete || r.failure)),
+    unexpected: failures.filter((r) => !r.path.startsWith('/reckless/') || (!r.complete && !r.failure)),
+  };
 }
 
 export function peakFootprint(browser, samples, navigationPeak = 0) {
