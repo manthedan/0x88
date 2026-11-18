@@ -1,6 +1,6 @@
 // One owned browser session / cold origin / real route journey. Shared matrix OS and proxy helpers.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { hostname, loadavg, platform, release } from 'node:os';
 import { median } from '../lib/perf_canary_stats.mjs';
 import { pgrep, readFootprint, sleep, WORKER_READY_SCRIPT } from '../perf_matrix/common.mjs';
@@ -187,6 +187,8 @@ try {
     evaluate = guarded((expression) => bounded(page.evaluate(expression), 'Chrome page evaluation'));
     navigate = guarded((url) => page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 }));
     result.browserVersion = browser.version();
+    // compareRuns refuses a cohort that mixes builds (e.g. PERF_ROUTES_CHROMIUM changed on --resume).
+    if (linux) result.browserExecutable = realpathSync(process.env.PERF_ROUTES_CHROMIUM || chromium.executablePath());
     sampling = setInterval(sample, 100);
     await sample();
   } else {
