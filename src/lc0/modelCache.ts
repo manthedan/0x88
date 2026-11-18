@@ -397,14 +397,22 @@ async function fetchModelManifest(manifestUrl: string): Promise<Lc0ModelManifest
   }
 }
 
+export function modelFileName(modelUrl: string): string | undefined {
+  const raw = new URL(absoluteUrl(modelUrl)).pathname.split('/').pop();
+  try {
+    return raw === undefined ? undefined : decodeURIComponent(raw).split('/').pop();
+  } catch {
+    return raw; // Exact URL pins and legacy non-UTF-8 URL octets remain valid.
+  }
+}
+
 async function fetchManifestEntry(modelUrl: string, manifestUrl: string): Promise<Lc0ModelManifestEntry | undefined> {
   const manifest = await fetchModelManifest(manifestUrl);
   const absolute = absoluteUrl(modelUrl);
-  const file = decodeURIComponent(new URL(absolute).pathname).split('/').pop();
-  return manifest?.models?.find((entry) => {
-    const entryUrl = absoluteUrl(entry.url);
-    return entry.url === modelUrl || entryUrl === absolute || entry.file === file;
-  });
+  const exact = manifest?.models?.find((entry) => entry.url === modelUrl || absoluteUrl(entry.url) === absolute);
+  if (exact) return exact;
+  const file = modelFileName(modelUrl);
+  return manifest?.models?.find((entry) => entry.file === file);
 }
 
 async function fetchManifestEntryWithTiming(
@@ -820,7 +828,7 @@ export function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoadOption
  * work is left running because metadata requests are shared through
  * single-flight maps, and one caller's abort must not cancel another's wait.
  */
-function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+export function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return promise;
   signal.throwIfAborted();
   return new Promise<T>((resolve, reject) => {

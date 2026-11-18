@@ -1,4 +1,4 @@
-import { clearLc0ModelCacheEntry, type Lc0ModelLoadResult, loadLc0ModelForOrt } from '../lc0/modelCache.ts';
+import { clearLc0ModelCacheEntry, type Lc0ModelLoadResult, loadLc0ModelForOrt, modelFileName } from '../lc0/modelCache.ts';
 import { isMetadataTrustedModel, isOnnxModelParseError } from '../lc0/onnxModelRecovery.ts';
 import { createOrtSession } from './ortRuntime.ts';
 
@@ -13,7 +13,7 @@ function ownModel({ model, ...info }: Lc0ModelLoadResult): OwnedModel {
 /** Metadata/model IDs describe tensor semantics, not the identity of an explicit research ONNX override. */
 export function isPinnedCentipawnOnnx(modelUrl: string): boolean {
   try {
-    return decodeURIComponent(new URL(modelUrl, 'http://localhost/').pathname).split('/').pop() === 's4fix_v_ema.onnx';
+    return modelFileName(modelUrl) === 's4fix_v_ema.onnx';
   } catch {
     return false;
   }

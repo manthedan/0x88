@@ -16,7 +16,7 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
       env,
     });
     assert.equal(child.status, 0, `${child.stdout}\n${child.stderr}`);
-    assert.match(child.stdout, /^# pass 4$/m);
+    assert.match(child.stdout, /^# pass 5$/m);
     assert.match(child.stdout, /^# fail 0$/m);
   });
 } else {
@@ -99,6 +99,32 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
 
   const encoded = () => [new Uint32Array(64), new Float32Array(64 * THREATGRAPH_SQUARE_SUMMARY_V1_FEATURES), new Uint32Array([1, 2, 3])];
   const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  test('custom WebGPU initialization cancels manifest and kernel downloads', async (t) => {
+    let phase, controller, started, signals;
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+      const signal = options?.signal;
+      signals.push(signal);
+      if (phase === 'kernels' && url === '/tvm/manifest.json')
+        return Response.json({ schema: 'centipawn.squareformer-tvm-hybrid.v1', kernelBase: '/tvm/kernels', fixtureRoot: '/tvm/fixtures' });
+      started.resolve();
+      assert.ok(signal, 'all kernel/weight reads must retain their owner cancellation');
+      return new Promise((_resolve, reject) => {
+        if (signal.aborted) reject(signal.reason);
+        else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    });
+    for (phase of ['manifest', 'kernels']) {
+      controller = new AbortController();
+      started = Promise.withResolvers();
+      signals = [];
+      const creating = SquareformerTvmHybridEvaluator.create({}, META, { manifestUrl: '/tvm/manifest.json', signal: controller.signal });
+      await started.promise;
+      controller.abort();
+      await assert.rejects(creating, { name: 'AbortError' });
+      assert.ok(signals.every((signal) => signal === controller.signal));
+    }
+  });
 
   test('custom WebGPU evaluator serialises evaluations and never re-uploads the attention bias', async () => {
     const { evaluator, state, settleNext } = fakeHybrid();

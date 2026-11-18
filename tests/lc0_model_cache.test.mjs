@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createLc0OnnxEvaluatorFromUrl } from '../src/lc0/lc0SmallModelSelection.ts';
-import { clearLc0ModelCache, clearLc0ModelCacheEntry, loadLc0ModelForOrt, sha256Hex, verifyLc0ModelBytes } from '../src/lc0/modelCache.ts';
+import { clearLc0ModelCache, clearLc0ModelCacheEntry, loadLc0ModelForOrt, modelFileName, sha256Hex, verifyLc0ModelBytes } from '../src/lc0/modelCache.ts';
 
 // Known SHA-256 test vector: the empty input hashes to this digest.
 const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
@@ -154,6 +154,37 @@ async function withMockedEnv(
     globalThis.location = prev.location;
   }
 }
+
+test('exact manifest URL pins precede filename fallback and tolerate non-UTF-8 URL octets', async () => {
+  const url = MODEL_URL.replace('test.onnx', '%E9.onnx');
+  assert.equal(modelFileName(url), '%E9.onnx');
+  await withMockedEnv(
+    async () => {
+      const original = globalThis.fetch;
+      let bodies = 0;
+      globalThis.fetch = async (input, options) => {
+        const requested = input.url ?? String(input);
+        if (requested === MANIFEST_URL)
+          return Response.json({
+            models: [
+              { file: '%E9.onnx', url: MODEL_URL, bytes: 3, sha256: '0'.repeat(64) },
+              { file: 'legacy-name.onnx', url, bytes: 3, sha256: ABC_SHA256 },
+            ],
+          });
+        if (requested === url) {
+          bodies++;
+          return new Response('abc');
+        }
+        return original(input, options);
+      };
+      const loaded = await loadLc0ModelForOrt(url, { cache: false, manifestUrl: MANIFEST_URL, channelUrl: null });
+      assert.equal(loaded.sha256Valid, true);
+      assert.equal(new TextDecoder().decode(loaded.model), 'abc');
+      assert.equal(bodies, 1);
+    },
+    { serveBytes: () => bytesOf('abc'), manifestBytes: 3, manifestSha256: ABC_SHA256 },
+  );
+});
 
 test('loadLc0ModelForOrt caches on miss then serves a validated hit', async () => {
   await withMockedEnv(

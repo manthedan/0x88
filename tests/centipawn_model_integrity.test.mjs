@@ -86,6 +86,7 @@ test('the pinned loader follows the ONNX artifact identity, not metadata or a cl
   assert.equal(isPinnedCentipawnOnnx('/models/s4fix_v_ema.onnx?v=1'), true);
   assert.equal(isPinnedCentipawnOnnx('https://assets.0x88.app/models/s4fix_v_ema.onnx'), true);
   assert.equal(isPinnedCentipawnOnnx('/models/%734fix_v_ema.onnx'), true);
+  assert.equal(isPinnedCentipawnOnnx('/models/%E9/s4fix_v_ema.onnx'), true, 'invalid UTF-8 in a directory must not bypass a valid shipped basename');
   assert.equal(isPinnedCentipawnOnnx('/models/s4fix_v_ema.meta.json'), false);
   assert.equal(isPinnedCentipawnOnnx('/models/custom.onnx'), false);
 });

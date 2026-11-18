@@ -73,7 +73,7 @@ type HybridRuntimeManifest = {
     files?: Array<{ path: string; bytes?: number; sha256: string }>;
   };
 };
-type ArtifactVerifier = { verify(url: string, bytes: ArrayBuffer): Promise<void> };
+type ArtifactVerifier = { signal?: AbortSignal; verify(url: string, bytes: ArrayBuffer): Promise<void> };
 type FixtureArrayKey =
   | 'staticAttentionBias'
   | 'attnQkvWeight'
@@ -119,10 +119,13 @@ type FixtureSummary = {
   arrays: Record<FixtureArrayKey, { file: string }>;
 };
 async function loadBytes(url: string, verifier?: ArtifactVerifier): Promise<ArrayBuffer> {
-  const res = await fetch(url);
+  verifier?.signal?.throwIfAborted();
+  const res = await fetch(url, { signal: verifier?.signal });
   if (!res.ok) throw new Error(`fetch ${url}: ${res.status} ${res.statusText}`);
   const bytes = await res.arrayBuffer();
+  verifier?.signal?.throwIfAborted();
   await verifier?.verify(url, bytes);
+  verifier?.signal?.throwIfAborted();
   return bytes;
 }
 async function loadText(url: string, verifier?: ArtifactVerifier): Promise<string> {
@@ -165,19 +168,21 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
-async function verifySha256(label: string, url: string, expected: string | undefined): Promise<void> {
+async function verifySha256(label: string, url: string, expected: string | undefined, signal?: AbortSignal): Promise<void> {
   if (!expected) return;
-  const actual = await sha256Hex(await loadBytes(url));
+  const actual = await sha256Hex(await loadBytes(url, createArtifactVerifier(undefined, undefined, signal)));
+  signal?.throwIfAborted();
   if (actual !== expected) throw new Error(`Hybrid TVM artifact SHA-256 mismatch for ${label}: expected ${expected}, got ${actual}`);
 }
 function artifactUrl(manifestUrl: string, path: string): string {
   return new URL(path, new URL(manifestUrl, typeof location !== 'undefined' ? location.href : 'http://localhost/')).toString();
 }
-function createArtifactVerifier(manifest: HybridRuntimeManifest | undefined, manifestUrl: string | undefined): ArtifactVerifier | undefined {
-  if (!manifest?.artifacts?.files?.length || !manifestUrl) return undefined;
-  const byUrl = new Map(manifest.artifacts.files.map((file) => [artifactUrl(manifestUrl, file.path), file]));
+function createArtifactVerifier(manifest: HybridRuntimeManifest | undefined, manifestUrl: string | undefined, signal?: AbortSignal): ArtifactVerifier {
+  const byUrl = new Map(manifestUrl ? (manifest?.artifacts?.files ?? []).map((file) => [artifactUrl(manifestUrl, file.path), file]) : []);
   return {
+    signal,
     async verify(url: string, bytes: ArrayBuffer): Promise<void> {
+      signal?.throwIfAborted();
       const resolved = new URL(url, typeof location !== 'undefined' ? location.href : 'http://localhost/').toString();
       const expected = byUrl.get(resolved);
       if (!expected) return;
@@ -188,11 +193,16 @@ function createArtifactVerifier(manifest: HybridRuntimeManifest | undefined, man
     },
   };
 }
-async function verifyManifestArtifacts(manifest: HybridRuntimeManifest | undefined, kernelBase: string, fixtureRoot: string): Promise<void> {
+async function verifyManifestArtifacts(
+  manifest: HybridRuntimeManifest | undefined,
+  kernelBase: string,
+  fixtureRoot: string,
+  signal?: AbortSignal,
+): Promise<void> {
   if (!manifest?.artifacts || manifest.artifacts.files?.length) return;
   await Promise.all([
-    verifySha256('kernel summary', `${kernelBase}/summary.json`, manifest.artifacts.kernelSummarySha256),
-    verifySha256('fixture summary', `${fixtureRoot}/summary.json`, manifest.artifacts.fixtureSummarySha256),
+    verifySha256('kernel summary', `${kernelBase}/summary.json`, manifest.artifacts.kernelSummarySha256, signal),
+    verifySha256('fixture summary', `${fixtureRoot}/summary.json`, manifest.artifacts.fixtureSummarySha256, signal),
   ]);
 }
 function nowMs(): number {
@@ -270,19 +280,20 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
   static async create(
     device: GPUDevice,
     meta: SquareFormerMeta,
-    urls: { kernelBase?: string; fixtureRoot?: string; manifestUrl?: string } = {},
+    urls: { kernelBase?: string; fixtureRoot?: string; manifestUrl?: string; signal?: AbortSignal } = {},
   ): Promise<SquareformerTvmHybridEvaluator> {
+    urls.signal?.throwIfAborted();
     let kernelBase = stripSlash(urls.kernelBase ?? '/tvm/squareformer-ffn');
     let fixtureRoot = stripSlash(urls.fixtureRoot ?? '/tvm/ffn-fixtures');
     let manifest: HybridRuntimeManifest | undefined;
     if (urls.manifestUrl) {
-      manifest = await loadJson<HybridRuntimeManifest>(urls.manifestUrl);
+      manifest = await loadJson<HybridRuntimeManifest>(urls.manifestUrl, createArtifactVerifier(undefined, undefined, urls.signal));
       validateManifest(manifest, meta);
       kernelBase = resolveManifestPath(urls.manifestUrl, urls.kernelBase ?? manifest.kernelBase, kernelBase);
       fixtureRoot = resolveManifestPath(urls.manifestUrl, urls.fixtureRoot ?? manifest.fixtureRoot, fixtureRoot);
-      await verifyManifestArtifacts(manifest, kernelBase, fixtureRoot);
+      await verifyManifestArtifacts(manifest, kernelBase, fixtureRoot, urls.signal);
     }
-    const verifier = createArtifactVerifier(manifest, urls.manifestUrl);
+    const verifier = createArtifactVerifier(manifest, urls.manifestUrl, urls.signal);
     const [kernels, root] = await Promise.all([loadKernels(kernelBase, verifier), loadJson<FixtureRootSummary>(`${fixtureRoot}/summary.json`, verifier)]);
     if (!root.layers.length) throw new Error(`No layers in ${fixtureRoot}/summary.json`);
     assertExpected('layers', manifest?.expected?.layers, root.layers.length);
@@ -358,6 +369,7 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
       SquareformerTvmValueHeadWebgpuBlock.create(device as never, valueWeights, last.summary.shape),
       SquareformerTvmLegalPolicyGatherWebgpuBlock.createDynamic(device as never, Math.max(1, Number(meta.max_legal_moves ?? 256)), meta.policy_size),
     ]);
+    urls.signal?.throwIfAborted();
     return new SquareformerTvmHybridEvaluator(
       device,
       meta,

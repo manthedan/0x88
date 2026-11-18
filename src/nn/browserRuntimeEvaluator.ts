@@ -70,15 +70,19 @@ async function createHybridEvaluator(
   manifestUrl: string | undefined,
   kernelBase: string | undefined,
   fixtureRoot: string | undefined,
+  signal?: AbortSignal,
 ): Promise<Evaluator> {
+  signal?.throwIfAborted();
   const gpu = (navigator as NavigatorGpu).gpu;
   if (!gpu) throw new Error('WebGPU is unavailable for custom WebGPU runtime');
   const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
+  signal?.throwIfAborted();
   if (!adapter) throw new Error('WebGPU adapter unavailable for custom WebGPU runtime');
   const device = await adapter.requestDevice();
   try {
     // On success the evaluator owns the device and destroys it in destroy().
-    return await SquareformerTvmHybridEvaluator.create(device as never, meta, { manifestUrl, kernelBase, fixtureRoot });
+    signal?.throwIfAborted();
+    return await SquareformerTvmHybridEvaluator.create(device as never, meta, { manifestUrl, kernelBase, fixtureRoot, signal });
   } catch (error) {
     device.destroy();
     throw error;
@@ -100,6 +104,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
 ): Promise<BrowserRuntimeEvaluatorResult> {
   const params = options.params;
   const meta = v.parse(SquareFormerMetaSchema, await loadJson(spec.meta, options.signal));
+  options.signal?.throwIfAborted();
   const modelId = isPinnedCentipawnOnnx(spec.onnx) ? S4FIX_V_EMA_MODEL_ID : inferRuntimeModelId(spec);
   const requestedRuntime = parseBrowserRuntimeSelector(options.runtime ?? spec.runtime ?? params?.get('runtime'));
   const createOrtEvaluator = () =>
@@ -151,7 +156,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
   if (shouldAttemptTvmjsRuntime(modelId, requestedRuntime)) {
     try {
       if (!manifestUrl) throw new Error(`No TVMJS manifest is registered for ${modelId}`);
-      const primary = await SquareformerTvmjsWebgpuEvaluator.create(manifestUrl, meta);
+      const primary = await SquareformerTvmjsWebgpuEvaluator.create(manifestUrl, meta, options.signal);
       const selectedManifestUrl = primary.manifestUrl ?? manifestUrl;
       const runtimeConfigId = new URL(selectedManifestUrl, location.href).pathname.endsWith('/f32/v3-subgroups/manifest.json')
         ? 'centipawn-tvmjs-webgpu-f32-v3-subgroups'
@@ -170,6 +175,8 @@ export async function createBrowserSquareformerRuntimeEvaluator(
       publishBrowserRuntimeAudit({ ...selectedAudit, resolvedRuntime: result.resolvedRuntime });
       return result;
     } catch (err) {
+      options.signal?.throwIfAborted();
+      if (err instanceof Error && err.name === 'AbortError') throw err;
       if (!fallback) throw err;
       const fallbackReason = err instanceof Error ? err.message : String(err);
       console.warn('TVMJS WebGPU runtime unavailable; falling back to ORT SquareFormer.', { label: spec.label ?? spec.id, modelId, fallbackReason });
@@ -191,7 +198,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
 
   if (customRequested) {
     try {
-      const primary = await createHybridEvaluator(meta, manifestUrl, kernelBase, fixtureRoot);
+      const primary = await createHybridEvaluator(meta, manifestUrl, kernelBase, fixtureRoot, options.signal);
       const evaluator = fallback ? new RuntimeFallbackEvaluator(primary, createOrtEvaluator, auditBase, 'custom-webgpu-fallback-ort') : primary;
       const result = {
         evaluator,
@@ -205,6 +212,8 @@ export async function createBrowserSquareformerRuntimeEvaluator(
       publishBrowserRuntimeAudit({ ...auditBase, resolvedRuntime: result.resolvedRuntime });
       return result;
     } catch (err) {
+      options.signal?.throwIfAborted();
+      if (err instanceof Error && err.name === 'AbortError') throw err;
       if (!fallback) throw err;
       const fallbackReason = err instanceof Error ? err.message : String(err);
       console.warn('Custom WebGPU runtime unavailable; falling back to ORT SquareFormer.', { label: spec.label ?? spec.id, modelId, fallbackReason });

@@ -164,6 +164,65 @@ test("Centipawn TVMJS padding uses each chunk's final context and rejects invali
   evaluator.destroy();
 });
 
+for (const phase of ['manifest', 'wasm'])
+  test(`Centipawn TVMJS cancels ${phase} downloads without an uncached retry`, async (t) => {
+    const controller = new AbortController(),
+      started = Promise.withResolvers();
+    let modelRequests = 0,
+      deviceDestroys = 0;
+    const sha256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+    const manifest = {
+      schema: 'lc0_browser.lc0_tvmjs_webgpu_bundle.v1',
+      modelFamily: 'bt4-soap-rem-c19000-final',
+      dtype: 'f32',
+      target: 'webgpu',
+      version: 'v2-shape-k16',
+      requiredFeatures: [],
+      models: [{ batch: 16, wasm: 'model.wasm', bytes: 3, sha256 }],
+      files: [{ path: 'tvmjs.bundle.js', sha256: '0'.repeat(64) }],
+    };
+    const restore = [
+      replaceGlobal('location', new URL('https://app.example/analysis')),
+      replaceGlobal('caches', undefined),
+      replaceGlobal('navigator', {
+        gpu: {
+          requestAdapter: async () => ({
+            features: { has: () => false },
+            limits: {},
+            requestDevice: async () => ({
+              destroy() {
+                deviceDestroys++;
+              },
+            }),
+          }),
+        },
+      }),
+      replaceGlobal('tvmjs', { createPolyfillWASI: () => ({}), instantiate: async () => assert.fail('canceled bytes must not instantiate') }),
+      replaceGlobal('__LC0_TVMJS_BUNDLE_SHA256__', '0'.repeat(64)),
+      replaceGlobal('fetch', async (input, options) => {
+        const url = String(input.url ?? input);
+        if (phase === 'wasm' && url.endsWith('/manifest.json')) return Response.json(manifest);
+        if (phase === 'wasm') modelRequests++;
+        started.resolve();
+        const signal = options?.signal ?? input.signal;
+        assert.ok(signal, 'every compiled artifact fetch must receive cancellation');
+        return new Promise((_resolve, reject) => {
+          if (signal.aborted) reject(signal.reason);
+          else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      }),
+    ];
+    t.after(() => {
+      for (const undo of restore.reverse()) undo();
+    });
+    const creating = SquareformerTvmjsWebgpuEvaluator.create('/runtimes/centipawn/manifest.json', meta, controller.signal);
+    await started.promise;
+    controller.abort();
+    await assert.rejects(creating, { name: 'AbortError' });
+    assert.equal(modelRequests, phase === 'wasm' ? 1 : 0);
+    assert.equal(deviceDestroys, phase === 'wasm' ? 1 : 0);
+  });
+
 test('Centipawn TVMJS evaluator defers disposal until an in-flight batch finishes', async () => {
   let releaseSync;
   let syncStarted;
