@@ -4097,6 +4097,19 @@ function removeHiddenTabPause(): void {
 }
 
 let analysisReclaimOwner: AbortController | null = null;
+/** The run whose big-net init is in flight, and the nets it is loading. */
+let analysisBigNetInit: { owner: AbortController; keys: AnalysisBigNetKey[] } | null = null;
+
+/**
+ * Stop ends a cold big-net load instead of leaving it to run on, so the run
+ * settles now and Maia3 can reload once the worker retires. Navigation keeps
+ * the load: the next run joins it rather than restarting the download.
+ */
+function stopAnalysisBigNetInit(): void {
+  const init = analysisBigNetInit;
+  if (!init || init.owner !== analysisAbort) return;
+  for (const key of init.keys) if (!peekBigNetSearcher(key)?.loaded) disposeBigNetSearcherNow(key);
+}
 
 function invalidateAnalysisSettings(
   maintenance: Maintenance = { reloadLc0: false, disposeUnused: false },
@@ -4527,7 +4540,13 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         if (controller.signal.aborted || mountAbort.signal.aborted || !analysisCanPrepare(analysisRunState, owner)) return;
       }
       el('message').textContent = `Loading ${uninitializedBigNets.map((key) => `Lc0 ${BIG_NETS[key].name}`).join(' + ')}…`;
-      const initErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted);
+      analysisBigNetInit = { owner: controller, keys: uninitializedBigNets };
+      let initErrors: Map<AnalysisBigNetKey, Error>;
+      try {
+        initErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted);
+      } finally {
+        if (analysisBigNetInit?.owner === controller) analysisBigNetInit = null;
+      }
       for (const [key, error] of initErrors) bigNetInitErrors.set(key, error);
       if (controller.signal.aborted || mountAbort.signal.aborted) return;
     }
@@ -5796,6 +5815,7 @@ function wireEvents() {
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'prefetch');
     cancelAllAnalysisAssetPrefetches();
+    stopAnalysisBigNetInit();
     cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
     if (hiddenTab.hidden) el('message').textContent = 'Analysis stopped.';
     // The paused run's finally already ran and left Stop enabled. Cancelling

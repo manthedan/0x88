@@ -264,7 +264,7 @@ function analysisOwner(native) {
         analysisAbort=null;
       }
     }
-    return {prepare,cancel:()=>cancelAnalysisOperation(1),changeRows:()=>invalidateAnalysisSettings({disposeUnused:true},true),enableMaia3Panel,unloadMaia3Panel,...criticalCallbacks,getStockfish,message,disposeAnalysisCpuEngines};`,
+    return {prepare,cancel:()=>cancelAnalysisOperation(1),stop:()=>{stopAnalysisBigNetInit();cancelAnalysisOperation(1);},changeRows:()=>invalidateAnalysisSettings({disposeUnused:true},true),enableMaia3Panel,unloadMaia3Panel,...criticalCallbacks,getStockfish,message,disposeAnalysisCpuEngines};`,
     {
       ANALYSIS_BIG_NET_KEYS: keys,
       message,
@@ -604,3 +604,30 @@ for (const phone of [true, false]) {
     native.assertPeak(phone ? 1 : 2);
   });
 }
+
+test('phone Analysis Stop during a first BT4 download ends the load, then Maia3 waits for its retirement', async (t) => {
+  const native = nativeModels(t);
+  const owner = analysisOwner(native);
+  const run = owner.prepare([row('bt4')]);
+  const bt4 = await native.get('bt4');
+  owner.stop();
+  // The download never finishes: the run must settle without it.
+  let timer;
+  const stuck = new Promise((resolve) => {
+    timer = setTimeout(() => resolve('stuck'), 200);
+  });
+  try {
+    assert.notEqual(await Promise.race([run, stuck]), 'stuck', 'Stop left the run waiting for the big-net download');
+  } finally {
+    clearTimeout(timer);
+  }
+  assert.equal(bt4.disposeRequest?.type, 'dispose');
+  const maia = owner.enableMaia3Panel();
+  await tick();
+  assert.deepEqual(native.initializing(), ['bt4'], 'Maia3 must wait for the BT4 worker to retire');
+  bt4.finishDispose();
+  const model = await native.get('maia3');
+  model.finishInit();
+  await maia;
+  native.assertPeak();
+});
