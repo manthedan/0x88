@@ -4109,6 +4109,8 @@ function stopAnalysisBigNetInit(): void {
   const init = analysisBigNetInit;
   if (!init || init.owner !== analysisAbort) return;
   for (const key of init.keys) if (!peekBigNetSearcher(key)?.loaded) disposeBigNetSearcherNow(key);
+  // The run settles silently once its load is gone; replace "Loading Lc0 …".
+  el('message').textContent = 'Analysis stopped.';
 }
 
 function invalidateAnalysisSettings(
