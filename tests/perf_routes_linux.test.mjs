@@ -150,7 +150,8 @@ test('Linux Chrome flags and Chromium channel apply only on Linux; macOS launche
   const source = readFileSync(new URL('../scripts/perf_routes/session.mjs', import.meta.url), 'utf8');
   assert.match(source, /linux \? \{ channel: 'chromium', executablePath: process\.env\.PERF_ROUTES_CHROMIUM \|\| undefined \} : \{ channel: 'chrome' \}/);
   assert.match(source, /args: \['--enable-blink-features=ForceEagerMeasureMemory', \.\.\.\(linux \? LINUX_CHROME_ARGS : \[\]\)\]/);
-  assert.ok(LINUX_CHROME_ARGS.includes('--enable-unsafe-webgpu'));
+  assert.ok(LINUX_CHROME_ARGS.includes('--enable-features=Vulkan'));
+  assert.ok(!LINUX_CHROME_ARGS.includes('--enable-unsafe-webgpu'), 'the WebGPU blocklist stays as users have it');
   const warm = source.indexOf('await warmWebGpu(');
   assert.ok(warm > source.indexOf('newBrowserCDPSession()') && warm < source.indexOf('browser.newContext('), 'warm-up precedes the measured context');
   assert.ok(warm < source.indexOf('sampling = setInterval(sample, 100)'), 'warm-up precedes sampling');

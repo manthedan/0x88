@@ -79,8 +79,8 @@ export function linuxFootprintReader({ readText = (path) => readFile(path, 'utf8
 
 // Headless Chromium on Linux exposes the NVIDIA Vulkan adapter only with these (verified on Yukon,
 // Chromium 149 / driver 580, no display). Without Vulkan, ANGLE and Dawn fall back to SwiftShader; no
-// surface exists headless.
-export const LINUX_CHROME_ARGS = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=vulkan', '--disable-vulkan-surface'];
+// surface exists headless. --enable-unsafe-webgpu is not needed, so users' WebGPU blocklist applies.
+export const LINUX_CHROME_ARGS = ['--enable-features=Vulkan', '--use-angle=vulkan', '--disable-vulkan-surface'];
 
 export const ADAPTER_INFO = `(async () => {
   const a = await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' });
@@ -117,4 +117,4 @@ export async function warmWebGpu(browser, isRendererGone, { attempts = 40, delay
 }
 
 export const LINUX_LIMITATION =
-  'Linux/NVIDIA: memory = smaps_rollup Pss_Dirty+SwapPss per process plus nvidia-smi VRAM for the GPU process; peaks are 100 ms sampled maxima (no kernel high-water). Chromium runs with --enable-unsafe-webgpu and ANGLE/Vulkan, after a WebGPU warm-up in a throwaway context. Not comparable with macOS phys_footprint results.';
+  'Linux/NVIDIA: memory = smaps_rollup Pss_Dirty+SwapPss per process plus nvidia-smi VRAM for the GPU process; peaks are 100 ms sampled maxima (no kernel high-water). Chromium runs headless with ANGLE/Vulkan, after a WebGPU warm-up in a throwaway context. Not comparable with macOS phys_footprint results.';
