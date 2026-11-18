@@ -1,13 +1,13 @@
 // One owned browser session / cold origin / real route journey. Shared matrix OS and proxy helpers.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { hostname, loadavg, platform, release } from 'node:os';
 import { median } from '../lib/perf_canary_stats.mjs';
 import { pgrep, readFootprint, sleep, WORKER_READY_SCRIPT } from '../perf_matrix/common.mjs';
 import { startCountingProxy } from '../perf_matrix/proxy.mjs';
 import { footprintSum, jsBytesByRoute, naturalVisibilityValid, peakFootprint, requestFailures, safariWebContentPid } from './gate.mjs';
 import { DOCS_READY, MIDGAME, routeFor, runJourney, waitFor } from './journeys.mjs';
-import { shutdownDelay, watchShutdown } from './lifecycle.mjs';
+import { cleanupMarker, shutdownDelay, watchShutdown } from './lifecycle.mjs';
 
 const [specFile, outFile] = process.argv.slice(2);
 const spec = JSON.parse(readFileSync(specFile, 'utf8'));
@@ -34,6 +34,8 @@ const guarded =
   };
 let proxy, browser, sid, cdp, page, evaluate, navigate, close, sampling, safariPid;
 const wc = 'com.apple.WebKit.WebContent';
+const pendingCleanup = cleanupMarker(outFile);
+const markBrowserStarting = () => writeFileSync(pendingCleanup, `${spec.browser} session process ${process.pid}\n`, { flag: 'wx' });
 let phase = 'journey',
   busy = false,
   samplingError;
@@ -59,7 +61,11 @@ async function wd(method, path, body) {
     signal: AbortSignal.timeout(120000),
   });
   const data = await r.json();
-  if (!r.ok) throw Error(`${method} ${path}: ${r.status} ${JSON.stringify(data.value).slice(0, 300)}`);
+  if (!r.ok || data.value?.error) {
+    throw Object.assign(Error(`${method} ${path}: ${r.status} ${JSON.stringify(data.value)?.slice(0, 300)}`), {
+      webDriverError: data.value?.error,
+    });
+  }
   return data.value;
 }
 const quantile = (xs, q) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.ceil(xs.length * q) - 1] : 0);
@@ -111,13 +117,21 @@ try {
   signal.throwIfAborted();
   if (spec.browser === 'chrome') {
     const { chromium } = await import('playwright');
-    browser = await chromium.launch({
-      channel: 'chrome',
-      headless: true,
-      handleSIGINT: false,
-      handleSIGTERM: false,
-      args: ['--enable-blink-features=ForceEagerMeasureMemory'],
-    });
+    signal.throwIfAborted();
+    markBrowserStarting();
+    browser = await chromium
+      .launch({
+        channel: 'chrome',
+        headless: true,
+        handleSIGINT: false,
+        handleSIGTERM: false,
+        args: ['--enable-blink-features=ForceEagerMeasureMemory'],
+      })
+      .catch((error) => {
+        // Playwright closes a failed launch before rejecting.
+        unlinkSync(pendingCleanup);
+        throw error;
+      });
     close = () => browser.close();
     cdp = await browser.newBrowserCDPSession();
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -147,9 +161,19 @@ try {
     if (Object.values(result.jscFlags).some(Boolean)) throw Error('Normal-JSC cohort refuses launchctl overrides');
     const before = new Set(pgrep(wc, { strict: true }));
     signal.throwIfAborted();
-    const session = await wd('POST', '/session', { capabilities: { alwaysMatch: { browserName: 'safari' } } });
-    sid = session.sessionId;
-    close = () => wd('DELETE', `/session/${sid}`);
+    markBrowserStarting();
+    const session = await wd('POST', '/session', { capabilities: { alwaysMatch: { browserName: 'safari' } } }).catch((error) => {
+      // A protocol-level refusal creates no session. A lost reply may hide an owned session.
+      if (error.webDriverError) unlinkSync(pendingCleanup);
+      throw error;
+    });
+    sid = session?.sessionId;
+    if (typeof sid !== 'string' || !sid) throw Error('Safari did not return a session ID');
+    close = () =>
+      wd('DELETE', `/session/${encodeURIComponent(sid)}`).catch((error) => {
+        if (error.webDriverError !== 'invalid session id') throw error;
+      });
+    writeFileSync(pendingCleanup, `Owned Safari session ${sid} at ${spec.driver}\n`);
     signal.throwIfAborted();
     result.browserVersion = session.capabilities?.browserVersion;
     await wd('POST', `/session/${sid}/timeouts`, { pageLoad: 90000, script: 120000 });
@@ -278,11 +302,15 @@ try {
 } finally {
   clearInterval(sampling);
   while (busy) await sleep(10);
-  if (close)
-    await close().catch((e) => {
-      result.cleanupError = String(e);
+  if (close) {
+    try {
+      await close();
+      unlinkSync(pendingCleanup);
+    } catch (error) {
+      result.cleanupError = String(error);
       result.status = 'invalid';
-    });
+    }
+  }
   if (proxy) await proxy.close();
   if (signal.aborted) {
     result.status = 'invalid';

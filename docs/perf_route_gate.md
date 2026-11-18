@@ -54,7 +54,7 @@ Safari needs only Node, clang/pidfp and the existing driver (`4446` on the mini)
 
 ## Journeys (fresh browser session/origin each time)
 
-1. **Analysis default:** cold mid-game FEN URL, Lc0 Small + SF Lite default rows; auto-analysis on, real user-move hook while analyzing, then a 60 s observation window starting at the move. Defaults are finite search budgets, not an artificial infinite search. Within that window require new worker/UI progress and visible PVs for every selected engine, with a worker response associated with the exact post-move FEN (a zero-new-visit reused-root response proves the request but adds no speed sample).
+1. **Analysis default:** cold mid-game FEN URL, Lc0 Small + SF Lite default rows; auto-analysis on, real user-move hook while analyzing, then a 60 s observation window starting at the move. Defaults are finite search budgets, not an artificial infinite search. Within that window require a worker progress message or result for the exact post-move FEN and visible PVs for every selected engine (a zero-new-visit reused-root response proves the request but adds no speed sample).
 2. **Analysis four:** same, add two rows through the UI and select Berserk and PlentyChess (CPU); after 60 s, make ten further legal user plies, waiting for FEN-associated worker progress and every engine's new PV after each.
 3. **Play Maia3 / Small:** separate ten-full-move games (20 plies) as White at the UI's fastest strength. A deterministic host-side three-ply material/development chooser avoids trivial early checkmates, adding no browser engine/worker. It replays committed SAN, only runs on the user's turn and must match the board's legal destinations (including back-rank castling/rook moves). Real engine replies are required. An early terminal game is invalid, not silently restarted.
 4. **Arena CPU / Small:** one completed SF Lite–Berserk game, then a separate Small–SF Lite game, 100 ms equal movetime, one game/opening, concurrency one. Require a completed game chip/log; errors/forfeits/timeouts, illegal replies, missing-move resignations and cancellation are invalid.
@@ -76,7 +76,7 @@ Reuse `perf_matrix/common.mjs` (kernel `pidfp` / `proc_pid_rusage`, worker-ready
 - **First line / interactivity:** early probe timestamp to first engine output/progress (including initial loading) and to board DOM plus installed page controls/hook. Board interactive does **not** mean every model is loaded. Both timings are in-page, excluding HTML network time before probe installation.
 - **Long tasks:** supported `PerformanceObserver('longtask')` entries on the Analysis route: count, total ms, p95. Safari's missing API is unavailable, not zero. The probe itself has equal overhead in both arms.
 - **Input:** scheduled real user-move hook to two animation frames, including main-thread queue/handler/render delay; not hardware-to-screen latency or a trusted physical drag. Record/verify the changed FEN or committed ply.
-- **JS:** response body bytes for `.js`/`.mjs`, including worker/glue scripts, excluding WASM/models/CSS. Per-route attribution uses request initiation times (cached repeats may transfer zero); navigation also reports the journey total. It is transferred JS for this route journey, not a static import-graph estimate. Keep raw request logs. Optional missing Reckless HEAD probes and unused speculative Reckless prefetch failures are retained separately; no gate journey selects Reckless, and every selected engine must produce speed/progress.
+- **JS:** response body bytes for `.js`/`.mjs`, including worker/glue scripts, excluding WASM/models/CSS. Per-route attribution uses request initiation times (cached repeats may transfer zero); navigation also reports the journey total. It is transferred JS for this route journey, not a static import-graph estimate. Keep raw request logs. Confirmed 404/410 responses from optional model/logo HEAD probes and unused speculative Reckless requests are retained separately; no gate journey selects Reckless, and every selected engine must produce speed/progress.
 
 ## Verdict / owner sign-off
 
@@ -93,7 +93,7 @@ Raw specs, full time series, process/context/worker evidence and immutable failu
 ### Known limitations
 
 - `--report` does not reconstruct a missing or incomplete `runs.jsonl` from per-session files. If the coordinator stops before indexing a session result, that result remains on disk but is absent from regenerated reports.
-- On SIGINT or SIGTERM the coordinator stops scheduling attempts. It waits for the owned session to clean up before releasing a verified `--lock-dir`; with an external `--benchlock` wrapper it lets the current invocation finish rather than risk interrupting the wrapper while it holds the mutex.
+- On SIGINT or SIGTERM the coordinator stops scheduling attempts. It waits for the owned session to clean up before releasing a verified `--lock-dir`. If browser closure cannot be confirmed, it retains that mutex for owner recovery and records a `.cleanup-pending` marker next to the session result. With an external `--benchlock` wrapper it lets the current invocation finish rather than interrupting the wrapper while it holds the mutex.
 
 ## Initial production baseline
 

@@ -4,9 +4,8 @@ import { appendFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync,
 import { createServer } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sleep } from '../perf_matrix/common.mjs';
 import { compareRuns, HELP, parseArgs, plan, previewEnvironment } from './gate.mjs';
-import { acquireLock, claimOutput, runOwnedSession, shutdownDelay, watchShutdown } from './lifecycle.mjs';
+import { acquireLock, claimOutput, cleanupMarker, releaseAfterSession, runOwnedSession, shutdownDelay, watchShutdown } from './lifecycle.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 // Build/archive/git/file operations are confined to the calling worktree's ignored output tree.
@@ -99,30 +98,49 @@ function build(input, out, arm) {
     dependencies: sameLock ? 'shared-installed/same-lockfile' : 'isolated-npm-ci',
   };
 }
-async function serve(dist, out, arm) {
+async function serve(dist, out, arm, signal) {
   const socket = createServer();
   await new Promise((r) => socket.listen(0, '127.0.0.1', r));
   const port = socket.address().port;
   await new Promise((r) => socket.close(r));
   const child = spawn(process.execPath, [join(root, 'scripts/serve_isolated_static.mjs'), dist, String(port)], {
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
     env: previewEnvironment(port),
   });
+  let spawnError;
+  child.on('error', (error) => {
+    spawnError = error;
+  });
+  const closed = new Promise((r) => child.once('close', r));
+  const stop = async () => {
+    child.kill('SIGTERM');
+    await closed;
+  };
   child.stdout.on('data', (d) => appendFileSync(join(out, `${arm}-server.log`), d));
   child.stderr.on('data', (d) => appendFileSync(join(out, `${arm}-server.log`), d));
   const base = `http://127.0.0.1:${port}`;
-  for (let i = 0; i < 100; i++) {
-    if (child.exitCode !== null) throw Error(`Static server exited ${child.exitCode}`);
-    if (
-      await fetch(`${base}/app/analysis/`)
-        .then((r) => r.ok)
-        .catch(() => false)
-    )
-      return { child, base };
-    await sleep(100);
+  try {
+    for (let i = 0; i < 100; i++) {
+      signal.throwIfAborted();
+      if (spawnError) throw spawnError;
+      if (child.exitCode !== null || child.signalCode !== null) throw Error(`Static server exited ${child.exitCode ?? child.signalCode}`);
+      if (
+        await fetch(`${base}/app/analysis/`, { signal: AbortSignal.any([signal, AbortSignal.timeout(1000)]) })
+          .then(async (r) => {
+            await r.body?.cancel();
+            return r.ok;
+          })
+          .catch(() => false)
+      )
+        return { stop, base };
+      await shutdownDelay(100, signal);
+    }
+    throw Error('Static server did not become ready');
+  } catch (error) {
+    await stop();
+    throw error;
   }
-  child.kill('SIGTERM'); // this exact child was started here
-  throw Error('Static server did not become ready');
 }
 async function run(signal) {
   const out = resolve(args.out ?? `.local-dev-artifacts/perf-routes/${new Date().toISOString().replace(/[:.]/g, '-')}`);
@@ -139,8 +157,8 @@ async function run(signal) {
       else {
         // Self comparisons share identical bytes, but use separate origins/sessions.
         builds[arm] = arm === 'candidate' && args.baseline === args.candidate ? { ...builds.baseline } : build(args[arm], out, arm);
-        const server = await serve(builds[arm].dist, out, arm);
-        servers.push(server.child);
+        const server = await serve(builds[arm].dist, out, arm, signal);
+        servers.push(server.stop);
         builds[arm].base = server.base;
       }
     }
@@ -155,7 +173,7 @@ async function run(signal) {
         resultFile = join(out, 'sessions', `${id}.json`);
       writeFileSync(specFile, JSON.stringify({ ...cell, base: builds[cell.arm].base, source: builds[cell.arm], driver: args.driver }, null, 2));
       console.log(`[${i + 1}/${cells.length}] ${id}`);
-      let status;
+      let status, cleanupConfirmed;
       do {
         const release = args['lock-dir'] ? await acquireLock(resolve(args['lock-dir']), signal) : () => {};
         try {
@@ -163,22 +181,31 @@ async function run(signal) {
           const bin = args.benchlock ?? process.execPath;
           status = await runOwnedSession(bin, args.benchlock ? [process.execPath, ...commandArgs] : commandArgs, signal, !!args.benchlock);
         } finally {
-          release();
+          cleanupConfirmed = releaseAfterSession(resultFile, release);
         }
-        if (status === 75 && !signal.aborted) {
+        if (cleanupConfirmed && status === 75 && !signal.aborted) {
           console.log('Shared Safari busy; mutex released; retry in 30s');
           await shutdownDelay(30000, signal);
         }
-      } while (status === 75 && !signal.aborted);
+      } while (cleanupConfirmed && status === 75 && !signal.aborted);
       const row = existsSync(resultFile)
         ? JSON.parse(readFileSync(resultFile, 'utf8'))
         : { ...cell, status: 'invalid', error: `session process exited ${status}` };
+      if (!cleanupConfirmed) {
+        row.status = 'invalid';
+        row.error = `Browser cleanup unconfirmed; see ${cleanupMarker(resultFile)}${args['lock-dir'] ? `; mutex retained at ${args['lock-dir']}` : ''}`;
+        console.error(row.error);
+      }
       appendFileSync(join(out, 'runs.jsonl'), `${JSON.stringify(row)}\n`);
       signal.throwIfAborted();
+      if (!cleanupConfirmed) {
+        process.exitCode = 2;
+        return;
+      }
       report(out);
     }
   } finally {
-    for (const child of servers) if (child.exitCode === null) child.kill('SIGTERM');
+    await Promise.all(servers.map((stop) => stop()));
     if (existsSync(join(out, 'runs.jsonl'))) report(out);
   }
   process.exitCode = exitFor(out);

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -56,6 +56,14 @@ export async function acquireLock(dir, signal) {
       if (error.code !== 'ENOENT') throw error;
     }
   };
+}
+
+export const cleanupMarker = (resultFile) => `${resultFile}.cleanup-pending`;
+
+export function releaseAfterSession(resultFile, release) {
+  if (existsSync(cleanupMarker(resultFile))) return false;
+  release();
+  return true;
 }
 
 export async function shutdownDelay(ms, signal) {

@@ -25,7 +25,7 @@ import {
 } from '../scripts/perf_routes/gate.mjs';
 import { chooseHumanMove, playHumanTurn } from '../scripts/perf_routes/human.mjs';
 import { arenaGameFailed, DOCS_READY, requireAnalysisForMove } from '../scripts/perf_routes/journeys.mjs';
-import { acquireLock, claimOutput } from '../scripts/perf_routes/lifecycle.mjs';
+import { acquireLock, claimOutput, cleanupMarker, releaseAfterSession } from '../scripts/perf_routes/lifecycle.mjs';
 
 const args = (...extra) => parseArgs(['--baseline', 'main', '--candidate', 'HEAD', '--dry-run', ...extra]);
 
@@ -197,7 +197,13 @@ test('proxy records upstream failure before headers, truncated bodies and downst
   assert.equal(failures.unexpected.find((r) => r.path === '/truncated.js').status, 200);
   assert.equal(failures.optional[0].path, '/reckless/optional.js');
   const late = { at: 10, path: '/docs/chunk.js', status: 200, complete: false, failure: null };
-  assert.deepEqual(requestFailures([late]).unexpected, [late]);
+  const bigNetProbe = { path: '/models/lc0/t3-big.onnx', method: 'HEAD', status: 404, complete: true, failure: null };
+  const brokenProbe = { ...bigNetProbe, complete: false, failure: 'disconnected' };
+  const missingModel = { ...bigNetProbe, method: 'GET' };
+  assert.deepEqual(requestFailures([bigNetProbe, brokenProbe, missingModel, late]), {
+    optional: [bigNetProbe],
+    unexpected: [brokenProbe, missingModel, late],
+  });
 });
 
 test('route probes retain original worker payloads, count teardown once and parse both UCI transports', () => {
@@ -416,8 +422,8 @@ test('Safari requires exactly one new WebContent PID without ranking by footprin
 });
 
 test('Analysis requires current-FEN worker and UI progress and all PVs inside the move window', async () => {
-  const move = { fen: 'new', started: 10, scheduling: { workerProgressMessages: 19, uiProgressSamples: 18 } };
-  const state = { fen: 'new', workerProgressMessages: 20, uiProgressSamples: 19 };
+  const move = { fen: 'new', started: 10 };
+  const state = { fen: 'new', workerProgressMessages: 0, uiProgressSamples: 0 };
   const window = { __routePerf: { analysisProgress: [{ fen: 'old', at: 10 }] }, __analysisSchedulingState: () => state };
   let rowCount = 2;
   let now = 11;
@@ -428,7 +434,7 @@ test('Analysis requires current-FEN worker and UI progress and all PVs inside th
         : [1, 2],
   };
   const evaluate = async (expression) => new Function('window', 'document', 'performance', `return (${expression});`)(window, document, { now: () => now });
-  const observe = () => requireAnalysisForMove(evaluate, move, 1, true);
+  const observe = () => requireAnalysisForMove(evaluate, move, 1);
   await assert.rejects(observe(), /Timed out/);
   window.__routePerf.analysisProgress = [{ fen: 'new', at: 9 }];
   await assert.rejects(observe(), /Timed out/);
@@ -440,7 +446,7 @@ test('Analysis requires current-FEN worker and UI progress and all PVs inside th
   rowCount = 1;
   await assert.rejects(observe(), /Timed out/);
   rowCount = 2;
-  state.uiProgressSamples = move.scheduling.uiProgressSamples;
+  state.fen = 'other';
   await assert.rejects(observe(), /Timed out/);
 });
 
@@ -480,6 +486,19 @@ test('interrupted mutex wait and release cannot remove another owner', async (t)
   controller.abort(Error('test interrupt'));
   await assert.rejects(waiting, /test interrupt/);
   assert.equal(readFileSync(owner, 'utf8'), 'replacement owner\n');
+});
+
+test('unconfirmed owned browser cleanup retains the mutex', async (t) => {
+  const dir = scratch(t);
+  const lock = join(dir, 'mutex');
+  const output = join(dir, 'attempt.json');
+  const release = await acquireLock(lock, new AbortController().signal);
+  writeFileSync(cleanupMarker(output), 'Owned Safari session test-session\n');
+  assert.equal(releaseAfterSession(output, release), false);
+  assert.equal(existsSync(join(lock, 'owner')), true);
+  rmSync(cleanupMarker(output));
+  assert.equal(releaseAfterSession(output, release), true);
+  assert.equal(existsSync(lock), false);
 });
 
 for (const [signal, code] of [

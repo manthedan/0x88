@@ -145,11 +145,16 @@ export function footprintSum(pids, readings, label) {
 }
 
 export function requestFailures(requests) {
-  const failures = requests.filter((r) => !r.complete || r.failure || r.status >= 400);
-  return {
-    optional: failures.filter((r) => r.path.startsWith('/reckless/') && (r.complete || r.failure)),
-    unexpected: failures.filter((r) => !r.path.startsWith('/reckless/') || (!r.complete && !r.failure)),
-  };
+  const optional = [],
+    unexpected = [];
+  for (const r of requests) {
+    if (r.complete && !r.failure && r.status < 400) continue;
+    const probe = r.method === 'HEAD' && /^\/(?:models\/lc0\/(?:BT4-|t3-)[^/?]+\.onnx|engine-logos\/[^/?]+\.svg)(?:\?|$)/i.test(r.path);
+    const absent = r.complete && !r.failure && [404, 410].includes(r.status);
+    if ((probe || r.path.startsWith('/reckless/')) && absent) optional.push(r);
+    else unexpected.push(r);
+  }
+  return { optional, unexpected };
 }
 
 export function peakFootprint(browser, samples, navigationPeak = 0) {

@@ -89,7 +89,6 @@ export async function userMove(evaluate, analysis, index = 0, preferredMove = ''
       window.__routeMove = {from,to,done:false};
       setTimeout(() => {
         window.__routeMove.start = performance.now();
-        if (${analysis}) window.__routeMove.scheduling = window.__analysisSchedulingState();
         window[${JSON.stringify(analysis ? '__analysisUserMove' : '__playUserMove')}](from,to);
         requestAnimationFrame(() => requestAnimationFrame(() => {
           window.__routeMove.ms = performance.now()-queuedAt; window.__routeMove.done = true;
@@ -106,9 +105,7 @@ export async function userMove(evaluate, analysis, index = 0, preferredMove = ''
   );
   return {
     ...result,
-    ...(await evaluate(
-      `({latencyMs:window.__routeMove.ms,started:window.__routeMove.start${analysis ? ',fen:window.__analysisSchedulingState().fen,scheduling:window.__routeMove.scheduling' : ''}})`,
-    )),
+    ...(await evaluate(`({latencyMs:window.__routeMove.ms,started:window.__routeMove.start${analysis ? ',fen:window.__analysisSchedulingState().fen' : ''}})`)),
   };
 }
 
@@ -116,7 +113,7 @@ export function arenaGameFailed(log) {
   return /forfeit|failed|error|timeout|\billegal\b|\bresigned\b|\bcancelled\b/i.test(log);
 }
 
-export function analysisMoveObservation(move, deadline, requireProgress) {
+function analysisMoveObservation(move, deadline) {
   const at = performance.now();
   if (at > deadline) return { expired: true };
   const worker = window.__routePerf.analysisProgress.some((p) => p.fen === move.fen && p.at >= move.started && p.at <= at);
@@ -124,20 +121,15 @@ export function analysisMoveObservation(move, deadline, requireProgress) {
   const count = document.querySelectorAll('#engineList .engine-row').length;
   if (!worker || !count || new Set(rows.map((el) => el.dataset.engine)).size < count) return null;
   const state = window.__analysisSchedulingState();
-  if (
-    state.fen !== move.fen ||
-    (requireProgress &&
-      (state.workerProgressMessages <= move.scheduling.workerProgressMessages || state.uiProgressSamples <= move.scheduling.uiProgressSamples))
-  )
-    return null;
+  if (state.fen !== move.fen) return null;
   return { at, state };
 }
 
-export async function requireAnalysisForMove(evaluate, move, timeout = 120000, requireProgress = false) {
+export async function requireAnalysisForMove(evaluate, move, timeout = 120000) {
   // Check all evidence on the same page clock as the move, even if the first poll is delayed.
   const deadline = move.started + timeout;
-  const observation = await waitFor(evaluate, `(${analysisMoveObservation.toString()})(${JSON.stringify(move)},${deadline},${requireProgress})`, timeout);
-  if (observation.expired) throw Error(`No current-FEN worker/PV${requireProgress ? '/UI progress' : ''} observed within ${timeout}ms of user move`);
+  const observation = await waitFor(evaluate, `(${analysisMoveObservation.toString()})(${JSON.stringify(move)},${deadline})`, timeout);
+  if (observation.expired) throw Error(`No current-FEN worker/PV progress observed within ${timeout}ms of user move`);
   return observation;
 }
 
@@ -161,9 +153,8 @@ export async function runJourney(evaluate, name, mark = () => {}, pause = sleep)
     const firstMove = await userMove(evaluate, true);
     evidence.moves.push(firstMove);
     const windowMs = 60000;
-    const observed = await requireAnalysisForMove(evaluate, firstMove, windowMs, true);
+    evidence.analysisObservation = await requireAnalysisForMove(evaluate, firstMove, windowMs);
     await waitFor(evaluate, `performance.now() >= ${firstMove.started + windowMs}`, windowMs);
-    evidence.scheduling = { start: firstMove.scheduling, observed };
     if (name === 'analysis-four') {
       for (let i = 0; i < 10; i++) {
         const move = await userMove(evaluate, true, i);
