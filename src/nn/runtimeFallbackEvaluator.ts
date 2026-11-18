@@ -2,7 +2,8 @@ import type { BoardState } from '../chess/board.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { type BrowserRuntimeAuditDetail, publishBrowserRuntimeAudit } from './runtimeAudit.ts';
 
-async function disposeEvaluator(evaluator: Evaluator | undefined): Promise<void> {
+/** Await an evaluator's release; compiled runtimes expose dispose(), older ones destroy(). */
+export async function disposeEvaluator(evaluator: Evaluator | undefined): Promise<void> {
   if (!evaluator) return;
   const owner = evaluator as Evaluator & { dispose?: () => void | Promise<void>; destroy?: () => void | Promise<void> };
   await (owner.dispose ? owner.dispose() : owner.destroy?.());

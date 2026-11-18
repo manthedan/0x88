@@ -1,5 +1,6 @@
 import type { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
-import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import { CachedEvaluator } from '../nn/evaluator.ts';
+import { disposeEvaluator } from '../nn/runtimeFallbackEvaluator.ts';
 import { squareformerModelSettings } from '../nn/runtimeRegistry.ts';
 import { loadRetirableResource } from './arenaResourceLoad.ts';
 import { CENTIPAWN_NET_HISTORY_POSITIONS } from './engineCatalog.ts';
@@ -16,13 +17,9 @@ type Request = {
 /** Shared loading and ownership: a retired load cannot delete or replace a newer entry. */
 export function createCentipawnEvaluatorCache(load: Loader) {
   const entries = new Map<string, { promise: Promise<CachedEvaluator>; value?: CachedEvaluator; abort: AbortController }>();
-  const disposeInner = async (evaluator: Evaluator) => {
-    const inner = evaluator as Evaluator & { dispose?: () => void | Promise<void>; destroy?: () => void | Promise<void> };
-    await (inner.dispose ? inner.dispose() : inner.destroy?.());
-  };
   const destroy = async (cached: CachedEvaluator) => {
     cached.clear();
-    await disposeInner(cached.inner);
+    await disposeEvaluator(cached.inner);
   };
   const remove = (key: string) => {
     const entry = entries.get(key);
@@ -48,7 +45,7 @@ export function createCentipawnEvaluatorCache(load: Loader) {
           .then(() =>
             loadRetirableResource(async () => {
               const loaded = await load(request.spec, { ...request.options, signal: abort.signal });
-              return { ...loaded, dispose: () => disposeInner(loaded.evaluator) };
+              return { ...loaded, dispose: () => disposeEvaluator(loaded.evaluator) };
             }, abort.signal),
           )
           .then(async (loaded) => {
