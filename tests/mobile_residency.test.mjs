@@ -161,7 +161,7 @@ test('Play unmount calls the same awaitable retirement for both neural owners', 
   await api.maia();
   const cleanup = extract(play, '    ctx.autosave?.flush();', '    if (ctx.resignArmTimer)');
   compile(cleanup, {
-    ctx: { disposed: false, abort: new AbortController() },
+    ctx: { disposed: false, abort: new AbortController(), consentAbort: new AbortController() },
     ctxCancelEngineTurn: () => {},
     retireUnusedPlayNeuralEngines: api.retire,
     centipawnEvaluatorGeneration: 0,
@@ -326,6 +326,7 @@ test('Analysis cancels a pending Maia panel load, awaits terminal cleanup, and r
       awaitEngineRetirements,
       mountAbort: new AbortController(),
       isStaleMount: () => false,
+      isMemoryConstrainedDevice: () => false,
       el: (id) => {
         if (!elements.has(id)) elements.set(id, {});
         return elements.get(id);

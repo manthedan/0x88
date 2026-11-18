@@ -226,9 +226,11 @@ test('constrained acquire also clears an inherited idle-TTL net before replaceme
 for (const ack of [true, false]) {
   test(`phone exclusive replacement awaits graceful disposal (${ack ? 'ack' : 'bounded timeout'})`, async () => {
     const events = [];
+    const disposing = Promise.withResolvers();
     class Worker extends EventTarget {
       postMessage(message) {
         events.push(message.type);
+        if (message.type === 'dispose') disposing.resolve();
       }
       terminate() {
         events.push('terminate');
@@ -246,7 +248,7 @@ for (const ack of [true, false]) {
     );
     const first = pool.acquire('bt4');
     const next = pool.acquireAsync('t3', true);
-    await new Promise((resolve) => setImmediate(resolve));
+    await disposing.promise;
     assert.equal(pool.has('bt4'), false, 'detach remains synchronous at retirement');
     assert.equal(pool.has('t3'), false, 'replacement is not constructed while the old worker drains');
     assert.deepEqual(events, ['create:bt4', 'cancel', 'dispose']);

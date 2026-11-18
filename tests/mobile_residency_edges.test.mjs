@@ -61,6 +61,8 @@ test('the Maia reload control cannot race a constrained big-net run, but works o
       awaitEngineRetirements,
       mountAbort: new AbortController(),
       isStaleMount: () => false,
+      isMemoryConstrainedDevice: () => true,
+      ANALYSIS_BIG_NET_KEYS: [],
       el: (id) => {
         if (!elements.has(id))
           elements.set(id, {
@@ -157,7 +159,7 @@ test('Arena reconciles Small and big-net residency from the active seats before 
   assert.ok(events.includes('dispose:t3'));
   assert.match(
     extract(text, 'function buildEngines()', 'async function warmUpSelectedEngines('),
-    /function buildEngines\(\) \{\s*reconcileArenaNeuralSessions\(\)/,
+    /row\.variant = safeVariant;\s*\}\s*reconcileArenaNeuralSessions\(\);\s*for \(const row of activeSeatRows\(\)\) clampStrength/,
   );
   for (const first of ["el('arenaSeatList').addEventListener('click'", "el('tournamentModeSelect').addEventListener('change'"]) {
     const handler = extract(text, first, '\n  });');

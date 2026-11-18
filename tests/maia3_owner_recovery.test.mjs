@@ -55,7 +55,7 @@ test('Analysis Maia failure removes the failed owner, settles task ownership and
     let maia3PanelTask = null, maia3PanelTimer = null, explorerMaia = null;
     const elements = new Map();
     const el = (id) => { if (!elements.has(id)) elements.set(id, {}); return elements.get(id); };
-    const mountAbort = new AbortController(), isStaleMount = () => false;
+    const mountAbort = new AbortController(), isStaleMount = () => false, isMemoryConstrainedDevice = () => false;
     const showModelProgress = () => {}, hideModelProgress = () => {}, renderExplorerComparison = () => {};
     const renderMaia3Panel = async () => {}, scheduleMaia3Panel = () => {};
     const maia3PanelStatus = (text) => { el('maia3PanelStatus').textContent = text; };

@@ -125,7 +125,7 @@ export class BigNetSessionPool<T extends DisposableSearcher> {
     this.records.delete(key);
     const disposal = record.searcher.dispose();
     if (disposal) {
-      const pending = trackEngineRetirement(disposal);
+      const pending = trackEngineRetirement(Promise.resolve(disposal));
       this.retiring.add(pending);
       // Synchronous page/pool owners remain supported without unhandled rejection.
       void pending.finally(() => this.retiring.delete(pending)).catch(() => undefined);

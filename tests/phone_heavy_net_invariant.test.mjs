@@ -1,0 +1,368 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
+import test from 'node:test';
+import * as pool from '../src/lc0/bigNetSessionPool.ts';
+import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
+import { isMemoryConstrainedDevice } from '../src/lc0/deviceMemoryClass.ts';
+import { disposeOrtWorker } from '../src/lc0/disposeOrtWorker.ts';
+import { isLc0BigNetVariant } from '../src/lc0/engineCatalog.ts';
+import * as retirement from '../src/lc0/engineRetirement.ts';
+import { untilAborted } from '../src/lc0/modelCache.ts';
+import { phoneBigNetBlocked, phoneLargeNetPreference } from '../src/lc0/phoneLargeNetPolicy.ts';
+
+const { disposeAllBigNetSearchersNow } = pool;
+const { awaitEngineRetirements } = retirement;
+const tick = () => new Promise(setImmediate);
+const row = (variant) => ({ id: variant, label: variant, family: variant === 'maia3' ? 'maia3' : 'lc0', variant });
+const nop = () => {};
+const node = () => ({ toggleAttribute() {} });
+const play = source('playBrowser');
+const analysis = source('analysisBrowser');
+const arena = source('arenaBrowser');
+const keys = ['bt4', 't3'];
+
+function source(name) {
+  return readFileSync(new URL(`../src/lc0/${name}.ts`, import.meta.url), 'utf8');
+}
+
+// Link the browser owners to the same production pool and retirement module. Only
+// native model/worker I/O and unrelated page rendering are replaced.
+function slice(text, start, end, from = 0) {
+  const first = text.indexOf(start, from);
+  const last = text.indexOf(end, first);
+  assert.ok(first >= 0 && last > first, `${start} .. ${end}`);
+  return text.slice(first, last);
+}
+function link(code, deps = {}) {
+  const bindings = {
+    ...pool,
+    ...retirement,
+    BIG_NETS,
+    isMemoryConstrainedDevice,
+    isLc0BigNetVariant,
+    untilAborted,
+    el: node,
+    ...deps,
+  };
+  return new Function(...Object.keys(bindings), `return ${stripTypeScriptTypes(`(function run(){\n${code}\n})()`)}`)(...Object.values(bindings));
+}
+
+function nativeModels(t, { phone = true } = {}) {
+  const trace = [];
+  const models = [];
+  const active = new Set();
+  function transition(model, phase) {
+    if (phase === 'init') active.add(model);
+    if (phase === 'terminated') active.delete(model);
+    trace.push({ name: model.name, phase, concurrent: active.size });
+  }
+  class Worker extends EventTarget {
+    start(name) {
+      this.name = name;
+      models.push(this);
+      transition(this, 'init');
+    }
+    reply(data) {
+      this.dispatchEvent(new MessageEvent('message', { data }));
+    }
+    finishInit(error) {
+      this.initFinished = true;
+      transition(this, error ? 'init-error' : 'ready');
+      if (this.initRequest) this.reply({ type: error ? 'error' : 'ready', id: this.initRequest.id, backend: 'webgpu', error });
+      else if (error) this.evaluator.reject(error);
+      else this.evaluator.resolve({ modelLoad: {}, chooseMove: async () => {}, dispose: () => (this.disposal ??= disposeOrtWorker(this)) });
+    }
+    finishDispose(error) {
+      assert.ok(this.disposeRequest, `${this.name} is retiring`);
+      transition(this, error ? 'dispose-error' : 'disposed');
+      this.reply({ type: error ? 'error' : 'disposed', id: this.disposeRequest.id, error });
+    }
+    terminate() {
+      transition(this, 'terminated');
+    }
+    postMessage(message) {
+      if (message.type === 'init') {
+        this.initRequest = message;
+        this.start(Object.values(BIG_NETS).find((config) => config.modelUrl === message.modelUrl).key);
+      } else if (message.type === 'dispose') {
+        this.disposeRequest = message;
+        transition(this, 'dispose');
+      } else if (message.type === 'search') {
+        queueMicrotask(() => this.reply({ type: 'searchResult', id: message.id, result: { cancelled: false } }));
+      } else if (message.type === 'resetSearch') {
+        queueMicrotask(() => this.reply({ type: 'resetDone', id: message.id }));
+      }
+    }
+  }
+  const previousLocation = globalThis.location;
+  const previousWorker = globalThis.Worker;
+  globalThis.location = new URL(`https://test.invalid/?memoryClass=${phone ? 'phone' : 'desktop'}`);
+  globalThis.Worker = Worker;
+  phoneLargeNetPreference.setEnabled(true); // Consent has been granted; phone residency must still apply.
+  t.after(async () => {
+    disposeAllBigNetSearchersNow();
+    for (const model of active) if (model.evaluator && !model.initFinished) model.finishInit();
+    await tick();
+    for (const model of active) if (model.disposeRequest) model.finishDispose();
+    await awaitEngineRetirements();
+    phoneLargeNetPreference.setEnabled(false);
+    globalThis.Worker = previousWorker;
+    globalThis.location = previousLocation;
+  });
+  assert.equal(isMemoryConstrainedDevice(), phone);
+  assert.equal(phoneBigNetBlocked('bt4'), false);
+  return {
+    createMaia({ signal }) {
+      const model = new Worker();
+      model.signal = signal;
+      model.evaluator = Promise.withResolvers();
+      model.start('maia3');
+      // Deliberately ignore cancellation until a tardy native init completes.
+      return model.evaluator.promise;
+    },
+    async get(name) {
+      await tick();
+      const model = models.find((candidate) => candidate.name === name);
+      assert.ok(model, `${name} init: ${JSON.stringify(trace)}`);
+      return model;
+    },
+    initializing() {
+      return models.map((model) => model.name);
+    },
+    assertPeak(expected = 1) {
+      assert.equal(Math.max(0, ...trace.map((entry) => entry.concurrent)), expected, JSON.stringify(trace));
+    },
+  };
+}
+
+function playOwner(native) {
+  const pgn = '1. e4 *';
+  const links = [],
+    handoffs = [];
+  const owner = link(
+    `
+    const ctx={abort:new AbortController(),consentAbort:new AbortController(),enginePreparationGeneration:0,
+      board:{turn:'w'},humanColor:'w',positions:[],moves:[],listeners:[],opponent:{active:{maiaElo:1500}}};
+    let option=maia;
+    let maia3Promise=null,maia3Status=null,maia3Generation=0,maia3Owner=null;
+    let centipawnLoadPromise=null,lc0LoadPromise=null;
+    const ctxSelectedEngine=()=>option;
+    const hook=()=>{},releaseDom=()=>{};
+    ${slice(play, 'function retireUnusedPlayNeuralEngines(', 'function ctxEnsureLc0Small(')}
+    ${slice(play, 'async function ctxEnsureMaia3(', 'function ctxCpuEngineFor(')}
+    ${slice(play, 'async function ctxVerifySelectedEngineReady(', 'function ctxPriorFens(')}
+    ${slice(play, "  for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-analyze]'))", "  trackListener(ctx, el('downloadPgn')", play.indexOf('function ctxInit('))}
+    function teardown(){${slice(play, '  return () => {\n    try {\n      ctx.autosave?.flush();', '\n  };', play.indexOf('export function mountPlayBrowser('))}\n    };}
+    return {prepare:()=>ctxVerifySelectedEngineReady(ctx),ready:()=>ctx.engineReady,
+      select:(next)=>{ctxCancelEngineTurn(ctx);option=next;return ctxVerifySelectedEngineReady(ctx);},
+      finishMove:()=>ctx.moves.push('e2e4'),unmount:teardown()};`,
+    {
+      maia: row('maia3'),
+      buttonEl: node,
+      ctxAsyncUiIsCurrent: () => false,
+      ctxSetEngineNote: nop,
+      ctxRender: nop,
+      ctxHideDownloadProgress: nop,
+      ctxDisarmNewGame: nop,
+      ctxSetEngineFailure: (_ctx, error) => assert.fail(error),
+      ctxLqoSearchOptions: () => ({}),
+      Maia3BrowserEvaluator: { create: native.createMaia },
+      playRuntimeFallbackAudits: new Map(),
+      disposeCachedCpuEngine: nop,
+      PLAY_DRAW_SCORE: 0,
+      PLAY_SEARCH_CONTEMPT_LIMIT: 0,
+      document: { querySelectorAll: () => [{}] },
+      trackListener: (_ctx, _target, _type, listener) => links.push(listener),
+      ctxExportPgn: () => pgn,
+      writeAnalysisHandoff: (value) => handoffs.push(value),
+    },
+  );
+  return {
+    ...owner,
+    analyzeThisGame() {
+      owner.finishMove();
+      links[0]({ preventDefault: nop });
+      owner.unmount();
+      return handoffs.pop();
+    },
+  };
+}
+
+function analysisOwner(native) {
+  return link(
+    `
+    const mountAbort=new AbortController();
+    let explorerMaia=null, activeAnalysisSelectionKey='';
+    const analysisRunState={},owner={};
+    ${slice(analysis, 'async function bigNetFor(', '\n}', analysis.indexOf('async function bigNetFor('))}}
+    ${slice(analysis, 'const ANALYSIS_BIG_NET_SESSION', '/** After initBigNetsForRun')}
+    ${slice(analysis, 'const MAIA3_PANEL_RATINGS', 'function scheduleMaia3Panel()')}
+    async function prepare(rows){
+      const controller=new AbortController();
+      try {
+        ${slice(analysis, '    const bigNetInitErrors =', '    snapshotBigNetServedModels(rows);')}
+        return bigNetInitErrors;
+      } finally {
+        ${slice(analysis, '    if (maia3PanelBlockedByRun === controller)', '\n    }', analysis.indexOf('async function performAnalysis(owner:'))}
+        }
+      }
+    }
+    return {prepare,enableMaia3Panel,unloadMaia3Panel};`,
+    {
+      ANALYSIS_BIG_NET_KEYS: keys,
+      analysisCanPrepare: () => true,
+      maybeEl: node,
+      isStaleMount: (signal) => signal.aborted,
+      Maia3BrowserEvaluator: { create: native.createMaia },
+      showModelProgress: nop,
+      hideModelProgress: nop,
+      renderExplorerComparison: nop,
+      scheduleMaia3Panel: nop,
+      renderMaia3Panel: nop,
+      LatestOnlyTask: class {
+        dispose() {}
+      },
+    },
+  );
+}
+
+function arenaOwner() {
+  return link(
+    `
+    let seats=[],running=false,startPending=false,lc0Cache=null,loadingLc0=false;
+    const engines=new Map(), warmupPositions=[];
+    ${slice(arena, 'async function bigNetFor(', 'let runtimeIsolation')}
+    ${slice(arena, 'function reconcileArenaNeuralSessions()', 'function buildEngines()')}
+    ${slice(arena, '  const lc0BigNetWarmup =', '  const centipawnWarmup =')}
+    ${slice(arena, 'async function warmUpSelectedEngines(', 'function legalFromUci(')}
+    const activeSeatRows=()=>seats;
+    return {
+      seat:(key)=>{seats=[row(key)];reconcileArenaNeuralSessions();engines.set(key,{warmup:lc0BigNetWarmup(key)});},
+      warmup:(key,signal)=>warmUpSelectedEngines([key],signal,0),
+    };`,
+    {
+      row,
+      ARENA_BIG_NET_KEYS: keys,
+      arenaCacheEntries: () => 2048,
+      showDownloadProgress: nop,
+      hideDownloadProgress: nop,
+      showEngineWarmupStatus: nop,
+      hideEngineWarmupStatus: nop,
+      renderCacheInfo: nop,
+    },
+  );
+}
+
+for (const crossRoute of [false, true]) {
+  test(`phone keeps one heavy model when ${crossRoute ? 'Play hands off to Analysis BT4' : 'Play switches from Maia3 to BT4'}`, async (t) => {
+    const native = nativeModels(t);
+    const play = playOwner(native);
+    const old = play.prepare();
+    const maia = await native.get('maia3');
+    let replacement;
+    if (crossRoute) {
+      assert.equal(play.analyzeThisGame(), '1. e4 *');
+      replacement = analysisOwner(native).prepare([row('bt4')]);
+    } else replacement = play.select(row('bt4'));
+    assert.equal(maia.signal.aborted, true);
+    await tick();
+    assert.deepEqual(native.initializing(), ['maia3']);
+    maia.finishInit(); // Old owner resolves AFTER the picker/handoff has cancelled it.
+    await tick();
+    assert.deepEqual(native.initializing(), ['maia3']);
+    maia.finishDispose();
+    (await native.get('bt4')).finishInit();
+    await old;
+    const result = await replacement;
+    if (crossRoute) assert.equal(result.size, 0);
+    else assert.equal(play.ready(), true);
+    native.assertPeak();
+  });
+}
+
+test('phone Play waits for a retiring BT4 worker before admitting Queen Odds', async (t) => {
+  const native = nativeModels(t);
+  const play = playOwner(native);
+  const old = play.select(row('bt4'));
+  const bt4 = await native.get('bt4');
+  bt4.finishInit();
+  await old;
+  const replacement = play.select(row('lqo'));
+  await tick();
+  assert.deepEqual(native.initializing(), ['bt4']);
+  bt4.finishDispose('native release rejected');
+  (await native.get('lqo')).finishInit();
+  await replacement;
+  assert.equal(play.ready(), true);
+  native.assertPeak();
+});
+
+test('phone Analysis default plus Maia3 switches to t3 after rejected worker release and termination', async (t) => {
+  const native = nativeModels(t);
+  const owner = analysisOwner(native);
+  const load = owner.enableMaia3Panel();
+  const maia = await native.get('maia3');
+  maia.finishInit();
+  await load;
+  const replacement = owner.prepare([row('t3')]);
+  await tick();
+  assert.deepEqual(native.initializing(), ['maia3']);
+  maia.finishDispose('native release rejected');
+  (await native.get('t3')).finishInit();
+  assert.equal((await replacement).size, 0);
+  native.assertPeak();
+});
+
+test('phone Arena seat swap waits for terminal disposal of a cancelled BT4 load before t3', async (t) => {
+  const native = nativeModels(t);
+  const arena = arenaOwner();
+  const firstMatch = new AbortController();
+  arena.seat('bt4');
+  const loading = assert.rejects(arena.warmup('bt4', firstMatch.signal), /disposed/);
+  const bt4 = await native.get('bt4');
+  firstMatch.abort();
+  arena.seat('t3');
+  const replacement = arena.warmup('t3', new AbortController().signal);
+  await loading;
+  bt4.finishInit(); // Stale ready notification; BT4 still counts until terminate().
+  await tick();
+  assert.deepEqual(native.initializing(), ['bt4']);
+  bt4.finishDispose();
+  (await native.get('t3')).finishInit();
+  await replacement;
+  native.assertPeak();
+});
+
+test('phone Analysis with BT4 and t3 rows admits only the first large net', async (t) => {
+  const native = nativeModels(t);
+  const run = analysisOwner(native).prepare([row('bt4'), row('t3')]);
+  (await native.get('bt4')).finishInit();
+  assert.match((await run).get('t3')?.message, /one large net/);
+  assert.deepEqual(native.initializing(), ['bt4']);
+  native.assertPeak();
+});
+
+for (const phone of [true, false]) {
+  test(`${phone ? 'phone' : 'desktop'} Analysis: enabling Maia3 after a completed BT4 run`, async (t) => {
+    const native = nativeModels(t, { phone });
+    const owner = analysisOwner(native);
+    const first = owner.prepare([row('bt4')]);
+    const bt4 = await native.get('bt4');
+    bt4.finishInit();
+    assert.equal((await first).size, 0);
+    const maia = owner.enableMaia3Panel();
+    await tick();
+    if (phone) {
+      assert.deepEqual(native.initializing(), ['bt4']);
+      bt4.finishDispose();
+    }
+    const model = await native.get('maia3');
+    model.finishInit();
+    await maia;
+    owner.unloadMaia3Panel('Done');
+    await tick();
+    model.finishDispose();
+    native.assertPeak(phone ? 1 : 2);
+  });
+}

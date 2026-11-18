@@ -4466,18 +4466,27 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     // rows, runtime/broker settings, served models, keys. A settings change made
     // during init ends this run in favour of the queued one (below). A run with
     // no uninitialized big net does not yield.
-    if (isMemoryConstrainedDevice() && rows.some((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant))) {
+    const bigNetInitErrors = new Map<AnalysisBigNetKey, Error>();
+    const firstBigNet = rows.find((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant))?.variant;
+    if (isMemoryConstrainedDevice() && firstBigNet && isLc0BigNetVariant(firstBigNet)) {
       maia3PanelBlockedByRun = controller;
       unloadMaia3Panel('Maia3 unloaded to make room for Lc0. Enable Maia3 after analysis finishes to reload.');
+      for (const key of ANALYSIS_BIG_NET_KEYS) {
+        if (key === firstBigNet) continue;
+        releaseBigNetSearcher(key, 0);
+        if (rows.some((row) => row.family === 'lc0' && row.variant === key)) {
+          bigNetInitErrors.set(key, new Error(`Phones can run one large net at a time. Remove Lc0 ${BIG_NETS[firstBigNet].name} to run this net.`));
+        }
+      }
     }
     if (hasEngineRetirements()) await awaitEngineRetirements();
     if (controller.signal.aborted || mountAbort.signal.aborted || !analysisCanPrepare(analysisRunState, owner)) return;
-    const uninitializedBigNets = bigNetsAwaitingInit(rows);
-    let bigNetInitErrors = new Map<AnalysisBigNetKey, Error>();
+    const uninitializedBigNets = bigNetsAwaitingInit(rows).filter((key) => !bigNetInitErrors.has(key));
     if (uninitializedBigNets.length) {
       activeAnalysisSelectionKey = ''; // no keys yet: navigation during init cancels this run
       el('message').textContent = `Loading ${uninitializedBigNets.map((key) => `Lc0 ${BIG_NETS[key].name}`).join(' + ')}…`;
-      bigNetInitErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted);
+      const initErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted);
+      for (const [key, error] of initErrors) bigNetInitErrors.set(key, error);
       if (controller.signal.aborted || mountAbort.signal.aborted) return;
     }
     if (!analysisCanPrepare(analysisRunState, owner)) return;
@@ -4925,6 +4934,8 @@ async function enableMaia3Panel(): Promise<void> {
   try {
     maia3PanelStatus('Loading Maia3…');
     showModelProgress('Maia3', undefined, undefined, 'Preparing');
+    // A completed or stopped run may still own a pooled large net.
+    if (isMemoryConstrainedDevice()) for (const key of ANALYSIS_BIG_NET_KEYS) releaseBigNetSearcher(key, 0);
     await awaitEngineRetirements();
     if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) return;
     maia3PanelPending = Maia3BrowserEvaluator.create({

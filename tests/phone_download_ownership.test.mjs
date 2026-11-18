@@ -289,7 +289,7 @@ for (const phase of [
 }
 
 const restoreGuard = extract(source.play, 'async function ctxCheckRestoredDownloadConsent(', '/** Imported setup must not make');
-const readinessEntry = extract(source.play, 'async function ctxVerifySelectedEngineReady(', '  releaseUnusedBigNetSearchers(', 'admit();\n}');
+const readinessEntry = extract(source.play, 'async function ctxVerifySelectedEngineReady(', '  const generation =', 'await retirement;\nadmit();\n}');
 const moveEntry = extract(source.play, 'async function ctxEngineTurn(', '  ctxSetEngineThinking(ctx, true);', 'await admit();\n}');
 for (const key of Object.keys(BIG_NETS)) {
   for (const mode of ['readiness', 'engine-first']) {
@@ -323,6 +323,9 @@ for (const key of Object.keys(BIG_NETS)) {
           },
           ctxSetEngineNote() {},
           releaseUnusedBigNetSearchers() {},
+          retireUnusedPlayNeuralEngines: async () => {
+            assert.equal(ctx.restoredDownloadEngineId, null, 'retirement starts only after approval');
+          },
           buttonEl: () => retry,
           ctxRender() {},
           ctxSetEngineFailure: (_ctx, error) => assert.fail(String(error)),

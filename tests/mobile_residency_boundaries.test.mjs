@@ -333,6 +333,7 @@ for (const reason of ['navigation', 'seat cancellation', 'diagnostics failure'])
         isStaleMount: (s) => s.aborted,
         selectedLc0Runtime: () => 'onnx',
         selectedSeatsNeedLc0Evaluator: () => true,
+        setArenaStartDisabled: () => {},
         el: () => ({ toggleAttribute() {} }),
         refreshSeatControls: () => {},
         readyMessage: () => 'Ready',
