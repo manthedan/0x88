@@ -996,7 +996,8 @@ async function fetchUncachedVerifiedModel(
   storagePersistent?: boolean,
 ): Promise<Lc0ModelLoadResult> {
   options.signal?.throwIfAborted();
-  if (options.allowUnverified && !options.onProgress) {
+  // The lab opt-out only skips checks that have no metadata; it never skips a known hash.
+  if (options.allowUnverified && !options.onProgress && !resolved.expectedSha256 && resolved.expectedBytes === undefined) {
     return {
       model: resolved.url,
       url: resolved.url,

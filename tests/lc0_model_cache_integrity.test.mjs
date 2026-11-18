@@ -87,6 +87,28 @@ test('lab opt-out keeps arbitrary local-model loads usable without persisting un
   });
 });
 
+for (const cache of [false, true]) {
+  test(`lab opt-out still verifies a pinned model it loads without progress (cache=${cache})`, async () => {
+    await withEnvironment(async (counts) => {
+      // No Cache Storage (or no quota): the uncached fallback must not hand ORT an unchecked URL.
+      delete globalThis.caches;
+      // A signal (the search worker's abortable init) keeps the load out of the shared flight.
+      const options = {
+        cache,
+        allowUnverified: true,
+        signal: new AbortController().signal,
+        manifestEntry: { file: 'custom.onnx', url: MODEL_URL, bytes: 3, sha256: SHA256 },
+      };
+      const result = await loadLc0ModelForOrt(MODEL_URL, options);
+      assert.equal(result.mode, 'memory');
+      assert.equal(result.sha256Valid, true);
+      globalThis.fetch = async () => new Response('bad');
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /sha256 mismatch/);
+      assert.equal(counts.writes(), 0);
+    });
+  });
+}
+
 test('an opt-out flight cannot downgrade a concurrent product load', async () => {
   await withEnvironment(async (counts) => {
     const [lab, product] = await Promise.allSettled([
