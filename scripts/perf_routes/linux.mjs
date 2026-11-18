@@ -78,11 +78,43 @@ export function linuxFootprintReader({ readText = (path) => readFile(path, 'utf8
 }
 
 // Headless Chromium on Linux exposes the NVIDIA Vulkan adapter only with these (verified on Yukon,
-// Chromium 149 / driver 580, no display): WebGPU is blocklisted there without --enable-unsafe-webgpu,
-// and ANGLE/GL would fall back to SwiftShader without Vulkan. No surface exists headless.
-// requestAdapter() without powerPreference still returns null headless; the app always asks for
-// high-performance, and the session asserts that adapter is hardware.
+// Chromium 149 / driver 580, no display). Without Vulkan, ANGLE and Dawn fall back to SwiftShader; no
+// surface exists headless.
 export const LINUX_CHROME_ARGS = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=vulkan', '--disable-vulkan-surface'];
 
+export const ADAPTER_INFO = `(async () => {
+  const a = await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' });
+  return a && { vendor: a.info.vendor, architecture: a.info.architecture, device: a.info.device, description: a.info.description, fallback: a.info.isFallbackAdapter };
+})()`;
+
+/**
+ * Headless Chromium returns null for requestAdapter() calls made in the first seconds after launch
+ * (Yukon: the first call fails, later ones succeed; under Xvfb it never fails). The app's first
+ * request happens right at page load and would silently fall back to WASM. Poll from a throwaway
+ * context, closed before the measured context exists, until the GPU process returns a hardware adapter.
+ * `isRendererGone` lets the caller wait for the throwaway renderer to exit so it is never sampled.
+ */
+export async function warmWebGpu(browser, isRendererGone, { attempts = 40, delayMs = 250 } = {}) {
+  const started = Date.now();
+  const context = await browser.newContext();
+  let adapter, tries;
+  try {
+    // A secure-context origin served by Playwright itself: no request reaches the counting proxy.
+    await context.route('**/*', (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>warm-up</title>' }));
+    const page = await context.newPage();
+    await page.goto('http://127.0.0.1/webgpu-warmup');
+    for (tries = 1; tries <= attempts && !adapter; tries++) {
+      adapter = await page.evaluate(ADAPTER_INFO);
+      if (!adapter) await new Promise((r) => setTimeout(r, delayMs));
+    }
+  } finally {
+    await context.close();
+  }
+  if (!adapter || adapter.fallback || /swiftshader|llvmpipe/i.test(JSON.stringify(adapter)))
+    throw Error(`No hardware WebGPU adapter: ${JSON.stringify(adapter)}`);
+  for (let i = 0; i < 50 && !(await isRendererGone()); i++) await new Promise((r) => setTimeout(r, 100));
+  return { ...adapter, attempts: tries - 1, ms: Date.now() - started };
+}
+
 export const LINUX_LIMITATION =
-  'Linux/NVIDIA: memory = smaps_rollup Pss_Dirty+SwapPss per process plus nvidia-smi VRAM for the GPU process; peaks are 100 ms sampled maxima (no kernel high-water). Chromium runs with --enable-unsafe-webgpu and ANGLE/Vulkan. Not comparable with macOS phys_footprint results.';
+  'Linux/NVIDIA: memory = smaps_rollup Pss_Dirty+SwapPss per process plus nvidia-smi VRAM for the GPU process; peaks are 100 ms sampled maxima (no kernel high-water). Chromium runs with --enable-unsafe-webgpu and ANGLE/Vulkan, after a WebGPU warm-up in a throwaway context. Not comparable with macOS phys_footprint results.';

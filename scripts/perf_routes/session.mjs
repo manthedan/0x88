@@ -19,7 +19,7 @@ import {
 } from './gate.mjs';
 import { DOCS_READY, MIDGAME, routeFor, runJourney, waitFor } from './journeys.mjs';
 import { checkSessionCancellation, cleanupMarker, safariCreationRefused, shutdownDelay, waitForCleanup, watchShutdown } from './lifecycle.mjs';
-import { LINUX_CHROME_ARGS, LINUX_LIMITATION, linuxFootprintReader } from './linux_memory.mjs';
+import { LINUX_CHROME_ARGS, LINUX_LIMITATION, linuxFootprintReader, warmWebGpu } from './linux.mjs';
 
 const [specFile, outFile] = process.argv.slice(2);
 const spec = JSON.parse(readFileSync(specFile, 'utf8'));
@@ -175,6 +175,7 @@ try {
       });
     close = () => browser.close();
     cdp = await browser.newBrowserCDPSession();
+    if (linux) result.webgpuWarmup = await warmWebGpu(browser, async () => !(await chromePids()).rendererPids.length);
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     context.on('request', (request) => {
       const url = new URL(request.url());
@@ -320,16 +321,6 @@ try {
   // UA measurement triggers GC (eager with our Chrome flag). Never request it until
   // ALL natural footprint, worker, speed, input and long-task observations are frozen.
   await uaMemory('postResidualGc');
-  if (linux) {
-    // A SwiftShader/llvmpipe fallback would silently measure the wrong machine. Checked last so the
-    // extra adapter object cannot touch any natural observation.
-    result.webgpuAdapter = await evaluate(`(async () => {
-      const a = await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' });
-      return a && { vendor: a.info.vendor, architecture: a.info.architecture, device: a.info.device, description: a.info.description, fallback: a.info.isFallbackAdapter };
-    })()`);
-    if (!result.webgpuAdapter || result.webgpuAdapter.fallback || /swiftshader|llvmpipe/i.test(JSON.stringify(result.webgpuAdapter)))
-      throw Error(`No hardware WebGPU adapter: ${JSON.stringify(result.webgpuAdapter)}`);
-  }
   result.status = 'ok';
 } catch (error) {
   if (evaluate && !signal.aborted)

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { chromeFootprint, compareRuns, footprintSum, parseArgs, plan, platformProblem } from '../scripts/perf_routes/gate.mjs';
-import { LINUX_CHROME_ARGS, linuxFootprintReader, parseNvidiaComputeApps, parseSmapsRollup } from '../scripts/perf_routes/linux_memory.mjs';
+import { LINUX_CHROME_ARGS, linuxFootprintReader, parseNvidiaComputeApps, parseSmapsRollup, warmWebGpu } from '../scripts/perf_routes/linux.mjs';
 
 // Captured on Yukon (Linux 7.0, Chromium 149, RTX 3090): headless GPU process after a 256 MiB WebGPU allocation.
 const GPU_SMAPS = `00010000-7ffcb8118000 ---p 00000000 00:00 0                              [rollup]
@@ -151,5 +151,37 @@ test('Linux Chrome flags and Chromium channel apply only on Linux; macOS launche
   assert.match(source, /linux \? \{ channel: 'chromium', executablePath: process\.env\.PERF_ROUTES_CHROMIUM \|\| undefined \} : \{ channel: 'chrome' \}/);
   assert.match(source, /args: \['--enable-blink-features=ForceEagerMeasureMemory', \.\.\.\(linux \? LINUX_CHROME_ARGS : \[\]\)\]/);
   assert.ok(LINUX_CHROME_ARGS.includes('--enable-unsafe-webgpu'));
-  assert.ok(source.indexOf('No hardware WebGPU adapter') > source.indexOf('await uaMemory('), 'adapter check runs after natural observations');
+  const warm = source.indexOf('await warmWebGpu(');
+  assert.ok(warm > source.indexOf('newBrowserCDPSession()') && warm < source.indexOf('browser.newContext('), 'warm-up precedes the measured context');
+  assert.ok(warm < source.indexOf('sampling = setInterval(sample, 100)'), 'warm-up precedes sampling');
+});
+
+test('WebGPU warm-up retries the early null adapter, rejects software adapters and always closes its context', async () => {
+  const fakeBrowser = (answers) => {
+    const state = { closed: 0, routed: 0, evaluations: 0 };
+    return {
+      state,
+      newContext: async () => ({
+        route: async () => state.routed++,
+        newPage: async () => ({ goto: async () => {}, evaluate: async () => (state.evaluations++, answers.shift() ?? null) }),
+        close: async () => state.closed++,
+      }),
+    };
+  };
+  const nvidia = { vendor: 'nvidia', architecture: 'ampere', device: '', description: '', fallback: false };
+  let gone = 0;
+  const ok = fakeBrowser([null, nvidia]);
+  const info = await warmWebGpu(ok, async () => ++gone > 2, { delayMs: 0 });
+  assert.equal(info.attempts, 2);
+  assert.equal(info.vendor, 'nvidia');
+  assert.deepEqual(ok.state, { closed: 1, routed: 1, evaluations: 2 });
+  assert.equal(gone, 3, 'waits for the throwaway renderer to exit');
+  for (const answers of [[], [{ ...nvidia, fallback: true }], [{ vendor: 'google', description: 'SwiftShader Device', fallback: false }]]) {
+    const browser = fakeBrowser(answers);
+    await assert.rejects(
+      warmWebGpu(browser, async () => true, { attempts: 3, delayMs: 0 }),
+      /No hardware WebGPU adapter/,
+    );
+    assert.equal(browser.state.closed, 1);
+  }
 });
