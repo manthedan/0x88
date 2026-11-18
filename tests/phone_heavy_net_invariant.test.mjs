@@ -235,7 +235,7 @@ function analysisOwner(native) {
     `
     const mountAbort=new AbortController();
     let explorerMaia=null, activeAnalysisSelectionKey='';
-    const analysisRunState={revision:0},owner={},analysisOperations=new Map();
+    const analysisRunState={revision:0,execution:{tag:'idle'}},owner={},analysisOperations=new Map();
     const activeAnalysisRunId=1,hiddenTab={hidden:false};
     const automaticAnalysisAllowed=()=>true,analysisIntent=()=>({});
     let analysisAbort=null, criticalDeferredMaia=false,stockfishLite=null,stockfishFull=null;
