@@ -20,8 +20,10 @@ import {
   routeOwnedIds,
   snapshotExpression,
   usableNodes,
+  walkStoragePreset,
 } from '../scripts/lib/feature_walk_core.mjs';
 import { FEATURES, ROUTES } from '../src/features/registry.ts';
+import { loadPlayPreferences, PLAY_PREFERENCES_STORAGE_KEY } from '../src/lc0/playPreferences.ts';
 
 const draws = (rng, n) => Array.from({ length: n }, () => rng());
 
@@ -214,13 +216,13 @@ test('boardMove re-queries squares after each re-render and skips promotion-only
   assert.equal(board.state.selected, null);
 });
 
-test('boardMove clears an existing selection first and reports when no move is possible', () => {
+test('boardMove clears an existing selection first and skips positions without a supported move', () => {
   const board = fakeBoard(PIECES, { a7: ['a8'], e1: ['e2'] }, 'a7');
   assert.equal(vm.runInNewContext(boardMoveExpression("'White'", 0.5), { document: board.document }).move, 'e1e2');
   assert.equal(board.state.clicks[0], 'a7');
   const blocked = fakeBoard(PIECES, { a7: ['a8'] });
-  assert.match(vm.runInNewContext(boardMoveExpression("'Black'", 0), { document: blocked.document }).error, /no legal non-promotion move for Black/);
-  assert.equal(vm.runInNewContext(boardMoveExpression("'White'", 0), { document: blocked.document }).error, 'no legal non-promotion move for White');
+  assert.match(vm.runInNewContext(boardMoveExpression("'Black'", 0), { document: blocked.document }).skipped, /no legal non-promotion move for Black/);
+  assert.equal(vm.runInNewContext(boardMoveExpression("'White'", 0), { document: blocked.document }).skipped, 'no legal non-promotion move for White');
   assert.equal(blocked.state.selected, null);
 });
 
@@ -414,4 +416,42 @@ test('Home and Docs wait for hydration, which the root layout signals', () => {
     assert.equal(ready(true), true);
   }
   assert.match(readFileSync('src/routes/+layout.svelte', 'utf8'), /onMount\([\s\S]*document\.documentElement\.dataset\.hydrated = ''/);
+});
+
+test('controls inside a disabled fieldset are not usable', () => {
+  const insideDisabledFieldset = { ...fakeNode({}), matches: (selector) => selector === ':disabled' };
+  const result = vm.runInNewContext(`(${usableNodes.toString()})(nodes)`, {
+    nodes: [insideDisabledFieldset, fakeNode({})],
+    document: { querySelector: () => null },
+  });
+  assert.deepEqual([...result], [false, true]);
+});
+
+test('pick actions are eligible whenever any of their targets is usable (e.g. only forward history at ply 0)', () => {
+  for (const feature of FEATURES)
+    for (const action of feature.actions) {
+      const [step] = action.steps;
+      if (action.steps.length === 1 && step.do === 'click' && step.pick) assert.equal(action.when, step.target, `${feature.id}/${action.name}`);
+    }
+  for (const name of ['play.game/browseMoves', 'analysis.toolbar/browseMoves', 'analysis.pvPreview/stepPv', 'arena.moves/review']) {
+    const route = name.split('.')[0];
+    const { action } = routeActions(route).find((candidate) => `${candidate.feature}/${candidate.action.name}` === name);
+    assert.match(action.when, /#(navNext|navForward|pvForward|revNext)\b/, name);
+  }
+});
+
+test('Arena quick match pins the single start position before Start', () => {
+  const { action } = routeActions('arena').find((candidate) => candidate.action.name === 'quickMatch');
+  const order = action.steps.map((step) => step.target);
+  const opening = action.steps.find((step) => step.target === '#startingPositionSelect');
+  assert.deepEqual(opening.values, ['start']);
+  assert.ok(order.indexOf('#startingPositionSelect') < order.indexOf('#start'));
+});
+
+test('walk storage preset makes the default Maia3 opponent play its deterministic top move', () => {
+  const preset = walkStoragePreset();
+  assert.equal(preset.key, PLAY_PREFERENCES_STORAGE_KEY);
+  const loaded = loadPlayPreferences({ getItem: (key) => (key === preset.key ? preset.value : null) }, new Set(['maia3']));
+  assert.equal(loaded.engineId, 'maia3');
+  assert.equal(loaded.maiaStyle, 'argmax');
 });

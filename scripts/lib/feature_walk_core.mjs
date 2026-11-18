@@ -1,6 +1,7 @@
 // Pure parts of scripts/feature_walk.mjs: seeding, action/value choice, in-page
 // expression builders, and invariant evaluation. No browser here, so tests cover it.
 import { featuresOn, routeForPath } from '../../src/features/registry.ts';
+import { DEFAULT_PLAY_PREFERENCES, PLAY_PREFERENCES_STORAGE_KEY } from '../../src/lc0/playPreferences.ts';
 import { actionableErrorEntries } from '../production_browser_smoke.mjs';
 
 /** Numeric seeds are used as-is; any other string hashes (FNV-1a) so `--seed ci-42` works. */
@@ -74,7 +75,8 @@ export function usableNodes(nodes) {
   return nodes.map((node) => {
     // Styled toggles hide the checkbox itself; its label is what the user sees.
     const visible = shown(node) || (node.type === 'checkbox' && [...(node.labels ?? [])].some(shown));
-    const enabled = !node.disabled && node.getAttribute('aria-disabled') !== 'true' && !node.closest('[inert]');
+    // :disabled also covers controls inside a disabled <fieldset> (Arena settings during a match).
+    const enabled = !node.disabled && !node.matches?.(':disabled') && node.getAttribute('aria-disabled') !== 'true' && !node.closest('[inert]');
     return visible && enabled && (!modal || modal.contains(node));
   });
 }
@@ -123,7 +125,8 @@ function boardMove(side, roll) {
     square(to).click();
     return { move: from + to };
   }
-  return { error: `no legal non-promotion move for ${side}` };
+  // Mate, stalemate, or only promotions: an ordinary position, so the step is a no-op, not a failure.
+  return { skipped: `no legal non-promotion move for ${side}` };
 }
 
 export function boardMoveExpression(sideExpression, roll) {
@@ -201,4 +204,13 @@ export function evaluateInvariants(names, snap, context) {
     else if (name === 'routeReady' && context.route && !snap.ready) fail(name, `${context.route} did not finish mounting at ${snap.pathname}`);
   }
   return failures;
+}
+
+/**
+ * localStorage preset for a fresh walk context. Play defaults to Maia3 sampling, which draws
+ * from the app's unseeded Math.random; the app's own "Top move" (argmax) style makes replies
+ * replayable. Applied only when the key is absent, so in-walk preference changes persist.
+ */
+export function walkStoragePreset() {
+  return { key: PLAY_PREFERENCES_STORAGE_KEY, value: JSON.stringify({ ...DEFAULT_PLAY_PREFERENCES, maiaStyle: 'argmax' }) };
 }

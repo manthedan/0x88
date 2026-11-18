@@ -24,6 +24,7 @@ import {
   routeOwnedIds,
   snapshotExpression,
   usableNodes,
+  walkStoragePreset,
 } from './lib/feature_walk_core.mjs';
 
 const VIEWPORTS = { desktop: { width: 1366, height: 900 }, phone: { width: 390, height: 844 } };
@@ -179,6 +180,13 @@ async function walk(args) {
     await context.addInitScript(() => {
       window.__featureWalkDocumentId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     });
+    await context.addInitScript((preset) => {
+      try {
+        if (localStorage.getItem(preset.key) === null) localStorage.setItem(preset.key, preset.value);
+      } catch {
+        // Storage can be unavailable (e.g. opaque origins); the walk still runs, only less replayable.
+      }
+    }, walkStoragePreset());
     const page = await context.newPage();
     const pageErrors = [];
     const consoleErrors = [];

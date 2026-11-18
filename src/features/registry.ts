@@ -163,7 +163,7 @@ export const FEATURES = [
     actions: [
       {
         name: 'heroCta',
-        when: '.hero a.btn',
+        when: '.hero a.btn[href^="/app/"]',
         steps: [{ do: 'click', target: '.hero a.btn[href^="/app/"]', pick: true }],
       },
     ],
@@ -261,7 +261,7 @@ export const FEATURES = [
       {
         // Explicit sides only: Random uses the app's unseeded Math.random and breaks seed replay.
         name: 'pickColor',
-        when: '.color-choice [data-color="white"]',
+        when: '.color-choice [data-color="white"], .color-choice [data-color="black"]',
         steps: [{ do: 'click', target: '.color-choice [data-color="white"], .color-choice [data-color="black"]', pick: true }],
       },
       { name: 'ratingPreset', when: '.rating-presets [data-elo]', steps: [{ do: 'click', target: '.rating-presets [data-elo]', pick: true }] },
@@ -297,7 +297,11 @@ export const FEATURES = [
       { name: 'newGame', when: '#newGame', steps: [{ do: 'click', target: '#newGame' }], weight: 2 },
       { name: 'confirmRestart', when: '#confirmRestart', steps: [{ do: 'click', target: '#confirmRestart' }] },
       { name: 'dismissRestart', when: '#dismissRestart', steps: [{ do: 'click', target: '#dismissRestart' }] },
-      { name: 'browseMoves', when: '#navPrev', steps: [{ do: 'click', target: '#navFirst, #navPrev, #navNext, #navLast', pick: true }] },
+      {
+        name: 'browseMoves',
+        when: '#navFirst, #navPrev, #navNext, #navLast',
+        steps: [{ do: 'click', target: '#navFirst, #navPrev, #navNext, #navLast', pick: true }],
+      },
       { name: 'takeback', when: '#takeback', steps: [{ do: 'click', target: '#takeback' }] },
       {
         name: 'resign',
@@ -381,7 +385,11 @@ export const FEATURES = [
       'copyPgn',
     ],
     actions: [
-      { name: 'browseMoves', when: '#navBack', steps: [{ do: 'click', target: '#navStart, #navBack, #navForward, #navEnd', pick: true }] },
+      {
+        name: 'browseMoves',
+        when: '#navStart, #navBack, #navForward, #navEnd',
+        steps: [{ do: 'click', target: '#navStart, #navBack, #navForward, #navEnd', pick: true }],
+      },
       { name: 'boardTools', when: '#boardToolsButton', steps: [{ do: 'click', target: '#boardToolsButton' }], weight: 0.5 },
       { name: 'flip', when: '#flip', steps: [{ do: 'click', target: '#flip' }], weight: 0.3 },
       { name: 'copyMenu', when: '#copyMenuButton', steps: [{ do: 'click', target: '#copyMenuButton' }], weight: 0.5 },
@@ -613,7 +621,7 @@ export const FEATURES = [
     actions: [
       // .pv-move inserts the line into the game; [data-pv-preview] opens the preview dialog.
       { name: 'openPv', when: '#engineSummaries [data-pv-preview]', steps: [{ do: 'click', target: '#engineSummaries [data-pv-preview]', pick: true }] },
-      { name: 'stepPv', when: '#pvForward', steps: [{ do: 'click', target: '#pvStart, #pvBack, #pvForward, #pvEnd', pick: true }] },
+      { name: 'stepPv', when: '#pvStart, #pvBack, #pvForward, #pvEnd', steps: [{ do: 'click', target: '#pvStart, #pvBack, #pvForward, #pvEnd', pick: true }] },
       { name: 'closePv', when: '#closePvPreview', steps: [{ do: 'click', target: '#closePvPreview' }], weight: 2 },
     ],
     invariants: OWNED,
@@ -734,6 +742,8 @@ export const FEATURES = [
         steps: [
           { do: 'select', target: '#budgetModeSelect', values: ['movetime'] },
           { do: 'fill', target: '#movetimeInput', values: ['100'] },
+          // Games are per opening: the built-in suite would turn 1 into 16 games.
+          { do: 'select', target: '#startingPositionSelect', values: ['start'] },
           { do: 'fill', target: '#gamesInput', values: ['1'] },
           { do: 'click', target: '#start' },
         ],
@@ -779,7 +789,13 @@ export const FEATURES = [
     id: 'arena.moves',
     routes: ['arena'],
     ids: ['engineEvalInfo', 'reviewBar', 'reviewLabel', 'gameMoves', 'revStart', 'revPrev', 'revNext', 'revEnd', 'revLive'],
-    actions: [{ name: 'review', when: '#revPrev', steps: [{ do: 'click', target: '#revStart, #revPrev, #revNext, #revEnd, #revLive', pick: true }] }],
+    actions: [
+      {
+        name: 'review',
+        when: '#revStart, #revPrev, #revNext, #revEnd, #revLive',
+        steps: [{ do: 'click', target: '#revStart, #revPrev, #revNext, #revEnd, #revLive', pick: true }],
+      },
+    ],
     invariants: OWNED,
   },
   {
