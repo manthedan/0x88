@@ -30,6 +30,37 @@ function markupIds(source, props = {}) {
   return ids;
 }
 
+/**
+ * Page ids that only render inside an `{#if}` branch or `{#each}` body. An id also present in every branch of
+ * one top-level `{#if}…{:else}…{/if}` (the dev-mode duplicates) still always renders.
+ */
+function conditionalIds(source) {
+  const occurrences = new Map();
+  const stack = [];
+  let block = 0;
+  for (const match of source.matchAll(/\{#(?:if|each)\b|\{:else\b|\{\/(?:if|each)\}|(?<![\w-])id=(?:"([^"{}]+)"|'([^'{}]+)')/g)) {
+    if (match[0].startsWith('{#')) stack.push({ block: block++, branch: 0, hasElse: false });
+    else if (match[0] === '{:else') Object.assign(stack.at(-1), { branch: stack.at(-1).branch + 1, hasElse: true });
+    else if (match[0].startsWith('{/')) {
+      const closed = stack.pop();
+      for (const list of occurrences.values())
+        for (const at of list) if (at?.block === closed.block) at.branches = closed.hasElse ? closed.branch + 1 : Number.POSITIVE_INFINITY;
+    } else {
+      const id = match[1] ?? match[2];
+      const list = occurrences.get(id) ?? [];
+      list.push(stack.length ? { ...stack[0], depth: stack.length } : null);
+      occurrences.set(id, list);
+    }
+  }
+  const always = (list) => {
+    if (list.includes(null)) return true;
+    // Without {:else} a block can render nothing, so only full coverage of an if/else counts.
+    const top = list.filter((at) => at.depth === 1);
+    return top.some((at) => new Set(top.filter((other) => other.block === at.block).map((other) => other.branch)).size === at.branches);
+  };
+  return new Set([...occurrences].filter(([, list]) => !always(list)).map(([id]) => id));
+}
+
 /** Page ids plus ids of every $lib component the page renders, with that usage's string props. */
 function routeMarkupIds(pagePath) {
   const page = read(pagePath);
@@ -62,6 +93,19 @@ test('markupIds resolves component props and skips unresolvable templates', () =
 test('controllerLookups sees literal and for-of loop lookups, not computed ones', () => {
   const ids = controllerLookups(`el('a'); maybeEl("b"); x.el('no'); el(dynamic); for (const id of ['c', 'd']) el(id).hidden = true;`);
   assert.deepEqual([...ids].sort(), ['a', 'b', 'c', 'd']);
+});
+
+test('conditionalIds flags ids rendered only in some {#if} branches', () => {
+  const source = '<a id="always"></a>{#if dev}<b id="both"></b><c id="onlyIf"></c>{:else}<b id="both"></b>{/if}{#if q}<d id="search"></d>{/if}';
+  assert.deepEqual([...conditionalIds(source)].sort(), ['onlyIf', 'search']);
+});
+
+test('owned ids are not inside conditional markup (ownedIdsPresent checks them on every step)', () => {
+  for (const [route, spec] of Object.entries(ROUTES)) {
+    const conditional = conditionalIds(read(spec.markup));
+    const owned = featuresOn(route).flatMap((feature) => feature.ids.filter((id) => conditional.has(id)).map((id) => `${feature.id}: #${id}`));
+    assert.deepEqual(owned, [], `${route} owns ids that are not always rendered`);
+  }
 });
 
 test('feature ids are unique, and no two features on a route own the same DOM id', () => {

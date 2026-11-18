@@ -92,7 +92,7 @@ const APP_ROUTES = ['analysis', 'play', 'arena'] as const satisfies readonly Rou
 const OWNED = ['ownedIdsPresent'] as const satisfies readonly InvariantName[];
 
 const MIDGAME = 'r1bq1rk1/ppp2ppp/2np1n2/2b1p3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w - - 6 6';
-const PLAY_USER_SIDE = `document.querySelector('#bottomStrip [data-meta]')?.textContent?.includes('Black') ? 'Black' : 'White'`;
+const PLAY_USER_SIDE = `document.querySelector('[data-player="you"] [data-meta]')?.textContent?.includes('Black') ? 'Black' : 'White'`;
 const ANALYSIS_SIDE = `window.__analysisSchedulingState?.().fen.split(' ')[1] === 'b' ? 'Black' : 'White'`;
 
 /** Header links: desktop primary nav, or the menu toggle on narrow screens. */
@@ -160,7 +160,7 @@ export const FEATURES = [
   {
     id: 'docs.search',
     routes: ['docs'],
-    ids: ['main', 'doc-h1', 'docSearch', 'docSearchResults', 'pages-analysis'],
+    ids: ['main', 'doc-h1', 'docSearch', 'pages-analysis'],
     actions: [{ name: 'search', when: '#docSearch', steps: [{ do: 'fill', target: '#docSearch', values: ['cache', 'arena', 'webgpu', ''] }] }],
     invariants: OWNED,
   },
