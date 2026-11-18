@@ -151,7 +151,7 @@ function element() {
   };
 }
 
-function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
+function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet = async (key) => searchers.get(key) }) {
   const admissions = [];
   const observeTransition = (state, event) => {
     const result = transitionAnalysis(state, event);
@@ -197,9 +197,9 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
     const selectEl = el, inputEl = el;
     const document = { getElementById: el };
     const BIG_NETS = { bt4: BT4_NET, t3: T3_NET };
-    const bigNetFor = (variant) => {
+    const bigNetFor = async (variant) => {
       const key = variant === 't3' ? 't3' : 'bt4';
-      return { config: BIG_NETS[key], searcher: searchers.get(key) };
+      return { config: BIG_NETS[key], searcher: await acquireBigNet(key) };
     };
     const peekBigNetSearcher = (key) => searchers.get(key);
     let engineRows = rows;
@@ -353,6 +353,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
     'BT4_NET',
     'T3_NET',
     'searchers',
+    'acquireBigNet',
     'rows',
     'element',
     'snapshotHelpers',
@@ -366,6 +367,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null }) {
     BT4_NET,
     T3_NET,
     searchers,
+    acquireBigNet,
     rows,
     element,
     { analysisRunBroker, analysisRunRowKey, captureAnalysisRun, parseFen },
@@ -654,6 +656,39 @@ test('a big-net init failure stays that engine’s failed row and does not suppr
     assert.equal(page.completeAnalysisKeys.size, 0, 'a run with a failed engine is not marked complete');
     t3.dispose();
     bt4.dispose();
+  }));
+
+test('a rejected big-net acquisition reports that row’s error and keeps the other engines running', () =>
+  withWorkers({ [BT4_NET.modelUrl]: [{ servedModelUrl: BT4_NET.modelUrl }] }, async () => {
+    const bt4 = new Bt4WorkerSearcher(BT4_NET);
+    const small = { family: 'lc0', variant: 'small', strength: 64 };
+    const acquisitions = [];
+    const page = analysisPage({
+      rows: [t3Row, small, bt4Row],
+      searchers: new Map([['bt4', bt4]]),
+      smallLc0Runtime: 'onnx',
+      acquireBigNet: async (key) => {
+        acquisitions.push(key);
+        if (key === 't3') throw new Error('retiring worker cleanup failed');
+        return bt4;
+      },
+    });
+    try {
+      await page.analyzeCurrent();
+      const lines = page.lineCache.get(START_FEN);
+      assert.deepEqual(
+        lines?.map((line) => line.engine),
+        ['Lc0 t3-512 distill', 'Lc0', 'Lc0 BT4-it332'],
+      );
+      assert.equal(lines[0].error, 'retiring worker cleanup failed');
+      assert.deepEqual(lines[1].pvUci, ['d2d4']);
+      assert.deepEqual(lines[2].pvUci, ['e2e4']);
+      assert.equal(acquisitions.filter((key) => key === 't3').length, 1, 'the failed acquisition is not retried');
+      assert.equal(page.completeAnalysisKeys.size, 0);
+      assert.match(page.el('message').textContent, /completed with one or more engine failures/);
+    } finally {
+      await bt4.dispose();
+    }
   }));
 
 async function until(predicate) {

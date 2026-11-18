@@ -1962,27 +1962,29 @@ async function initBigNetsForRun(keys: AnalysisBigNetKey[], cancelled: () => boo
   const errors = new Map<AnalysisBigNetKey, Error>();
   await Promise.all(
     keys.map(async (key) => {
-      const { config, searcher } = await bigNetFor(key);
-      const label = `Lc0 ${config.name}`;
-      // A cancelled run no longer owns the shared model progress slot:
-      // cancelAnalysisOperation already cleared it, and the next run or mount
-      // may have shown its own. The pooled init keeps going, so its late
-      // callbacks and this finally must not touch the slot.
-      searcher.onDownloadProgress = (loaded, total) => {
-        if (!cancelled()) showModelProgress(label, loaded, total, 'Downloading');
-      };
       try {
+        const { config, searcher } = await bigNetFor(key);
         // Checked before each attempt: a stopped run must not reload a pooled
         // session that Play or Arena may have taken back.
         if (cancelled()) return;
-        await searcher.init(ANALYSIS_BIG_NET_SESSION);
-        // An init already in flight for other options resolves with those; reload once.
-        if (cancelled() || searcher.isInitializedFor(ANALYSIS_BIG_NET_SESSION)) return;
-        await searcher.init(ANALYSIS_BIG_NET_SESSION);
+        const label = `Lc0 ${config.name}`;
+        // A cancelled run no longer owns the shared model progress slot:
+        // cancelAnalysisOperation already cleared it, and the next run or mount
+        // may have shown its own. The pooled init keeps going, so its late
+        // callbacks and this finally must not touch the slot.
+        searcher.onDownloadProgress = (loaded, total) => {
+          if (!cancelled()) showModelProgress(label, loaded, total, 'Downloading');
+        };
+        try {
+          await searcher.init(ANALYSIS_BIG_NET_SESSION);
+          // An init already in flight for other options resolves with those; reload once.
+          if (cancelled() || searcher.isInitializedFor(ANALYSIS_BIG_NET_SESSION)) return;
+          await searcher.init(ANALYSIS_BIG_NET_SESSION);
+        } finally {
+          if (!cancelled()) hideModelProgress();
+        }
       } catch (error) {
         errors.set(key, error instanceof Error ? error : new Error(String(error)));
-      } finally {
-        if (!cancelled()) hideModelProgress();
       }
     }),
   );
