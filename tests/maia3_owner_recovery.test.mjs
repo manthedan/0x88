@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 import { LatestOnlyTask } from '../src/lc0/latestOnlyTask.ts';
+import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
 import { DEFAULT_PLAY_PREFERENCES } from '../src/lc0/playPreferences.ts';
 
 function extracted(path, start, end) {
@@ -26,24 +27,16 @@ function factory() {
 
 test('Play Retry evicts a fatally failed Maia cache once, even with concurrent callers', async () => {
   const Maia = factory();
-  const ensure = compile(
-    `
-    let maia3Promise = null, maia3Status = null, maia3Abort = null;
-    const ctxAsyncUiIsCurrent = () => false, trackEngineRetirement = () => {};
-    ${extracted('../src/lc0/playBrowser.ts', 'async function ctxEnsureMaia3(', 'function ctxCpuEngineFor(')}
-    return ctxEnsureMaia3;
-  `,
-    ['Maia3BrowserEvaluator'],
-    [Maia],
-  );
-  const ctx = { opponent: { active: DEFAULT_PLAY_PREFERENCES }, enginePreparationGeneration: 0 };
-  const first = await ensure(ctx);
+  const engines = createPlayEngines({ loadCentipawn: () => assert.fail('unused'), createMaia3: Maia.create });
+  const ui = { current: () => () => false, mounted: () => true, note() {}, clearNote() {}, progress() {}, hideProgress() {} };
+  const ensure = () => engines.ensureMaia3(DEFAULT_PLAY_PREFERENCES.maiaElo, ui);
+  const first = await ensure();
   first.failure = new Error('runtime crash');
-  const [second, concurrent] = await Promise.all([ensure(ctx), ensure(ctx)]);
+  const [second, concurrent] = await Promise.all([ensure(), ensure()]);
   assert.notEqual(second, first);
   assert.equal(second, concurrent);
   assert.equal(Maia.created.length, 2);
-  assert.equal(await ensure(ctx), second);
+  assert.equal(await ensure(), second);
 });
 
 test('Analysis Maia failure removes the failed owner, settles task ownership and re-enables a clean retry', async () => {

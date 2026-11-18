@@ -13,6 +13,7 @@ import {
   lc0SplitKUrl,
   selectLc0OrtModelUrl,
 } from '../src/lc0/lc0SmallModelSelection.ts';
+import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
 import {
   collectOrtRuntimeDiagnostics,
   gpuAdapterShaderF16,
@@ -360,7 +361,7 @@ test('an adapter with shader-f16, or one whose features are unreadable, keeps We
   assert.equal(gpuAdapterShaderF16(throwingFeatures), null);
 });
 
-test('an explicit ?model= override, even naming the default file, loads exactly that URL', () => {
+test('an explicit ?model= override, even naming the default file, loads exactly that URL', async () => {
   assert.deepEqual(lc0SmallModelRequest(ORIGINAL, null), { modelUrl: ORIGINAL, deviceSelection: true });
   assert.deepEqual(lc0SmallModelRequest(ORIGINAL, undefined), { modelUrl: ORIGINAL, deviceSelection: true });
   assert.deepEqual(lc0SmallModelRequest(ORIGINAL, ORIGINAL), { modelUrl: ORIGINAL, deviceSelection: false });
@@ -382,8 +383,20 @@ test('an explicit ?model= override, even naming the default file, loads exactly 
       file,
     );
     assert.doesNotMatch(source, /(deviceSelection|deviceModelSelection): MODEL_URL === DEFAULT_MODEL_URL/, file);
-    assert.match(source, /(deviceSelection|deviceModelSelection): LC0_DEVICE_MODEL_SELECTION/, file);
+    if (file !== 'playBrowser') assert.match(source, /(deviceSelection|deviceModelSelection): LC0_DEVICE_MODEL_SELECTION/, file);
   }
+  // Play hands the whole request to its engine host, which loads exactly that URL with that opt-in.
+  const loads = [];
+  const engines = createPlayEngines({
+    loadCentipawn: () => assert.fail('unused'),
+    loadLc0Small: async (url, options) => {
+      loads.push([url, options.deviceSelection]);
+      return { evaluator: {} };
+    },
+  });
+  const ui = { current: () => () => false, mounted: () => true, note() {}, clearNote() {}, progress() {}, hideProgress() {} };
+  await engines.ensureLc0Small(lc0SmallModelRequest(ORIGINAL, ORIGINAL), ui);
+  assert.deepEqual(loads, [[ORIGINAL, false]]);
 });
 
 test('critical-moment results are keyed by the model the Lc0 lane actually ran', async () => {

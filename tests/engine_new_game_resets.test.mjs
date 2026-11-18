@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { PendingCpuNewGames } from '../src/lc0/cpuEngineResidency.ts';
+import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
 import { RecklessEngine } from '../src/lc0/recklessEngine.ts';
 
 function extracted(path, start, end) {
@@ -63,34 +64,25 @@ test('Arena resets every participating CPU engine per game, Stockfish and Reckle
 });
 
 test('Play marks resident engines at every game start and resets each before its next move', async () => {
-  const pending = new PendingCpuNewGames();
-  const cpuEnginePromises = new Map([
-    ['sf-lite', Promise.resolve()],
-    ['berserk', Promise.resolve()],
-  ]);
-  const resetStart = new Function(
-    'pendingCpuNewGames',
-    'cpuEnginePromises',
-    'replayPlayPosition',
-    'startFenFor',
-    'ctxSelectedEngine',
-    'parseFen',
-    `${extracted('../src/lc0/playBrowser.ts', 'function ctxResetStartPosition(', '/** Imported setup')}\nreturn ctxResetStartPosition;`,
-  )(
-    pending,
-    cpuEnginePromises,
-    () => ({}),
-    () => 'fen',
-    () => ({}),
-    (fen) => ({ fen }),
-  );
-  resetStart({ practicePosition: null, humanColor: 'w' });
-  assert.equal(pending.has('sf-lite'), true);
-  assert.equal(pending.has('berserk'), true);
-
-  const play = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
-  const turn = play.slice(play.indexOf('const engine = await ctxCpuEngineFor(ctx, option);'), play.indexOf('return engine.bestMove('));
-  assert.match(turn, /await pendingCpuNewGames\.resetIfPending\(option\.id, engine, signal\);/, 'the engine move path resets first');
+  const resets = [];
+  const engines = createPlayEngines({
+    loadCentipawn: () => assert.fail('unused'),
+    createCpuEngine: (option) => ({ setOptions() {}, bestMove: async () => null, newGame: async () => resets.push(option.id) }),
+  });
+  const ui = { current: () => () => false, mounted: () => true, note() {}, clearNote() {}, progress() {}, hideProgress() {} };
+  const sf = { id: 'sf-lite', label: 'Stockfish', family: 'sf', variant: 'lite' };
+  const berserk = { id: 'berserk', label: 'Berserk', family: 'berserk', variant: 'berserk' };
+  const signal = new AbortController().signal;
+  await engines.cpuEngineForMove(sf, signal, ui);
+  await engines.cpuEngineForMove(berserk, signal, ui);
+  assert.deepEqual(resets, [], 'a fresh engine is not reset');
+  engines.markCpuNewGame();
+  await engines.cpuEngineFor(sf, ui);
+  assert.deepEqual(resets, [], 'the readiness probe leaves the reset to the first move');
+  await engines.cpuEngineForMove(sf, signal, ui);
+  await engines.cpuEngineForMove(sf, signal, ui);
+  await engines.cpuEngineForMove(berserk, signal, ui);
+  assert.deepEqual(resets, ['sf-lite', 'berserk'], 'each resident engine resets once, before its next move');
 });
 
 test('PendingCpuNewGames sends newGame once and retries a reset that did not finish', async () => {

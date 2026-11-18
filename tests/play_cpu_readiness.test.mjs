@@ -27,11 +27,10 @@ for (const move of [null, 'a1a8', 'e2e4']) {
     };
     const deps = {
       ctxSelectedEngine: () => option,
-      retireUnusedPlayNeuralEngines: async () => {},
+      engines: { retireUnusedEngines: async () => {}, cpuEngineFor: async () => ({ setOptions() {}, bestMove: async () => move }) },
       buttonEl: () => ({}),
       ctxSetEngineNote: (text) => notes.push(text),
       ctxRender: () => {},
-      ctxCpuEngineFor: async () => ({ setOptions() {}, bestMove: async () => move }),
       ctxSetEngineFailure: (_ctx, error) => failures.push(error),
       ctxHideDownloadProgress: () => {},
       boardToFen,

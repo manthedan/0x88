@@ -10,7 +10,6 @@ import { sanToMove } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
 import { routeDom } from '../features/dom.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
-import type { Evaluator } from '../nn/evaluator.ts';
 import {
   BROWSER_RUNTIME_AUDIT_EVENT,
   type BrowserRuntimeAuditDetail,
@@ -23,12 +22,11 @@ import { chooseMove } from '../search/puct.ts';
 import { acknowledgeInputTransfer, takePlayHandoff, writeAnalysisHandoff } from './analysisHandoff.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
-import { acquireBigNetSearcherAsync, type BigNetKey, peekBigNetSearcher, preparePhoneBigNet, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
+import { type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
 import { createBrowserDom, htmlEscape } from './browserDom.ts';
 import {
   BIG_NETS,
-  type Bt4SearchOptions,
   bigNetAssetStatusSync,
   bigNetMemoryCaution,
   bigNetOptionState,
@@ -39,19 +37,15 @@ import {
   probeBt4Support,
   T3_NET,
 } from './bt4Engine.ts';
-import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
 import { writeClipboard } from './clipboard.ts';
-import { inactiveCpuEnginesToEvict, PendingCpuNewGames } from './cpuEngineResidency.ts';
 import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryClass.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
-import { type EngineFamily, enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
-import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from './engineProvision.ts';
-import { awaitEngineRetirements, trackEngineRetirement } from './engineRetirement.ts';
+import { enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
-import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
+import { lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
-import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, Maia3BrowserEvaluator, type Maia3MoveStyle } from './maia3.ts';
+import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle } from './maia3.ts';
 import { rememberMoveFocus } from './moveListFocus.ts';
 import {
   displayedPly,
@@ -63,16 +57,15 @@ import {
   searchProgressLabel,
   viewPlyFor,
 } from './moveNavigation.ts';
-import { CachedLc0Evaluator } from './onnxEvaluator.ts';
 import { type OpeningNameIndex, openingPositionKey } from './openingNames.ts';
 import { type PendingInput, type PendingInputEvent, transitionPendingInput } from './pendingInput.ts';
 import { PHONE_LARGE_NET_CHANGE_EVENT, phoneLargeNetsBlocked, phoneSafeEngineVariant } from './phoneLargeNetPolicy.ts';
+import { createPlayEngines, type EngineUiPort, type PlayEngineSpec, type PlayFamily } from './play/playEngines.ts';
+import { BIG_NET_LEVELS, lqoSearchOptions, PLAY_DRAW_SCORE, PLAY_SEARCH_CONTEMPT_LIMIT } from './play/playSearchSettings.ts';
 import { playMaterial } from './playMaterial.ts';
 import { committedPlayOpponent, type PlayOpponentState, transitionPlayOpponent } from './playOpponentState.ts';
 import { type PlayPosition, playGameToPgn, playMoveLabel, playMoveRows, playTakebackPly, replayPlayPosition } from './playPosition.ts';
 import { DEFAULT_PLAY_PREFERENCES, loadPlayPreferences, type PlayPreferences, type PreferenceStorage, savePlayPreferences } from './playPreferences.ts';
-import { Lc0PuctSearcher } from './search.ts';
-import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import { defaultStormphraxVariantKey, stormphraxVariantByKey, stormphraxVariantUnsupportedReason } from './stormphraxVariants.ts';
 import { uciGameHistory } from './uciGameHistory.ts';
 import { createWakeLockManager } from './wakeLock.ts';
@@ -84,22 +77,13 @@ const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 // v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
 const blockedModelOverride = phoneBlockedBigNetModelUrl(params.get('model'));
-const { modelUrl: MODEL_URL, deviceSelection: LC0_DEVICE_MODEL_SELECTION } = lc0SmallModelRequest(
+const LC0_SMALL_MODEL = lc0SmallModelRequest(
   DEFAULT_MODEL_URL,
   isV0DeployProfile() || blockedModelOverride ? null : params.get('model'),
   resolvePublicAssetUrl,
 );
-const CENTIPAWN_MODEL_URL = resolvePublicAssetUrl('/models/s4fix_v_ema.onnx');
-const CENTIPAWN_META_URL = resolvePublicAssetUrl('/models/s4fix_v_ema.meta.json');
 
-type PlayFamily = 'maia3' | EngineFamily;
-
-interface PlayEngineOption {
-  id: string;
-  label: string;
-  family: PlayFamily;
-  /** Family-specific: Maia Elo, lc0 net key ('small' | 't3' | 'bt4' | 'lqo'), or stockfish kind. */
-  variant: string;
+interface PlayEngineOption extends PlayEngineSpec {
   group: 'human' | 'odds' | 'engine';
 }
 
@@ -120,54 +104,9 @@ const SF_LEVELS = [
   { skill: 20, depth: 18, label: '5 · Full strength' },
 ] as const;
 
-/** Big nets are far slower per visit; keep upper levels playable. */
-const BIG_NET_LEVELS = [4, 16, 64, 256, 800];
-
-/**
- * WDL draw contempt against the human opponent. Negative values reduce the
- * value assigned to draws. The LQO constants below follow its color-specific
- * upstream settings; regular Lc0 opponents use a smaller adjustment.
- */
-const PLAY_DRAW_SCORE = -0.25;
-/**
- * Model the human opponent as a budget-limited searcher (see
- * docs/search_contempt_design.md). The limit reflects the opponent's search
- * ability, not ours, so it stays fixed across the visit ladder; 16 is the
- * A/B-validated point (92% vs 58% baseline at queen odds vs Maia 1900).
- */
-const PLAY_SEARCH_CONTEMPT_LIMIT = 16;
-/** LeelaQueenOdds README search settings, including SwapColors when LQO plays Black. */
-const LQO_CPUCT = 1.5;
-const LQO_FPU_VALUE = 0.4;
-const LQO_WHITE_DRAW_SCORE = -0.4;
-const LQO_BLACK_DRAW_SCORE = -0.6;
-const LQO_WHITE_SEARCH_CONTEMPT_LIMIT = 40;
-const LQO_BLACK_SEARCH_CONTEMPT_LIMIT = 32;
-
-// ---------------------------------------------------------------------------
-// Module-level engine owners. Neural sessions retire on switch/unmount;
-// verified model bytes remain cached independently of native session residency.
-// ---------------------------------------------------------------------------
-const BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3', 'lqo'];
-let lc0Searcher: Lc0PuctSearcher | null = null;
-let lc0LoadPromise: Promise<Lc0PuctSearcher> | null = null;
-let lc0SmallOwner: { evaluator: CachedLc0Evaluator | null; abort: AbortController } = { evaluator: null, abort: new AbortController() };
-let maia3Abort: AbortController | null = null;
-const PLAY_CENTIPAWN_KEY = 's4fix-v-ema';
-const playCentipawn = createCentipawnEvaluatorCache(createBrowserSquareformerRuntimeEvaluator);
+// Engines outlive page mounts; see play/playEngines.ts.
+const engines = createPlayEngines({ loadCentipawn: createBrowserSquareformerRuntimeEvaluator });
 const playRuntimeFallbackAudits = new Map<string, BrowserRuntimeAuditDetail>();
-const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
-const pendingCpuNewGames = new PendingCpuNewGames();
-let maia3Promise: Promise<Maia3BrowserEvaluator> | null = null;
-/** One-line model/cache status shown in the caption once Maia3 has loaded. */
-let maia3Status: string | null = null;
-
-interface CpuEngine {
-  setOptions(options: { depth?: number; movetimeMs?: number; threads?: number; skillLevel?: number }): void;
-  bestMove(fen: string, signal?: AbortSignal, opts?: { moves?: readonly string[] }): Promise<string | null>;
-  newGame?(signal?: AbortSignal): Promise<void>;
-  dispose?(): void;
-}
 
 // ---------------------------------------------------------------------------
 // Screen wake lock (best-effort): keeps the screen on while the engine is
@@ -248,12 +187,14 @@ interface PlayContext {
   engineReady: boolean;
   preparingEngine: boolean;
   enginePreparationGeneration: number;
+  /** Where engine loads report notes and progress; stale loads see a superseded generation. */
+  engineUi: EngineUiPort;
   // Bound listeners for cleanup
   listeners: Array<{ type: string; target: EventTarget; fn: EventListenerOrEventListenerObject }>;
 }
 
 function createPlayContext(): PlayContext {
-  return {
+  const ctx: PlayContext = {
     autosave: null,
     pendingInput: null,
     restoredGame: false,
@@ -297,8 +238,22 @@ function createPlayContext(): PlayContext {
     engineReady: false,
     preparingEngine: false,
     enginePreparationGeneration: 0,
+    engineUi: {
+      current: () => {
+        const generation = ctx.enginePreparationGeneration;
+        return () => ctxAsyncUiIsCurrent(ctx, generation);
+      },
+      mounted: () => !ctxIsDisposed(ctx),
+      note: (text, warn) => ctxSetEngineNote(text, warn),
+      clearNote: (text) => {
+        if (maybeEl('engineNote')?.textContent === text) ctxSetEngineNote('');
+      },
+      progress: (label, loadedBytes, totalBytes) => ctxShowDownloadProgress(label, loadedBytes, totalBytes),
+      hideProgress: () => ctxHideDownloadProgress(),
+    },
     listeners: [],
   };
+  return ctx;
 }
 
 function trackListener(ctx: PlayContext, target: EventTarget, type: string, fn: EventListenerOrEventListenerObject): void {
@@ -386,6 +341,7 @@ function ctxStrengthCaption(_ctx: PlayContext): string {
       style === 'argmax'
         ? 'deterministic top human move'
         : `sampled, temperature ${ctxSelectedMaia3Temperature().toFixed(2)}, top-p ${ctxSelectedMaia3TopP().toFixed(2)}`;
+    const maia3Status = engines.maia3Status();
     const status = maia3Status ? ` ${maia3Status}.` : '';
     return `Maia3 predicts human moves at Elo ${ctxSelectedMaia3Elo()} — ${suffix}. No LC0/PUCT search; its WDL output predicts the human game outcome, not an engine eval.${status}`;
   }
@@ -400,17 +356,6 @@ function ctxStrengthCaption(_ctx: PlayContext): string {
   const isNeuralSearch = option.family === 'lc0' || option.family === 'centipawn';
   const base = isNeuralSearch ? `≈ ${value} visits per move` : `search depth ${value}`;
   return isNeuralSearch ? `${base} — strong even on Fastest; pick a Maia for a human-level opponent${cpuNote}` : base;
-}
-
-function ctxLqoSearchOptions(ctx: PlayContext): Pick<Bt4SearchOptions, 'drawScore' | 'searchContemptLimit' | 'cpuct' | 'fpu' | 'swapColors'> {
-  const lqoPlaysBlack = ctx.humanColor === 'w';
-  return {
-    drawScore: lqoPlaysBlack ? LQO_BLACK_DRAW_SCORE : LQO_WHITE_DRAW_SCORE,
-    searchContemptLimit: lqoPlaysBlack ? LQO_BLACK_SEARCH_CONTEMPT_LIMIT : LQO_WHITE_SEARCH_CONTEMPT_LIMIT,
-    cpuct: LQO_CPUCT,
-    fpu: LQO_FPU_VALUE,
-    swapColors: lqoPlaysBlack,
-  };
 }
 
 function ctxRenderLevelOptions(_ctx: PlayContext): void {
@@ -564,226 +509,8 @@ function ctxHideDownloadProgress(): void {
   hideLoadingProgress(container);
 }
 
-function retireUnusedPlayNeuralEngines(option?: PlayEngineOption): Promise<void> {
-  if (option?.family !== 'centipawn') playCentipawn.clear();
-  if (option?.family !== 'maia3' && maia3Promise) {
-    const pending = maia3Promise;
-    maia3Abort?.abort();
-    maia3Abort = null;
-    maia3Promise = null;
-    maia3Status = null;
-    // An aborted initialization publishes its worker cleanup through onInitCleanup.
-    trackEngineRetirement(
-      pending.then(
-        (evaluator) => evaluator.dispose(),
-        () => undefined,
-      ),
-    );
-  }
-  if (!(option?.family === 'lc0' && option.variant === 'small') && lc0LoadPromise) {
-    const pending = lc0LoadPromise;
-    const owner = lc0SmallOwner;
-    lc0SmallOwner = { evaluator: null, abort: new AbortController() };
-    lc0LoadPromise = null;
-    lc0Searcher = null;
-    owner.abort.abort();
-    trackEngineRetirement(
-      pending.then(
-        async (searcher) => {
-          searcher.resetTree();
-          await owner.evaluator?.dispose();
-          owner.evaluator = null;
-        },
-        () => undefined,
-      ),
-    );
-  }
-  releaseUnusedBigNetSearchers(option?.family === 'lc0' && option.variant !== 'small' ? [option.variant as BigNetKey] : [], 0);
-  return awaitEngineRetirements();
-}
-
-function disposePlayCpuEngines(): void {
-  for (const id of cpuEnginePromises.keys()) disposeCachedCpuEngine(id, true);
-}
-
-function ctxAcquireBigNet(key: BigNetKey, signal: AbortSignal) {
-  const reclaim = preparePhoneBigNet(key, 2048, signal, disposePlayCpuEngines, () => ctxSetEngineNote('Freeing memory…'));
-  if (!reclaim) return acquireBigNetSearcherAsync(key, false, signal);
-  return reclaim.then(
-    () => acquireBigNetSearcherAsync(key, false, signal),
-    (error: unknown) => {
-      // A cancelled wait (resign, new game, opponent change) must not leave the note on the next screen.
-      if (maybeEl('engineNote')?.textContent === 'Freeing memory…') ctxSetEngineNote('');
-      throw error;
-    },
-  );
-}
-
-function ctxEnsureLc0Small(ctx: PlayContext): Promise<Lc0PuctSearcher> {
-  if (lc0Searcher) return Promise.resolve(lc0Searcher);
-  if (!lc0LoadPromise) {
-    const uiGeneration = ctx.enginePreparationGeneration;
-    const owner = lc0SmallOwner;
-    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Lc0 small net…');
-    lc0LoadPromise = (async () => {
-      // Download progress hides only once the session exists: on Apple WebGPU a
-      // failed session reloads the original model for its WASM fallback.
-      const { evaluator } = await createLc0OnnxEvaluatorFromUrl(MODEL_URL, {
-        deviceSelection: LC0_DEVICE_MODEL_SELECTION,
-        load: {
-          cache: true,
-          requestPersistentStorage: true,
-          signal: owner.abort.signal,
-          onProgress: (loaded, total) => {
-            if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxShowDownloadProgress('Lc0 small net', loaded, total);
-          },
-        },
-      });
-      if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxHideDownloadProgress();
-      owner.evaluator = new CachedLc0Evaluator(evaluator, { maxEntries: 2048 });
-      const loaded = new Lc0PuctSearcher(owner.evaluator);
-      if (owner === lc0SmallOwner) lc0Searcher = loaded;
-      if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
-      return loaded;
-    })().catch((error: Error) => {
-      if (owner === lc0SmallOwner) lc0LoadPromise = null;
-      if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) {
-        ctxHideDownloadProgress();
-        ctxSetEngineNote(`Lc0 load failed: ${error.message}`, true);
-      }
-      throw error;
-    });
-  }
-  return lc0LoadPromise;
-}
-
-function ctxEnsureCentipawn(ctx: PlayContext): Promise<Evaluator> {
-  const starting = !playCentipawn.has(PLAY_CENTIPAWN_KEY);
-  const uiGeneration = ctx.enginePreparationGeneration;
-  const loading = playCentipawn.get(
-    PLAY_CENTIPAWN_KEY,
-    {
-      spec: { id: 's4fix-v-ema', modelId: 's4fix-v-ema', label: 'Centipawn', onnx: CENTIPAWN_MODEL_URL, meta: CENTIPAWN_META_URL, runtime: 'ort' },
-      options: { runtime: 'ort', fallback: true, audit: { surface: 'play' } },
-      maxEntries: 4096,
-      label: 'centipawn-play:ort',
-    },
-    () => !ctxIsDisposed(ctx),
-  );
-  if (!starting) return loading;
-  if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Centipawn…');
-  return loading.then(
-    (evaluator) => {
-      if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
-      return evaluator;
-    },
-    (error: Error) => {
-      if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote(`Centipawn load failed: ${error.message}`, true);
-      throw error;
-    },
-  );
-}
-
-async function ctxEnsureMaia3(ctx: PlayContext): Promise<Maia3BrowserEvaluator> {
-  if (maia3Promise) {
-    const cached = maia3Promise;
-    const owner = maia3Abort;
-    const evaluator = await cached;
-    if (owner?.signal.aborted) throw new DOMException('Maia3 owner retired', 'AbortError');
-    if (!evaluator.failure) return evaluator;
-    if (maia3Promise === cached) maia3Promise = null;
-    return ctxEnsureMaia3(ctx);
-  }
-  const uiGeneration = ctx.enginePreparationGeneration;
-  const owner = new AbortController();
-  maia3Abort = owner;
-  maia3Promise = (async () => {
-    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('Loading Maia3 human model…');
-    const evaluator = await Maia3BrowserEvaluator.create({
-      selfElo: ctx.opponent.active.maiaElo,
-      oppoElo: ctx.opponent.active.maiaElo,
-      signal: owner.signal,
-      onInitCleanup: trackEngineRetirement,
-      onProgress: (loaded, total) => {
-        if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxShowDownloadProgress('Maia3', loaded, total);
-      },
-    });
-    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxHideDownloadProgress();
-    const load = evaluator.modelLoad;
-    const origin = load.cacheStatus === 'hit' ? 'from cache' : load.cacheStatus === 'miss' ? 'downloaded' : 'loaded';
-    const integrity = load.sha256Valid === true ? ', sha256 ✓' : load.sha256Valid === false ? ', sha256 MISMATCH' : '';
-    if (owner === maia3Abort) maia3Status = `Model ${origin} (${((load.bytes ?? 0) / 1e6).toFixed(0)}MB${integrity})`;
-    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
-    return evaluator;
-  })().catch((error: Error) => {
-    if (owner === maia3Abort) maia3Promise = null;
-    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) {
-      ctxHideDownloadProgress();
-      ctxSetEngineNote(`Maia3 load failed: ${error.message}`, true);
-    }
-    throw error;
-  });
-  return maia3Promise;
-}
-
-function ctxCpuEngineFor(ctx: PlayContext, option: PlayEngineOption): Promise<CpuEngine> {
-  const existing = cpuEnginePromises.get(option.id);
-  if (existing) {
-    retainCpuEngine(option.id, existing);
-    return existing;
-  }
-  const label = option.label;
-  const uiGeneration = ctx.enginePreparationGeneration;
-  const slot: { current: Promise<CpuEngine> | null } = { current: null };
-  const created = (async (): Promise<CpuEngine> => {
-    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote(`Loading ${label} (first use downloads the engine)…`);
-    try {
-      switch (option.family) {
-        case 'sf':
-          return new StockfishEngine(
-            { depth: 4, threads: 1, hashMb: cpuEngineHashMbForSurface('play') },
-            stockfishFlavorUrl(option.variant === 'lite' ? 'lite-single' : 'single'),
-          );
-        default:
-          if (isDefaultBrowserUciFamily(option.family)) return createDefaultBrowserUciEngine(option.family);
-          throw new Error(`unsupported engine family ${option.family}`);
-      }
-    } finally {
-      if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote('');
-    }
-  })().catch((error: Error) => {
-    if (slot.current && cpuEnginePromises.get(option.id) === slot.current) cpuEnginePromises.delete(option.id);
-    if (ctxAsyncUiIsCurrent(ctx, uiGeneration)) ctxSetEngineNote(`${label} load failed: ${error.message}`, true);
-    throw error;
-  });
-  slot.current = created;
-  retainCpuEngine(option.id, created);
-  return created;
-}
-
-/** Keep `id` as the newest resident engine and dispose inactive engines past the cap. */
-function retainCpuEngine(id: string, pending: Promise<CpuEngine>): void {
-  cpuEnginePromises.delete(id);
-  cpuEnginePromises.set(id, pending);
-  evictInactiveCpuEngines(id);
-}
-
-function evictInactiveCpuEngines(activeId: string): void {
-  for (const evictId of inactiveCpuEnginesToEvict([...cpuEnginePromises.keys()], activeId)) disposeCachedCpuEngine(evictId);
-}
-
-function disposeCachedCpuEngine(id: string, track = false): void {
-  const pending = cpuEnginePromises.get(id);
-  if (!pending) return;
-  cpuEnginePromises.delete(id);
-  pendingCpuNewGames.forget(id);
-  const disposal = pending.then((engine) => engine.dispose?.());
-  if (track) trackEngineRetirement(disposal);
-  else void disposal.catch(() => undefined);
-}
-
 async function ctxPreloadLqoAfterBookMove(ctx: PlayContext, signal: AbortSignal): Promise<boolean> {
-  const searcher = await ctxAcquireBigNet('lqo', signal);
+  const searcher = await engines.acquireBigNet('lqo', signal, ctx.engineUi);
   if (searcher.loaded) return false;
   const label = `Lc0 ${searcher.config.name}`;
   ctxShowDownloadProgress(label, undefined, undefined, 'Loading in background');
@@ -822,7 +549,7 @@ function ctxPreloadLqoInBackground(ctx: PlayContext, signal: AbortSignal): boole
 
 async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Promise<string | null> {
   const option = ctxSelectedEngine(ctx);
-  await retireUnusedPlayNeuralEngines(option);
+  await engines.retireUnusedEngines(option);
   if (signal.aborted || ctx.disposed) return null;
   const preferences = ctx.opponent.active;
   const level = preferences.level;
@@ -837,7 +564,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
         return bookMove;
       }
     } else if (ctx.moves.length === 0) {
-      const searcher = await ctxAcquireBigNet('lqo', signal);
+      const searcher = await engines.acquireBigNet('lqo', signal, ctx.engineUi);
       let progressShown = false;
       if (!searcher.loaded) {
         ctxSetEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
@@ -870,7 +597,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     }
   }
   if (option.family === 'maia3') {
-    const player = await ctxEnsureMaia3(ctx);
+    const player = await engines.ensureMaia3(ctx.opponent.active.maiaElo, ctx.engineUi);
     if (signal.aborted) return null;
     const choice = await player.chooseMove(
       { positions: ctx.positions },
@@ -885,7 +612,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     return choice.move;
   }
   if (option.family === 'centipawn') {
-    const evaluator = await ctxEnsureCentipawn(ctx);
+    const evaluator = await engines.ensureCentipawn(ctx.engineUi);
     if (signal.aborted) return null;
     try {
       const result = await chooseMove(ctx.board, evaluator, {
@@ -915,7 +642,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     }
   }
   if (option.family === 'lc0' && option.variant === 'small') {
-    const searcher = await ctxEnsureLc0Small(ctx);
+    const searcher = await engines.ensureLc0Small(LC0_SMALL_MODEL, ctx.engineUi);
     try {
       const result = await searcher.search(
         { positions: ctx.positions },
@@ -940,7 +667,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     }
   }
   if (option.family === 'lc0') {
-    const searcher = await ctxAcquireBigNet(option.variant as BigNetKey, signal);
+    const searcher = await engines.acquireBigNet(option.variant as BigNetKey, signal, ctx.engineUi);
     if (!searcher.loaded && !signal.aborted && !ctxIsDisposed(ctx)) {
       ctxSetEngineNote(`Loading Lc0 ${searcher.config.name} (~${searcher.config.approxMb}MB on first use)…`);
       ctxShowDownloadProgress(`Lc0 ${searcher.config.name}`, undefined, undefined, 'Preparing');
@@ -949,7 +676,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
       };
     }
     try {
-      const lqoOptions = option.variant === 'lqo' ? ctxLqoSearchOptions(ctx) : null;
+      const lqoOptions = option.variant === 'lqo' ? lqoSearchOptions(ctx.humanColor) : null;
       const result = await searcher.search(
         { positions: ctx.positions },
         {
@@ -976,9 +703,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
       if (!signal.aborted && !ctxIsDisposed(ctx)) ctxHideDownloadProgress();
     }
   }
-  const engine = await ctxCpuEngineFor(ctx, option);
-  // Clear the hash a resident engine kept from the previous game.
-  await pendingCpuNewGames.resetIfPending(option.id, engine, signal);
+  const engine = await engines.cpuEngineForMove(option, signal, ctx.engineUi);
   if (option.family === 'sf') {
     engine.setOptions({ depth: visitsOrDepth, movetimeMs: undefined, skillLevel: SF_LEVELS[level].skill });
   } else {
@@ -998,7 +723,7 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
   const signal = ctx.abort.signal;
   if (ctx.restoredDownloadEngineId && !(await ctxCheckRestoredDownloadConsent(ctx))) return;
   if (signal.aborted || ctx.disposed) return;
-  const retirement = retireUnusedPlayNeuralEngines(option);
+  const retirement = engines.retireUnusedEngines(option);
   const generation = ++ctx.enginePreparationGeneration;
   ctx.engineReady = false;
   ctx.preparingEngine = true;
@@ -1009,7 +734,7 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
     await retirement;
     if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration) return;
     if (option.family === 'maia3') {
-      const player = await ctxEnsureMaia3(ctx);
+      const player = await engines.ensureMaia3(ctx.opponent.active.maiaElo, ctx.engineUi);
       await player.chooseMove(
         { positions: ctx.positions },
         {
@@ -1019,13 +744,13 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
         },
       );
     } else if (option.family === 'centipawn') {
-      const evaluator = await ctxEnsureCentipawn(ctx);
+      const evaluator = await engines.ensureCentipawn(ctx.engineUi);
       await evaluator.evaluate(ctx.board, {
         historyFens: searchHistoryFens(ctx.positions, ctx.positions.length),
         legalMoves: legalMoves(ctx.board),
       });
     } else if (option.family === 'lc0' && option.variant === 'small') {
-      const searcher = await ctxEnsureLc0Small(ctx);
+      const searcher = await engines.ensureLc0Small(LC0_SMALL_MODEL, ctx.engineUi);
       await searcher.search(
         { positions: ctx.positions },
         { visits: 1, signal, reuseTree: false, drawScore: PLAY_DRAW_SCORE, searchContemptLimit: PLAY_SEARCH_CONTEMPT_LIMIT },
@@ -1033,8 +758,8 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
       if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration || option.id !== ctxSelectedEngine(ctx).id) return;
       searcher.resetTree();
     } else if (option.family === 'lc0') {
-      const searcher = await ctxAcquireBigNet(option.variant as BigNetKey, signal);
-      const lqoOptions = option.variant === 'lqo' ? ctxLqoSearchOptions(ctx) : null;
+      const searcher = await engines.acquireBigNet(option.variant as BigNetKey, signal, ctx.engineUi);
+      const lqoOptions = option.variant === 'lqo' ? lqoSearchOptions(ctx.humanColor) : null;
       await searcher.search(
         { positions: ctx.positions },
         {
@@ -1052,7 +777,7 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
       if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration || option.id !== ctxSelectedEngine(ctx).id) return;
       await searcher.resetTree();
     } else {
-      const engine = await ctxCpuEngineFor(ctx, option);
+      const engine = await engines.cpuEngineFor(option, ctx.engineUi);
       engine.setOptions({ depth: 1, movetimeMs: undefined });
       const uci = await engine.bestMove(boardToFen(ctx.board), signal);
       // A cancelled probe has no answer to check; the guard below returns.
@@ -1284,19 +1009,11 @@ function ctxNewGame(ctx: PlayContext): void {
   ctx.gameOver = null;
   ctx.pendingPromotion = null;
   ctx.viewPly = null;
-  lc0Searcher?.resetTree();
-  for (const key of BIG_NET_KEYS) {
-    const searcher = peekBigNetSearcher(key);
-    if (!searcher) continue;
-    // Best effort: the same click may release this net (new opponent) and
-    // dispose its worker before the reset replies; nothing waits on it.
-    if (searcher.loaded) searcher.resetTree().catch(() => undefined);
-  }
+  engines.startNewGame(ctx.opponent.active.engineId);
   ctxSetEngineNote('');
   ctxDisarmResign(ctx);
   ctxDisarmNewGame(ctx);
   ctxRestoreSelectedRuntimeWarning(ctx);
-  evictInactiveCpuEngines(ctx.opponent.active.engineId);
   ctxRender(ctx);
   ctxPrepareOrStartEngine(ctx);
 }
@@ -1893,9 +1610,8 @@ function ctxSetOpponent(ctx: PlayContext, next: PlayOpponentState): void {
   // A draft approval is not permission to download the still-live opponent.
   // Only a committed replacement retires that live model's outstanding gate.
   if (next.active.engineId !== previousEngineId && ctx.restoredDownloadEngineId === previousEngineId) ctx.restoredDownloadEngineId = null;
-  // Stormphrax's large WASM heap must not share residency with the next model.
-  // A pending restart still belongs to the current game, so retain it until commit.
-  if (previousEngineId === 'stormphrax' && next.active.engineId !== previousEngineId) disposeCachedCpuEngine(previousEngineId);
+  // `active` changes only on commit; a pending restart still belongs to the current game.
+  engines.opponentCommitted(previousEngineId, next.active.engineId);
 }
 
 function ctxRestoreOpponentControls(ctx: PlayContext): void {
@@ -1980,7 +1696,7 @@ function ctxApplyPlayHandoffForMount(ctx: PlayContext): boolean {
 function ctxResetStartPosition(ctx: PlayContext): void {
   // Engines stay resident across games and page mounts; clear their hash
   // before their next move in this game.
-  pendingCpuNewGames.markAll(cpuEnginePromises.keys());
+  engines.markCpuNewGame();
   if (ctx.practicePosition) {
     Object.assign(ctx, replayPlayPosition(ctx.practicePosition));
     ctx.practiceBoundary = ctx.moves.length;
@@ -2483,12 +2199,8 @@ export function mountPlayBrowser(): () => void {
       ctx.consentAbort.abort();
       ctxCancelEngineTurn(ctx);
       ctx.abort.abort();
-      void retireUnusedPlayNeuralEngines().catch(() => undefined);
+      engines.unmounted(retireCpuOnUnmount);
       playRuntimeFallbackAudits.clear();
-      // Stormphrax reserves a 512 MiB WASM heap, so unlike the smaller CPU
-      // engines it must not remain cached after this Play route is gone.
-      if (retireCpuOnUnmount) disposePlayCpuEngines();
-      else disposeCachedCpuEngine('stormphrax');
       if (ctx.resignArmTimer) {
         clearTimeout(ctx.resignArmTimer);
         ctx.resignArmTimer = null;
