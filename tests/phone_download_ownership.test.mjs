@@ -750,8 +750,10 @@ for (const key of Object.keys(BIG_NETS)) {
           },
           ctxSetEngineNote() {},
           releaseUnusedBigNetSearchers() {},
-          retireUnusedPlayNeuralEngines: async () => {
-            assert.equal(ctx.restoredDownloadEngineId, null, 'retirement starts only after approval');
+          engines: {
+            retireUnusedEngines: async () => {
+              assert.equal(ctx.restoredDownloadEngineId, null, 'retirement starts only after approval');
+            },
           },
           buttonEl: () => retry,
           ctxRender() {},
@@ -869,6 +871,7 @@ for (const action of ['dismiss', 'confirm']) {
       ctxSetEngineNote() {},
       buttonEl: () => ({}),
       ctxSetEngineFailure: (_ctx, error) => assert.fail(String(error)),
+      engines: { opponentCommitted() {} },
     };
     const code =
       playPickerAbort +
@@ -958,7 +961,7 @@ for (const [accepted, stale] of [
 
 test('committing an asset-probed saved opponent preserves that destination model download gate', () => {
   const code = extract(source.play, 'function ctxSetOpponent(', 'function ctxRestoreOpponentControls(');
-  const setOpponent = new Function(`${code}; return ctxSetOpponent;`)();
+  const setOpponent = new Function('engines', `${code}; return ctxSetOpponent;`)({ opponentCommitted() {} });
   const ctx = { opponent: committedPlayOpponent({ engineId: 'maia3' }), restoredDownloadEngineId: 'leela-queen-odds' };
   setOpponent(ctx, committedPlayOpponent({ engineId: 'leela-queen-odds' }));
   assert.equal(ctx.restoredDownloadEngineId, 'leela-queen-odds');
