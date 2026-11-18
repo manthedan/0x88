@@ -149,9 +149,10 @@ export function requestFailures(requests) {
     unexpected = [];
   for (const r of requests) {
     if (r.complete && !r.failure && r.status < 400) continue;
-    const probe = r.method === 'HEAD' && /^\/(?:models\/lc0\/(?:BT4-|t3-)[^/?]+\.onnx|engine-logos\/[^/?]+\.svg)(?:\?|$)/i.test(r.path);
+    const probe = r.method === 'HEAD' && /^\/(?:models\/lc0\/(?:(?:BT4-|t3-)[^/?]+|lqo_v2\.f16\.qdq8)\.onnx|engine-logos\/[^/?]+\.svg)(?:\?|$)/i.test(r.path);
+    const speculative = ['GET', 'HEAD'].includes(r.method) && r.path.startsWith('/reckless/');
     const absent = r.complete && !r.failure && [404, 410].includes(r.status);
-    if ((probe || r.path.startsWith('/reckless/')) && absent) optional.push(r);
+    if ((probe && absent) || (speculative && (absent || r.clientAborted))) optional.push(r);
     else unexpected.push(r);
   }
   return { optional, unexpected };

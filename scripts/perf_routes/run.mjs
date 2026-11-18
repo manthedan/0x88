@@ -171,7 +171,10 @@ async function run(signal) {
       const id = `${String(i).padStart(3, '0')}-${cell.browser}-${cell.journey}-${cell.arm}-r${cell.repeat}`;
       const specFile = join(out, 'sessions', `${id}.spec.json`),
         resultFile = join(out, 'sessions', `${id}.json`);
-      writeFileSync(specFile, JSON.stringify({ ...cell, base: builds[cell.arm].base, source: builds[cell.arm], driver: args.driver }, null, 2));
+      writeFileSync(
+        specFile,
+        JSON.stringify({ ...cell, base: builds[cell.arm].base, source: builds[cell.arm], driver: args.driver, externalLock: !!args.benchlock }, null, 2),
+      );
       console.log(`[${i + 1}/${cells.length}] ${id}`);
       let status, cleanupConfirmed;
       do {

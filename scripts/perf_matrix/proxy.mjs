@@ -39,7 +39,7 @@ export async function startCountingProxy(target, { htmlScript } = {}) {
   };
   const requests = [];
   const server = createServer((req, res) => {
-    const entry = { at: Date.now(), method: req.method, path: req.url, status: null, bytes: 0, complete: false, failure: null };
+    const entry = { at: Date.now(), method: req.method, path: req.url, status: null, bytes: 0, complete: false, failure: null, clientAborted: false };
     requests.push(entry);
     let upstreamComplete = false;
     const fail = (reason) => {
@@ -95,7 +95,10 @@ export async function startCountingProxy(target, { htmlScript } = {}) {
     up.on('error', (error) => fail(`Upstream request: ${error.message}`));
     res.on('close', () => {
       if (res.writableFinished) return;
-      entry.failure ??= 'Browser disconnected before response finished';
+      if (!entry.failure) {
+        entry.clientAborted = true;
+        entry.failure = 'Browser disconnected before response finished';
+      }
       up.destroy();
     });
     req.pipe(up);

@@ -1,13 +1,13 @@
 // One owned browser session / cold origin / real route journey. Shared matrix OS and proxy helpers.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { hostname, loadavg, platform, release } from 'node:os';
 import { median } from '../lib/perf_canary_stats.mjs';
 import { pgrep, readFootprint, sleep, WORKER_READY_SCRIPT } from '../perf_matrix/common.mjs';
 import { startCountingProxy } from '../perf_matrix/proxy.mjs';
 import { footprintSum, jsBytesByRoute, naturalVisibilityValid, peakFootprint, requestFailures, safariWebContentPid } from './gate.mjs';
 import { DOCS_READY, MIDGAME, routeFor, runJourney, waitFor } from './journeys.mjs';
-import { cleanupMarker, shutdownDelay, watchShutdown } from './lifecycle.mjs';
+import { cleanupMarker, shutdownDelay, waitForCleanup, watchShutdown } from './lifecycle.mjs';
 
 const [specFile, outFile] = process.argv.slice(2);
 const spec = JSON.parse(readFileSync(specFile, 'utf8'));
@@ -316,10 +316,17 @@ try {
     result.status = 'invalid';
     result.error = signal.reason.message;
   }
-  dispose();
-  result.host.loadAfter = loadavg();
-  result.durationMs = Date.now() - t0;
-  writeFileSync(outFile, JSON.stringify(result, null, 2));
+  try {
+    result.host.loadAfter = loadavg();
+    result.durationMs = Date.now() - t0;
+    writeFileSync(outFile, JSON.stringify(result, null, 2));
+  } finally {
+    if (spec.externalLock && existsSync(pendingCleanup)) {
+      console.error(`Browser cleanup unconfirmed; holding benchlock. See ${pendingCleanup}`);
+      await waitForCleanup(outFile, spec.browser === 'safari' ? close : undefined);
+    }
+    dispose();
+  }
 }
 console.log(`${spec.arm}/${spec.browser}/${spec.journey}/r${spec.repeat}: ${result.status} ${JSON.stringify(result.metrics)}`);
 process.exitCode = result.status === 'ok' ? 0 : /already paired/.test(result.error ?? '') ? 75 : 2;

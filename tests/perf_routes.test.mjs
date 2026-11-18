@@ -24,8 +24,8 @@ import {
   verdict,
 } from '../scripts/perf_routes/gate.mjs';
 import { chooseHumanMove, playHumanTurn } from '../scripts/perf_routes/human.mjs';
-import { arenaGameFailed, DOCS_READY, requireAnalysisForMove } from '../scripts/perf_routes/journeys.mjs';
-import { acquireLock, claimOutput, cleanupMarker, releaseAfterSession } from '../scripts/perf_routes/lifecycle.mjs';
+import { arenaGameFailed, DOCS_READY, observeMovePvs, requireAnalysisForMove } from '../scripts/perf_routes/journeys.mjs';
+import { acquireLock, claimOutput, cleanupMarker, releaseAfterSession, waitForCleanup } from '../scripts/perf_routes/lifecycle.mjs';
 
 const args = (...extra) => parseArgs(['--baseline', 'main', '--candidate', 'HEAD', '--dry-run', ...extra]);
 
@@ -195,14 +195,19 @@ test('proxy records upstream failure before headers, truncated bodies and downst
     assert.equal(entry.complete, false);
   }
   assert.equal(failures.unexpected.find((r) => r.path === '/truncated.js').status, 200);
+  assert.equal(failures.unexpected.find((r) => r.path === '/truncated.js').clientAborted, false);
+  assert.equal(failures.unexpected.find((r) => r.path === '/disconnect.js').clientAborted, true);
   assert.equal(failures.optional[0].path, '/reckless/optional.js');
   const late = { at: 10, path: '/docs/chunk.js', status: 200, complete: false, failure: null };
   const bigNetProbe = { path: '/models/lc0/t3-big.onnx', method: 'HEAD', status: 404, complete: true, failure: null };
   const brokenProbe = { ...bigNetProbe, complete: false, failure: 'disconnected' };
   const missingModel = { ...bigNetProbe, method: 'GET' };
-  assert.deepEqual(requestFailures([bigNetProbe, brokenProbe, missingModel, late]), {
-    optional: [bigNetProbe],
-    unexpected: [brokenProbe, missingModel, late],
+  const queenOdds = { ...bigNetProbe, path: '/models/lc0/lqo_v2.f16.qdq8.onnx' };
+  const recklessCancel = { ...late, method: 'GET', path: '/reckless/engine.wasm', clientAborted: true };
+  const recklessBroken = { ...recklessCancel, clientAborted: false, failure: 'upstream truncated' };
+  assert.deepEqual(requestFailures([bigNetProbe, queenOdds, recklessCancel, brokenProbe, missingModel, late, recklessBroken]), {
+    optional: [bigNetProbe, queenOdds, recklessCancel],
+    unexpected: [brokenProbe, missingModel, late, recklessBroken],
   });
 });
 
@@ -421,33 +426,53 @@ test('Safari requires exactly one new WebContent PID without ranking by footprin
   assert.equal(safariWebContentPid(before, [10, 12, 14]), 14);
 });
 
-test('Analysis requires current-FEN worker and UI progress and all PVs inside the move window', async () => {
+test('Analysis records when every engine has a PV and accepts only in-window evidence, even when polled late', async () => {
   const move = { fen: 'new', started: 10 };
-  const state = { fen: 'new', workerProgressMessages: 0, uiProgressSamples: 0 };
-  const window = { __routePerf: { analysisProgress: [{ fen: 'old', at: 10 }] }, __analysisSchedulingState: () => state };
-  let rowCount = 2;
-  let now = 11;
+  const window = { __routePerf: { analysisProgress: [{ fen: 'old', at: 10 }] }, __routeMove: { start: 10 }, __analysisSchedulingState: () => ({ fen: 'new' }) };
+  let engines = ['Lc0'],
+    now = 10,
+    mutation,
+    disconnected = false;
   const document = {
-    querySelectorAll: (selector) =>
-      selector.includes('engineSummaries')
-        ? ['Lc0', 'SF'].slice(0, rowCount).map((engine) => ({ dataset: { pvFen: 'new', engine }, querySelector: () => true }))
-        : [1, 2],
+    querySelector: () => ({ querySelectorAll: () => engines.map((engine) => ({ dataset: { pvFen: 'new', engine }, querySelector: () => true })) }),
+    querySelectorAll: () => [1, 2],
   };
-  const evaluate = async (expression) => new Function('window', 'document', 'performance', `return (${expression});`)(window, document, { now: () => now });
-  const observe = () => requireAnalysisForMove(evaluate, move, 1);
-  await assert.rejects(observe(), /Timed out/);
-  window.__routePerf.analysisProgress = [{ fen: 'new', at: 9 }];
-  await assert.rejects(observe(), /Timed out/);
-  window.__routePerf.analysisProgress = [{ fen: 'new', at: 11 }];
-  assert.deepEqual(await observe(), { at: 11, state });
-  now = 12;
-  await assert.rejects(observe(), /within 1ms of user move/);
+  const evaluate = async (expression) =>
+    runInNewContext(expression, {
+      window,
+      document,
+      performance: { now: () => now },
+      setTimeout: () => 1,
+      clearTimeout() {},
+      MutationObserver: class {
+        constructor(fn) {
+          mutation = fn;
+        }
+        observe() {}
+        disconnect() {
+          disconnected = true;
+        }
+      },
+    });
+  await evaluate(`(${observeMovePvs.toString()})(window.__routeMove)`);
+  assert.equal(window.__routeMove.pvAt, undefined);
+  engines = ['Lc0', 'SF'];
   now = 11;
-  rowCount = 1;
-  await assert.rejects(observe(), /Timed out/);
-  rowCount = 2;
-  state.fen = 'other';
-  await assert.rejects(observe(), /Timed out/);
+  mutation();
+  assert.equal(window.__routeMove.pvAt, 11);
+  assert.equal(disconnected, true);
+  now = 12;
+  const observe = () => requireAnalysisForMove(evaluate, move, 1);
+  await assert.rejects(observe(), /within 1ms of user move/);
+  window.__routePerf.analysisProgress = [
+    { fen: 'new', at: 9 },
+    { fen: 'new', at: 12 },
+  ];
+  await assert.rejects(observe(), /within 1ms of user move/);
+  window.__routePerf.analysisProgress.push({ fen: 'new', at: 11 });
+  assert.equal((await observe()).workerAt, 11);
+  window.__routeMove.pvAt = 12;
+  await assert.rejects(observe(), /within 1ms of user move/);
 });
 
 test('Arena rejects illegal/missing moves even when a finished-game chip exists', () => {
@@ -499,6 +524,23 @@ test('unconfirmed owned browser cleanup retains the mutex', async (t) => {
   rmSync(cleanupMarker(output));
   assert.equal(releaseAfterSession(output, release), true);
   assert.equal(existsSync(lock), false);
+});
+
+test('wrapped session retries owned Safari teardown without returning while cleanup is pending', async (t) => {
+  const output = join(scratch(t), 'attempt.json');
+  const marker = cleanupMarker(output);
+  writeFileSync(marker, 'test session');
+  let attempts = 0;
+  await waitForCleanup(
+    output,
+    async () => {
+      assert.equal(existsSync(marker), true);
+      if (++attempts === 1) throw Error('temporary driver timeout');
+    },
+    async () => {},
+  );
+  assert.equal(attempts, 2);
+  assert.equal(existsSync(marker), false);
 });
 
 for (const [signal, code] of [

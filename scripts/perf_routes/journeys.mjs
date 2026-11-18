@@ -64,6 +64,25 @@ async function analysisSetup(evaluate, four = false) {
   );
 }
 
+export function observeMovePvs(move) {
+  const summaries = document.querySelector('#engineSummaries');
+  const count = document.querySelectorAll('#engineList .engine-row').length;
+  if (!summaries || !count) return;
+  move.fen = window.__analysisSchedulingState().fen;
+  const record = () => {
+    if (window.__analysisSchedulingState().fen !== move.fen) return;
+    const rows = [...summaries.querySelectorAll('[data-pv-fen]')].filter((el) => el.dataset.pvFen === move.fen && el.querySelector('.pv-move'));
+    if (new Set(rows.map((el) => el.dataset.engine)).size < count) return;
+    move.pvAt = performance.now();
+    observer.disconnect();
+    clearTimeout(timer);
+  };
+  const observer = new MutationObserver(record);
+  observer.observe(summaries, { childList: true, attributes: true, attributeFilter: ['data-pv-fen'], subtree: true });
+  const timer = setTimeout(() => observer.disconnect(), 120000);
+  record();
+}
+
 // Select a legal move through the accessible board, then invoke the existing real user-move hook.
 // A queued task plus two animation frames measures main-thread queue/handler/render latency, not hardware latency.
 export async function userMove(evaluate, analysis, index = 0, preferredMove = '') {
@@ -93,6 +112,7 @@ export async function userMove(evaluate, analysis, index = 0, preferredMove = ''
         requestAnimationFrame(() => requestAnimationFrame(() => {
           window.__routeMove.ms = performance.now()-queuedAt; window.__routeMove.done = true;
         }));
+        ${analysis ? `(${observeMovePvs.toString()})(window.__routeMove);` : ''}
       }, 0);
       return {from,to};
     }
@@ -114,15 +134,10 @@ export function arenaGameFailed(log) {
 }
 
 function analysisMoveObservation(move, deadline) {
-  const at = performance.now();
-  if (at > deadline) return { expired: true };
-  const worker = window.__routePerf.analysisProgress.some((p) => p.fen === move.fen && p.at >= move.started && p.at <= at);
-  const rows = [...document.querySelectorAll('#engineSummaries [data-pv-fen]')].filter((el) => el.dataset.pvFen === move.fen && el.querySelector('.pv-move'));
-  const count = document.querySelectorAll('#engineList .engine-row').length;
-  if (!worker || !count || new Set(rows.map((el) => el.dataset.engine)).size < count) return null;
-  const state = window.__analysisSchedulingState();
-  if (state.fen !== move.fen) return null;
-  return { at, state };
+  const worker = window.__routePerf.analysisProgress.find((p) => p.fen === move.fen && p.at >= move.started && p.at <= deadline);
+  const { start, fen, pvAt } = window.__routeMove;
+  if (worker && start === move.started && fen === move.fen && pvAt >= start && pvAt <= deadline) return { workerAt: worker.at, pvAt };
+  return performance.now() > deadline ? { expired: true } : null;
 }
 
 export async function requireAnalysisForMove(evaluate, move, timeout = 120000) {

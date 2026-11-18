@@ -66,6 +66,20 @@ export function releaseAfterSession(resultFile, release) {
   return true;
 }
 
+export async function waitForCleanup(resultFile, retry, pause = () => delay(5000)) {
+  const marker = cleanupMarker(resultFile);
+  while (existsSync(marker)) {
+    await pause();
+    if (!retry || !existsSync(marker)) continue;
+    try {
+      await retry();
+      rmSync(marker, { force: true });
+    } catch (error) {
+      console.error(`Owned Safari teardown still unconfirmed: ${error.message}`);
+    }
+  }
+}
+
 export async function shutdownDelay(ms, signal) {
   await delay(ms, undefined, { signal }).catch((error) => {
     signal.throwIfAborted();
