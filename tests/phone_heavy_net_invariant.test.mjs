@@ -4,12 +4,15 @@ import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import * as pool from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
+import { createCriticalEngines } from '../src/lc0/criticalMomentsEngines.ts';
 import { isMemoryConstrainedDevice } from '../src/lc0/deviceMemoryClass.ts';
 import { disposeOrtWorker } from '../src/lc0/disposeOrtWorker.ts';
 import { isLc0BigNetVariant } from '../src/lc0/engineCatalog.ts';
 import * as retirement from '../src/lc0/engineRetirement.ts';
+import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
 import { untilAborted } from '../src/lc0/modelCache.ts';
 import { phoneBigNetBlocked, phoneLargeNetPreference } from '../src/lc0/phoneLargeNetPolicy.ts';
+import { EngineResourceBroker } from '../src/lc0/resourceBroker.ts';
 
 const { disposeAllBigNetSearchersNow } = pool;
 const { awaitEngineRetirements } = retirement;
@@ -71,7 +74,16 @@ function nativeModels(t, { phone = true } = {}) {
       transition(this, error ? 'init-error' : 'ready');
       if (this.initRequest) this.reply({ type: error ? 'error' : 'ready', id: this.initRequest.id, backend: 'webgpu', error });
       else if (error) this.evaluator.reject(error);
-      else this.evaluator.resolve({ modelLoad: {}, chooseMove: async () => {}, dispose: () => (this.disposal ??= disposeOrtWorker(this)) });
+      else {
+        const dispose = () => (this.disposal ??= disposeOrtWorker(this));
+        this.evaluator.resolve({
+          modelLoad: {},
+          chooseMove: async () => {},
+          evaluateConditions: async () => [{ legalPriors: [] }],
+          terminate: () => void dispose(),
+          dispose,
+        });
+      }
     }
     finishDispose(error) {
       assert.ok(this.disposeRequest, `${this.name} is retiring`);
@@ -195,6 +207,9 @@ function analysisOwner(native) {
     const mountAbort=new AbortController();
     let explorerMaia=null, activeAnalysisSelectionKey='';
     const analysisRunState={},owner={};
+    let analysisAbort=null, criticalDeferredMaia=false;
+    const tree={current:{fen:''}};
+    const criticalCallbacks={${slice(analysis, '    pauseAnalysis: (maiaOwner) => {', '    updateView: (moment, lines) => {')}};
     ${slice(analysis, 'async function bigNetFor(', '\n}', analysis.indexOf('async function bigNetFor('))}}
     ${slice(analysis, 'const ANALYSIS_BIG_NET_SESSION', '/** After initBigNetsForRun')}
     ${slice(analysis, 'const MAIA3_PANEL_RATINGS', 'function scheduleMaia3Panel()')}
@@ -208,11 +223,15 @@ function analysisOwner(native) {
         }
       }
     }
-    return {prepare,enableMaia3Panel,unloadMaia3Panel};`,
+    return {prepare,enableMaia3Panel,unloadMaia3Panel,...criticalCallbacks};`,
     {
       ANALYSIS_BIG_NET_KEYS: keys,
       analysisCanPrepare: () => true,
       maybeEl: node,
+      dispatchAnalysis: nop,
+      clearAnalysisSearchProgress: nop,
+      criticalAnalysisRefresh: { take: nop },
+      analysisSelectionCacheKey: nop,
       isStaleMount: (signal) => signal.aborted,
       Maia3BrowserEvaluator: { create: native.createMaia },
       showModelProgress: nop,
@@ -340,6 +359,38 @@ test('phone Analysis with BT4 and t3 rows admits only the first large net', asyn
   (await native.get('bt4')).finishInit();
   assert.match((await run).get('t3')?.message, /one large net/);
   assert.deepEqual(native.initializing(), ['bt4']);
+  native.assertPeak();
+});
+
+test('phone critical-moment Maia3 replaces BT4 and retires before the next net', async (t) => {
+  const native = nativeModels(t);
+  t.mock.method(Maia3BrowserEvaluator, 'create', native.createMaia);
+  const owner = analysisOwner(native);
+  const run = owner.prepare([row('bt4')]);
+  const bt4 = await native.get('bt4');
+  bt4.finishInit();
+  assert.equal((await run).size, 0);
+
+  const report = new AbortController();
+  const engines = createCriticalEngines(new EngineResourceBroker({ policy: 'exclusive', dial: 'balanced' }), 1500, report.signal);
+  owner.pauseAnalysis(report);
+  const comparing = engines.lanes.find((lane) => lane.id === 'maia').evaluate({ fen: '' }, report.signal, nop);
+  await owner.enableMaia3Panel(); // The interactive Maia3 owner cannot enter while the report owns the slot.
+  await tick();
+  assert.deepEqual(native.initializing(), ['bt4']);
+  bt4.finishDispose();
+  const maia = await native.get('maia3');
+  maia.finishInit();
+  await comparing;
+  engines.dispose();
+  owner.settled(report);
+
+  const replacement = owner.prepare([row('t3')]);
+  await tick();
+  assert.deepEqual(native.initializing(), ['bt4', 'maia3']);
+  maia.finishDispose();
+  (await native.get('t3')).finishInit();
+  assert.equal((await replacement).size, 0);
   native.assertPeak();
 });
 

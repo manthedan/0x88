@@ -5899,10 +5899,15 @@ function wireEvents() {
       selectEl('reviewDepth').value,
       resourceBroker.getDial(),
     ],
-    pauseAnalysis: () => {
+    pauseAnalysis: (maiaOwner) => {
       void dispatchAnalysis({ type: 'MODE_ENTER', mode: 'critical' });
       analysisAbort = null;
       clearAnalysisSearchProgress();
+      if (maiaOwner && isMemoryConstrainedDevice()) {
+        maia3PanelBlockedByRun = maiaOwner;
+        unloadMaia3Panel('Maia3 unloaded to make room for the comparison.');
+        for (const key of ANALYSIS_BIG_NET_KEYS) releaseBigNetSearcher(key, 0);
+      }
       // Go through the busy guard so interrupted debounces/inference are hidden
       // and replayed, even when the board does not move during the report.
       scheduleMaia3Panel();
@@ -5910,7 +5915,11 @@ function wireEvents() {
       el('stop').toggleAttribute('disabled', true);
       el('analyze').toggleAttribute('disabled', false);
     },
-    settled: () => {
+    settled: (reportOwner) => {
+      if (maia3PanelBlockedByRun === reportOwner) {
+        maia3PanelBlockedByRun = null;
+        maybeEl('maia3Enable')?.toggleAttribute('disabled', false);
+      }
       const pending = criticalAnalysisRefresh.take(analysisSelectionCacheKey(tree.current.fen));
       if (criticalDeferredMaia) scheduleMaia3Panel();
       void dispatchAnalysis({ type: 'MODE_EXIT', mode: 'critical', resume: !pending });

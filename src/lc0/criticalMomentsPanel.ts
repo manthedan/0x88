@@ -21,8 +21,8 @@ interface PanelOptions {
   broker: EngineResourceBroker;
   baseline(): { review: GameReview; fens: string[]; signature: string; source: string } | undefined;
   settings(): unknown;
-  pauseAnalysis(): void;
-  settled(): void;
+  pauseAnalysis(maiaOwner?: AbortController): void;
+  settled(owner: AbortController): void;
   updateView(moment: CriticalMoment, lines: AnalysisLine[]): void;
   navigate(moment: CriticalMoment, target: string, lines: AnalysisLine[]): void;
   /** True while another mode has taken the panel's hosts off-document (Retry mistakes). */
@@ -128,16 +128,13 @@ export function mountCriticalMomentsPanel(options: PanelOptions) {
       if (!moments.length) return;
       const current = new AbortController();
       controller = current;
-      const engines = createCriticalEngines(
-        options.broker,
-        inputEl('criticalMaia').checked ? Number(selectEl('criticalRating').value) : undefined,
-        current.signal,
-      );
+      const rating = inputEl('criticalMaia').checked ? Number(selectEl('criticalRating').value) : undefined;
+      const engines = createCriticalEngines(options.broker, rating, current.signal);
       viewedIndex = undefined;
       viewedLinesSignature = '';
       report = createCriticalReport(signature(), baseline.source, moments, engines.lanes);
       const currentReport = report;
-      options.pauseAnalysis();
+      options.pauseAnalysis(rating === undefined ? undefined : current);
       el('criticalConsent').hidden = true;
       render();
       try {
@@ -146,7 +143,7 @@ export function mountCriticalMomentsPanel(options: PanelOptions) {
         engines.dispose();
         if (controller === current) controller = undefined;
         render();
-        if (!disposed) options.settled();
+        if (!disposed) options.settled(current);
       }
     })();
   });

@@ -2992,7 +2992,7 @@ function reconcileArenaNeuralSessions(): void {
     if (canceledLoad) {
       hideDownloadProgress();
       refreshSeatControls();
-      el('start').toggleAttribute('disabled', startPending);
+      setArenaStartDisabled(startPending);
       if (!startPending) el('message').textContent = readyMessage();
     }
   }
@@ -5479,7 +5479,7 @@ async function init(mountSignal: AbortSignal) {
   }
   // startMatch / the fixed-suite autorun load Small only when actually needed.
   if (!checkpoint && !checkpointUnreadable) {
-    el('start').toggleAttribute('disabled', false);
+    setArenaStartDisabled(false);
     el('message').textContent = readyMessage();
     refreshSeatControls();
   }

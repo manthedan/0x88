@@ -57,6 +57,9 @@ test('canceling a setup Small load restores Start and progress even though its l
       },
       el: (id) => elements.get(id),
       readyMessage: () => 'Ready.',
+      setArenaStartDisabled: (disabled) => {
+        elements.get('start').disabled = disabled;
+      },
     },
   );
   assert.equal(state, false);

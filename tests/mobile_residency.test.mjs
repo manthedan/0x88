@@ -437,23 +437,33 @@ test('Arena lazy mount enables Start and bench autoruns observe ready controls w
       },
     ],
     ['message', {}],
+    ['arenaMemoryNote', {}],
   ]);
   let autoruns = 0;
   const autorun = () => {
     assert.equal(elements.get('start').disabled, false);
     autoruns++;
   };
-  compile(tail.slice(0, tail.lastIndexOf('\n}')), {
-    checkpoint: null,
-    checkpointUnreadable: false,
-    el: (id) => elements.get(id),
-    readyMessage: () => 'Ready.',
-    refreshSeatControls: () => {},
-    renderRuntimeBadge: () => {},
-    runFixedSuiteBenchAutorun: autorun,
-    runArenaBenchAutorun: autorun,
-  });
+  compile(
+    `${extract(text, 'let startDisabled = true;', 'function runtimeAuditIdentityForRow(')}\n${tail.slice(0, tail.lastIndexOf('\n}'))}\nrefreshArenaMemoryGuard();`,
+    {
+      checkpoint: null,
+      checkpointUnreadable: false,
+      el: (id) => elements.get(id),
+      arenaTournamentMode: () => 'match',
+      arenaBigNetPairingBlocked: () => false,
+      arenaBigNetSeatBlocked: () => false,
+      seatRows: [],
+      ARENA_BIG_NET_MEMORY_REASON: 'Blocked',
+      readyMessage: () => 'Ready.',
+      refreshSeatControls: () => {},
+      renderRuntimeBadge: () => {},
+      runFixedSuiteBenchAutorun: autorun,
+      runArenaBenchAutorun: autorun,
+    },
+  );
   assert.equal(autoruns, 2);
+  assert.equal(elements.get('start').disabled, false, 'availability refresh must not undo readiness');
   assert.equal(elements.get('message').textContent, 'Ready.');
 });
 

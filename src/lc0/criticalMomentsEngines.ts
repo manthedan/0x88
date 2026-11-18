@@ -5,10 +5,13 @@ import { ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../
 import { type Lc0SearchLike, lc0AnalysisLines, stockfishAnalysisLines } from './analysisFormat.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { type CriticalLane, type CriticalMoment, type CriticalProvenance, type CriticalResult } from './criticalMoments.ts';
+import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { cpuEngineHashMbForSurface } from './engineProvision.ts';
+import { awaitEngineRetirements, trackEngineRetirement } from './engineRetirement.ts';
 import { withEngineTimeout } from './engineTimeout.ts';
 import { LC0_SMALL_BATCH1_QDQ8_PATH } from './lc0SmallModelSelection.ts';
 import { MAIA3_DEFAULT_MODEL_URL, Maia3BrowserEvaluator } from './maia3.ts';
+import { untilAborted } from './modelCache.ts';
 import type { EngineResourceBroker } from './resourceBroker.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 
@@ -25,6 +28,7 @@ export function createCriticalEngines(
   let maia: Maia3BrowserEvaluator | undefined;
   let lc0Ready: Promise<{ backend: string; servedModelUrl?: string }> | undefined;
   let maiaReady: Promise<Maia3BrowserEvaluator> | undefined;
+  const constrained = isMemoryConstrainedDevice();
   let sequence = 0;
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; progress: (text: string) => void }>();
   const ids = ['critical-sf', 'critical-lc0', ...(rating === undefined ? [] : ['critical-maia'])];
@@ -42,6 +46,15 @@ export function createCriticalEngines(
     sf = undefined;
     stopWorker();
     maia?.terminate();
+    if (constrained && maiaReady) {
+      trackEngineRetirement(
+        maiaReady.then(
+          (evaluator) => evaluator.dispose(),
+          () => undefined,
+        ),
+      );
+      maiaReady = undefined;
+    }
     for (const id of ids) broker.unregister(id);
   };
   signal.addEventListener('abort', dispose, { once: true });
@@ -208,11 +221,17 @@ export function createCriticalEngines(
       evaluate: (moment, _signal, progress) =>
         protectedWork('critical-maia', async (operationSignal): Promise<CriticalResult> => {
           // Initialization is shared within this job, never between cancelled jobs.
-          maiaReady ??= Maia3BrowserEvaluator.create({
-            signal: operationSignal,
-            wasmThreads: 1,
-            onProgress: (loaded) => progress(`Downloading ${(loaded / 1e6).toFixed(1)} MB`),
-          }).then((evaluator) => (maia = evaluator));
+          maiaReady ??= (async () => {
+            if (constrained) await untilAborted(awaitEngineRetirements(), operationSignal);
+            operationSignal.throwIfAborted();
+            maia = await Maia3BrowserEvaluator.create({
+              signal: operationSignal,
+              wasmThreads: 1,
+              onInitCleanup: constrained ? trackEngineRetirement : undefined,
+              onProgress: (loaded) => progress(`Downloading ${(loaded / 1e6).toFixed(1)} MB`),
+            });
+            return maia;
+          })();
           const abort = () => maia?.terminate();
           operationSignal.addEventListener('abort', abort, { once: true });
           try {

@@ -47,7 +47,7 @@ const invalidateFunction = slice('function invalidateAnalysisSettings(', 'functi
 const backendFunction = slice('async function loadLc0Backend(', 'async function loadLc0BackendOwned(');
 const reloadFunction = slice('async function reloadLc0Backend(', 'async function init(');
 const hiddenFunctions = slice('function hiddenTabActive(', 'function installHiddenTabPause(');
-const criticalHandoff = slice('    pauseAnalysis: () => {', '    updateView: (moment, lines) => {');
+const criticalHandoff = slice('    pauseAnalysis: (maiaOwner) => {', '    updateView: (moment, lines) => {');
 const navigationFunction = slice(
   'let analysisGameTree = tree;',
   '// ---------------------------------------------------------------------------\n// Human moves',
