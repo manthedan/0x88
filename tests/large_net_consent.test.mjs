@@ -155,6 +155,25 @@ test('a phone already opted in to t3 still warns when only the split-K model is 
   assert.equal(await pending, false);
 });
 
+test('t3 consent keeps the split-K size when the original artifact probe fails', async (t) => {
+  const f = browser(t);
+  phoneLargeNetPreference.setEnabled(true);
+  const splitK = lc0SplitKUrl(BIG_NETS.t3.modelUrl);
+  const inspect = (config, signal) =>
+    inspectLargeNetDownload(config, signal, {
+      placement: async () => ({ providers: ['webgpu', 'wasm'], adapterVendor: 'apple' }),
+      inspect: async (url) => {
+        if (url !== splitK) throw new Error('release metadata disagrees with the model manifest');
+        return { url, cached: false, downloadBytes: 170_000_000 };
+      },
+    });
+  const pending = f.request(BIG_NETS.t3, { inspect });
+  const dialog = await f.dialog();
+  assert.match(dialog.children[1].textContent, /One model is about 170 MB; the other model’s size is unavailable/);
+  choose(dialog, false);
+  assert.equal(await pending, false);
+});
+
 for (const accept of [false, true]) {
   test(`uncached Queen Odds has a download-only dialog (accepted=${accept}) without granting opt-in`, async (t) => {
     const f = browser(t);

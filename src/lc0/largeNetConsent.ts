@@ -68,7 +68,7 @@ async function showLargeNetConsent(
     (mb === undefined
       ? 'Download size is unavailable; cached after the first time.'
       : state?.mayDownloadFallback
-        ? `Model downloads with fallback are estimated at ${mb} MB. Retries can use more data.`
+        ? `${state.downloadBytesIncomplete ? `One model is about ${mb} MB; the other model’s size is unavailable.` : `Model downloads with fallback are estimated at ${mb} MB.`} Retries can use more data.`
         : `${phoneRisk ? `${name} is` : "It's"} a ${mb} MB download, cached after the first time.`);
   const dialog = document.createElement('dialog');
   dialog.className = 'large-net-consent';
