@@ -47,19 +47,6 @@ type TvmjsApi = {
   createPolyfillWASI(): unknown;
 };
 
-type GpuAdapter = {
-  features: { has(feature: string): boolean };
-  limits: Record<string, number>;
-  info?: { subgroupMinSize?: number; subgroupMaxSize?: number };
-  requestDevice(descriptor?: unknown): Promise<GpuDevice>;
-};
-
-type GpuDevice = {
-  lost?: Promise<{ message?: string }>;
-  addEventListener?(type: string, listener: (event: { error?: { message?: string } }) => void): void;
-  destroy(): void;
-};
-
 type TvmjsManifest = {
   schema: string;
   modelFamily: string;
@@ -209,7 +196,7 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
   private failureReason: string | undefined;
   private destroyed = false;
   private readonly runtime: TvmRuntime;
-  private readonly device: GpuDevice;
+  private readonly device: GPUDevice;
   private readonly vmModule: { getFunction(name: string): TvmPackedFunction };
   private readonly meta: SquareFormerMeta;
   readonly physicalBatchSize: number;
@@ -217,7 +204,7 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
 
   private constructor(
     runtime: TvmRuntime,
-    device: GpuDevice,
+    device: GPUDevice,
     vmModule: { getFunction(name: string): TvmPackedFunction },
     meta: SquareFormerMeta,
     physicalBatchSize: number,
@@ -251,7 +238,7 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
     const bundleFile = manifest.files?.find((entry) => entry.path === bundlePath);
     if (!bundleFile?.sha256) throw new Error(`TVMJS manifest missing bundle integrity metadata: ${bundlePath}`);
     const bundleUrl = new URL(bundlePath, baseUrl);
-    const gpu = (navigator as Omit<Navigator, 'gpu'> & { gpu?: { requestAdapter(options?: unknown): Promise<GpuAdapter | null> } }).gpu;
+    const gpu = navigator.gpu;
     if (!gpu) throw new Error('WebGPU is unavailable');
     const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
     if (!adapter) throw new Error('WebGPU adapter unavailable');
@@ -267,7 +254,8 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
       return SquareformerTvmjsWebgpuEvaluator.create(fallbackUrl.toString(), meta);
     }
     const api = await loadTvmjsBundle(bundleUrl, { sha256: bundleFile.sha256 });
-    const requiredFeatures = (manifest.requiredFeatures ?? []).filter((feature) => feature !== 'webgpu');
+    // Manifest strings, checked against the adapter below before they reach requestDevice.
+    const requiredFeatures = (manifest.requiredFeatures ?? []).filter((feature) => feature !== 'webgpu') as GPUFeatureName[];
     for (const feature of requiredFeatures) {
       if (!adapter.features.has(feature)) throw new Error(`WebGPU adapter missing required feature: ${feature}`);
     }
@@ -278,7 +266,7 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
       'maxBufferSize',
       'maxComputeWorkgroupStorageSize',
       'maxComputeInvocationsPerWorkgroup',
-    ]) {
+    ] as const) {
       const value = adapter.limits[key];
       if (value !== undefined) requiredLimits[key] = value;
     }

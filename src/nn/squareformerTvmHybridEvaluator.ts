@@ -33,14 +33,6 @@ export type SquareformerTvmHybridRawOutput = {
   timings: { uploadMs: number; gpuSubmitMs: number; readbackMs: number; totalMs: number };
 };
 
-type GPUBuffer = { destroy(): void };
-type GPUDevice = {
-  queue: { submit(commandBuffers: unknown[]): void };
-  createCommandEncoder(descriptor?: unknown): { finish(): unknown };
-  lost?: Promise<{ message?: string }>;
-  destroy(): void;
-};
-
 type KernelSummaryRow = { label: string; epilogue?: string; file: string };
 type FixtureRootSummary = { layers: Array<{ path: string; summary: string; shape?: { rows?: number; dModel?: number; dFf?: number } }> };
 type HybridRuntimeManifest = {
@@ -308,7 +300,7 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
           n1LayerNormBias: await loadF32(`${base}/${summary.arrays.n1LayerNormBias.file}`, verifier),
         };
         const block = await SquareformerTvmFullLayerWebgpuBlock.create(
-          device as never,
+          device,
           kernels,
           weights,
           { ...summary.shape, heads: 8 },
@@ -352,10 +344,10 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
       qBias: await loadF32(`${last.base}/${last.summary.arrays.qBias.file}`, verifier),
     };
     const [stem, policy, value, legal] = await Promise.all([
-      SquareformerTvmInputStemWebgpuBlock.create(device as never, stemWeights),
-      SquareformerTvmPolicyHeadWebgpuBlock.create(device as never, kernels, policyWeights, { ...last.summary.shape, pairDim: 128, promoDim: 256 }),
-      SquareformerTvmValueHeadWebgpuBlock.create(device as never, valueWeights, last.summary.shape),
-      SquareformerTvmLegalPolicyGatherWebgpuBlock.createDynamic(device as never, Math.max(1, Number(meta.max_legal_moves ?? 256)), meta.policy_size),
+      SquareformerTvmInputStemWebgpuBlock.create(device, stemWeights),
+      SquareformerTvmPolicyHeadWebgpuBlock.create(device, kernels, policyWeights, { ...last.summary.shape, pairDim: 128, promoDim: 256 }),
+      SquareformerTvmValueHeadWebgpuBlock.create(device, valueWeights, last.summary.shape),
+      SquareformerTvmLegalPolicyGatherWebgpuBlock.createDynamic(device, Math.max(1, Number(meta.max_legal_moves ?? 256)), meta.policy_size),
     ]);
     return new SquareformerTvmHybridEvaluator(
       device,
@@ -371,7 +363,7 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
   private async ensureLegalCapacity(legalCount: number): Promise<void> {
     if (legalCount <= this.legal.maxLegalCount) return;
     this.legal.destroy();
-    this.legal = await SquareformerTvmLegalPolicyGatherWebgpuBlock.createDynamic(this.device as never, legalCount, this.meta.policy_size);
+    this.legal = await SquareformerTvmLegalPolicyGatherWebgpuBlock.createDynamic(this.device, legalCount, this.meta.policy_size);
   }
 
   private runExclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -389,13 +381,13 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
       this.legal.uploadIndices(effectiveLegal);
       const tUpload = nowMs();
       const commandEncoder = this.device.createCommandEncoder({ label: 'squareformer-tvm-hybrid-evaluate' });
-      let inputBuffer = this.stem.encode(commandEncoder as never) as GPUBuffer;
-      for (const layer of this.layers) inputBuffer = layer.encode(commandEncoder as never, inputBuffer as never) as GPUBuffer;
-      const policyBuffer = this.policy.encode(commandEncoder as never, inputBuffer as never) as GPUBuffer;
-      this.legal.encode(commandEncoder as never, policyBuffer as never);
-      this.value.encode(commandEncoder as never, inputBuffer as never);
-      this.legal.copyOutputToReadback(commandEncoder as never);
-      this.value.copyOutputToReadback(commandEncoder as never);
+      let inputBuffer = this.stem.encode(commandEncoder);
+      for (const layer of this.layers) inputBuffer = layer.encode(commandEncoder, inputBuffer);
+      const policyBuffer = this.policy.encode(commandEncoder, inputBuffer);
+      this.legal.encode(commandEncoder, policyBuffer);
+      this.value.encode(commandEncoder, inputBuffer);
+      this.legal.copyOutputToReadback(commandEncoder);
+      this.value.copyOutputToReadback(commandEncoder);
       this.device.queue.submit([commandEncoder.finish()]);
       const tSubmit = nowMs();
       const [legalPolicy, valueOut] = await Promise.all([this.legal.readOutput(), this.value.readOutput()]);

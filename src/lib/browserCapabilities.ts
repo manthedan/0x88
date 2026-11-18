@@ -19,7 +19,7 @@ export interface BrowserCapabilityReport {
 const ADAPTER_TIMEOUT_MS = 4000;
 
 async function probeWebGpu(): Promise<boolean | null> {
-  const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
+  const gpu = navigator.gpu;
   if (!gpu) return false;
   try {
     const adapter = await Promise.race([gpu.requestAdapter(), new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), ADAPTER_TIMEOUT_MS))]);
