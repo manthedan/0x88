@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
 import { createCriticalReport, criticalMomentCacheKey, runCriticalReport } from '../src/lc0/criticalMoments.ts';
@@ -397,6 +398,71 @@ test('an explicit ?model= override, even naming the default file, loads exactly 
   const ui = { current: () => () => false, mounted: () => true, note() {}, clearNote() {}, progress() {}, hideProgress() {} };
   await engines.ensureLc0Small(lc0SmallModelRequest(ORIGINAL, ORIGINAL), ui);
   assert.deepEqual(loads, [[ORIGINAL, false]]);
+});
+
+test("Play's readiness and move paths forward its small-net request to the engine host intact", async () => {
+  const play = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
+  const slice = (start, end) => {
+    const from = play.indexOf(start);
+    const to = play.indexOf(end, from);
+    assert.ok(from >= 0 && to > from, start);
+    return stripTypeScriptTypes(play.slice(from, to));
+  };
+  // Play's own request declaration plus its production readiness and move paths.
+  const code = `${slice('const DEFAULT_MODEL_URL =', 'interface PlayEngineOption')}
+    ${slice('async function ctxRequestEngineMove(', 'async function ctxVerifySelectedEngineReady(')}
+    ${slice('async function ctxVerifySelectedEngineReady(', '// ---')}
+    return { move: ctxRequestEngineMove, ready: ctxVerifySelectedEngineReady };`;
+  const small = { id: 'lc0-small', label: 'Lc0', family: 'lc0', variant: 'small' };
+  const engineUi = { current: () => () => false, mounted: () => true, note() {}, clearNote() {}, progress() {}, hideProgress() {} };
+  for (const [query, expected] of [
+    ['', [ORIGINAL, true]],
+    [`model=${ORIGINAL}`, [ORIGINAL, false]],
+    ['model=/models/custom.onnx', ['/models/custom.onnx', false]],
+  ]) {
+    for (const path of ['ready', 'move']) {
+      const loads = [];
+      const failures = [];
+      const engines = createPlayEngines({
+        loadCentipawn: () => assert.fail('unused'),
+        loadLc0Small: async (url, options) => {
+          loads.push([url, options.deviceSelection]);
+          throw new Error('loader stops here');
+        },
+      });
+      const deps = {
+        engines,
+        params: new URLSearchParams(query),
+        resolvePublicAssetUrl: (url) => url,
+        isV0DeployProfile: () => false,
+        phoneBlockedBigNetModelUrl: () => null,
+        lc0SmallModelRequest,
+        ctxSelectedEngine: () => small,
+        ctxStrengthFor: () => 1,
+        buttonEl: () => ({}),
+        ctxSetEngineNote() {},
+        ctxRender() {},
+        ctxHideDownloadProgress() {},
+        ctxSetEngineFailure: (_ctx, error) => failures.push(error.message),
+      };
+      const api = new Function('deps', `const { ${Object.keys(deps)} } = deps; ${code}`)(deps);
+      const ctx = {
+        abort: new AbortController(),
+        board: { turn: 'w' },
+        humanColor: 'w',
+        moves: [],
+        positions: [],
+        enginePreparationGeneration: 0,
+        opponent: { active: { level: 0 } },
+        engineUi,
+      };
+      if (path === 'ready') {
+        await api.ready(ctx);
+        assert.deepEqual(failures, ['loader stops here'], query);
+      } else await assert.rejects(api.move(ctx, ctx.abort.signal), /loader stops here/);
+      assert.deepEqual(loads, [expected], `${path} ${query}`);
+    }
+  }
 });
 
 test('critical-moment results are keyed by the model the Lc0 lane actually ran', async () => {

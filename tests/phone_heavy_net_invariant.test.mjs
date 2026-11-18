@@ -23,6 +23,7 @@ const nop = () => {};
 const node = () => ({ toggleAttribute() {} });
 const analysis = source('analysisBrowser');
 const arena = source('arenaBrowser');
+const play = source('playBrowser');
 const keys = ['bt4', 't3'];
 
 function source(name) {
@@ -175,48 +176,54 @@ function nativeModels(t, { phone = true, gap = 0, retireCpu = true } = {}) {
   };
 }
 
-// Play's readiness path over the real engine host: retire every other engine,
-// then load and probe the selected one. Unmount retires like the Play route.
+// Play's production readiness, cancel, "Analyze this game" and teardown paths,
+// linked to a real engine host. Only native model I/O and page rendering are replaced.
 function playOwner(native) {
-  const retireAllCpu = isMemoryConstrainedDevice() && phoneReclaimSettings().retireCpu; // decided at mount
+  const pgn = '1. e4 *';
+  const links = [],
+    handoffs = [];
   const engines = createPlayEngines({ loadCentipawn: () => assert.fail('unused'), createMaia3: native.createMaia });
-  const ui = { current: () => () => false, mounted: () => true, note: nop, clearNote: nop, progress: nop, hideProgress: nop };
-  let option = row('maia3'),
-    turn = new AbortController(),
-    ready = false;
-  async function prepare() {
-    const selected = option,
-      signal = turn.signal;
-    ready = false;
-    try {
-      await engines.retireUnusedEngines(selected);
-      if (signal.aborted) return;
-      if (selected.family === 'maia3') {
-        const player = await engines.ensureMaia3(1500, ui);
-        await player.chooseMove({ positions: [] }, { selfElo: 1500, oppoElo: 1500, style: 'argmax' });
-      } else {
-        const searcher = await engines.acquireBigNet(selected.variant, signal, ui);
-        await searcher.search({ positions: [] }, { visits: 1, signal, reuseTree: false, batchSize: 1, batchPipelineDepth: 1, evalCacheEntries: 2048 });
-        if (signal.aborted) return;
-        await searcher.resetTree();
-      }
-      ready = !signal.aborted;
-    } catch (error) {
-      if (!signal.aborted) throw error;
-    }
-  }
-  return {
-    prepare,
-    ready: () => ready,
-    select(next) {
-      turn.abort();
-      turn = new AbortController();
-      option = next;
-      return prepare();
+  const owner = link(
+    `
+    ${slice(play, '  const retireCpuOnUnmount =', '  const releaseDom =', play.indexOf('export function mountPlayBrowser('))}
+    const ctx={abort:new AbortController(),consentAbort:new AbortController(),enginePreparationGeneration:0,
+      board:{turn:'w'},humanColor:'w',positions:[],moves:[],listeners:[],opponent:{active:{maiaElo:1500}},engineUi};
+    let option=maia;
+    const ctxSelectedEngine=()=>option;
+    const hook=()=>{},releaseDom=()=>{};
+    ${slice(play, 'async function ctxVerifySelectedEngineReady(', 'function ctxPriorFens(')}
+    ${slice(play, "  for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-analyze]'))", "  trackListener(ctx, el('downloadPgn')", play.indexOf('function ctxInit('))}
+    function teardown(){${slice(play, '  return () => {\n    try {\n      ctx.autosave?.flush();', '\n  };', play.indexOf('export function mountPlayBrowser('))}\n    };}
+    return {prepare:()=>ctxVerifySelectedEngineReady(ctx),ready:()=>ctx.engineReady,
+      select:(next)=>{ctxCancelEngineTurn(ctx);option=next;return ctxVerifySelectedEngineReady(ctx);},
+      finishMove:()=>ctx.moves.push('e2e4'),unmount:teardown()};`,
+    {
+      engines,
+      engineUi: { current: () => () => false, mounted: () => true, note: nop, clearNote: nop, progress: nop, hideProgress: nop },
+      maia: row('maia3'),
+      buttonEl: node,
+      ctxSetEngineNote: nop,
+      ctxRender: nop,
+      ctxHideDownloadProgress: nop,
+      ctxDisarmNewGame: nop,
+      ctxSetEngineFailure: (_ctx, error) => assert.fail(error),
+      lqoSearchOptions: () => ({}),
+      playRuntimeFallbackAudits: new Map(),
+      PLAY_DRAW_SCORE: 0,
+      PLAY_SEARCH_CONTEMPT_LIMIT: 0,
+      document: { querySelectorAll: () => [{}] },
+      trackListener: (_ctx, _target, _type, listener) => links.push(listener),
+      ctxExportPgn: () => pgn,
+      writeAnalysisHandoff: (value) => handoffs.push(value),
     },
-    unmount() {
-      turn.abort();
-      engines.unmounted(retireAllCpu);
+  );
+  return {
+    ...owner,
+    analyzeThisGame() {
+      owner.finishMove();
+      links[0]({ preventDefault: nop });
+      owner.unmount();
+      return handoffs.pop();
     },
   };
 }
@@ -326,7 +333,7 @@ for (const crossRoute of [false, true]) {
     const maia = await native.get('maia3');
     let replacement;
     if (crossRoute) {
-      play.unmount(); // Analyze this game
+      assert.equal(play.analyzeThisGame(), '1. e4 *');
       replacement = analysisOwner(native).prepare([row('bt4')]);
     } else replacement = play.select(row('bt4'));
     assert.equal(maia.signal.aborted, true);
@@ -469,7 +476,7 @@ for (const [name, phone, gap, elapsed, remaining] of [
     await loading;
     // SvelteKit may already expose the destination URL when Play unmounts.
     globalThis.location = new URL(`https://test.invalid/analysis?memoryClass=${phone ? 'phone' : 'desktop'}`);
-    play.unmount(); // Analyze this game
+    assert.equal(play.analyzeThisGame(), '1. e4 *');
     await tick();
     maia.finishDispose();
     await awaitEngineRetirements();

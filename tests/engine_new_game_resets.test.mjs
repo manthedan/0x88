@@ -64,25 +64,56 @@ test('Arena resets every participating CPU engine per game, Stockfish and Reckle
 });
 
 test('Play marks resident engines at every game start and resets each before its next move', async () => {
-  const resets = [];
+  const log = [];
   const engines = createPlayEngines({
     loadCentipawn: () => assert.fail('unused'),
-    createCpuEngine: (option) => ({ setOptions() {}, bestMove: async () => null, newGame: async () => resets.push(option.id) }),
+    createCpuEngine: (option) => ({
+      setOptions() {},
+      bestMove: async () => log.push(`${option.id}:move`) && null,
+      newGame: async () => log.push(`${option.id}:reset`),
+    }),
   });
-  const ui = { current: () => () => false, mounted: () => true, note() {}, clearNote() {}, progress() {}, hideProgress() {} };
+  const engineUi = { current: () => () => false, mounted: () => true, note() {}, clearNote() {}, progress() {}, hideProgress() {} };
   const sf = { id: 'sf-lite', label: 'Stockfish', family: 'sf', variant: 'lite' };
   const berserk = { id: 'berserk', label: 'Berserk', family: 'berserk', variant: 'berserk' };
-  const signal = new AbortController().signal;
-  await engines.cpuEngineForMove(sf, signal, ui);
-  await engines.cpuEngineForMove(berserk, signal, ui);
-  assert.deepEqual(resets, [], 'a fresh engine is not reset');
-  engines.markCpuNewGame();
-  await engines.cpuEngineFor(sf, ui);
-  assert.deepEqual(resets, [], 'the readiness probe leaves the reset to the first move');
-  await engines.cpuEngineForMove(sf, signal, ui);
-  await engines.cpuEngineForMove(sf, signal, ui);
-  await engines.cpuEngineForMove(berserk, signal, ui);
-  assert.deepEqual(resets, ['sf-lite', 'berserk'], 'each resident engine resets once, before its next move');
+  // Play's production game-start and engine-move paths, linked to the real engine host.
+  let option = sf;
+  const play = new Function(
+    'deps',
+    `const { ${['engines', 'ctxSelectedEngine', 'ctxStrengthFor', 'SF_LEVELS', 'uciGameHistory', 'replayPlayPosition', 'startFenFor', 'parseFen']} } = deps;
+    ${extracted('../src/lc0/playBrowser.ts', 'async function ctxRequestEngineMove(', 'async function ctxVerifySelectedEngineReady(')}
+    ${extracted('../src/lc0/playBrowser.ts', 'function ctxResetStartPosition(', '/** Restored preferences')}
+    return { move: ctxRequestEngineMove, resetStart: ctxResetStartPosition };`,
+  )({
+    engines,
+    ctxSelectedEngine: () => option,
+    ctxStrengthFor: () => 1,
+    SF_LEVELS: [{ skill: 0 }],
+    uciGameHistory: () => ({ fen: 'fen', moves: [] }),
+    replayPlayPosition: () => ({}),
+    startFenFor: () => 'fen',
+    parseFen: (fen) => ({ fen }),
+  });
+  const ctx = { opponent: { active: { level: 0 } }, positions: [], practicePosition: null, humanColor: 'w', engineUi };
+  const move = (next) => {
+    option = next;
+    return play.move(ctx, new AbortController().signal);
+  };
+  await move(sf);
+  await move(berserk);
+  assert.deepEqual(log, ['sf-lite:move', 'berserk:move'], 'a fresh engine is not reset');
+  log.length = 0;
+  play.resetStart(ctx);
+  await engines.cpuEngineFor(sf, engineUi);
+  assert.deepEqual(log, [], 'the readiness probe leaves the reset to the first move');
+  await move(sf);
+  await move(sf);
+  await move(berserk);
+  assert.deepEqual(
+    log,
+    ['sf-lite:reset', 'sf-lite:move', 'sf-lite:move', 'berserk:reset', 'berserk:move'],
+    'each resident engine resets once, before its next move',
+  );
 });
 
 test('PendingCpuNewGames sends newGame once and retries a reset that did not finish', async () => {

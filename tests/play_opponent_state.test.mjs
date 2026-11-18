@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
 import { committedPlayOpponent, transitionPlayOpponent } from '../src/lc0/playOpponentState.ts';
@@ -69,12 +71,10 @@ test('Stormphrax residency is retired at commit, never while restart consent is 
   const ui = { current: () => () => false, mounted: () => true, note() {}, clearNote() {}, progress() {}, hideProgress() {} };
   const stormphrax = { id: 'stormphrax', label: 'Stormphrax', family: 'stormphrax', variant: 'default' };
   const settled = () => new Promise(setImmediate);
-  // Play reports every opponent state change; only a commit changes `active`.
-  const setOpponent = (ctx, next) => {
-    const previous = ctx.opponent.active.engineId;
-    ctx.opponent = next;
-    engines.opponentCommitted(previous, next.active.engineId);
-  };
+  // Play's production setter, linked to the real engine host.
+  const source = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
+  const setter = source.slice(source.indexOf('function ctxSetOpponent('), source.indexOf('function ctxRestoreOpponentControls('));
+  const setOpponent = new Function('engines', `${stripTypeScriptTypes(setter)}; return ctxSetOpponent;`)(engines);
   await engines.cpuEngineFor(stormphrax, ui);
   const ctx = { opponent: committedPlayOpponent({ ...preferences, engineId: 'stormphrax' }) };
   setOpponent(ctx, edit(ctx.opponent, { engineId: 'maia3' }));
