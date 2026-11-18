@@ -47,18 +47,7 @@ type TvmjsApi = {
   createPolyfillWASI(): unknown;
 };
 
-type TvmjsManifest = {
-  schema: string;
-  modelFamily: string;
-  dtype: string;
-  target: string;
-  requiredFeatures?: string[];
-  version?: string;
-  subgroupSize?: number;
-  runtime?: { tvmjsBundle?: string; tvmjsRuntimeWasm?: string };
-  models?: Array<{ batch: number; wasm: string; bytes?: number; sha256?: string }>;
-  files?: Array<{ path: string; bytes?: number; sha256?: string }>;
-};
+type TvmjsManifest = v.InferOutput<typeof TvmjsManifestSchema>;
 
 type PreparedRow = {
   board: BoardState;

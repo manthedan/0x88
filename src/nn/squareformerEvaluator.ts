@@ -1,3 +1,4 @@
+import type * as v from 'valibot';
 import { type BoardState, boardToFen, type Color, opposite, type PieceRole, parseFen } from '../chess/board.ts';
 import { isStmWhiteRankflip, normalizedMoveToOriginal, normalizePositionForStmWhite, rankFlipSquare } from '../chess/boardNormalization.ts';
 import { repetitionKey, repetitionKeyFromFen, rootRepetitionKeyFromFen } from '../chess/drawRules.ts';
@@ -8,6 +9,7 @@ import { ExclusiveQueue } from '../lc0/exclusiveQueue.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
 import * as ort from './ortRuntime.ts';
+import type { SquareFormerMetaSchema } from './squareFormerMetaSchema.ts';
 
 // Every browser surface wraps this evaluator in a CachedEvaluator whose key
 // (FEN + history + legal moves + attack mask) is a superset of this one, so this
@@ -49,28 +51,7 @@ function encodedInputKey(board: BoardState, historyFens: string[], compact: bool
   return `${compact ? 'c' : 'f'}:${boardToFen(board)}\nh:${historyFens.join('|')}`;
 }
 
-export interface SquareFormerMeta {
-  kind: 'squareformer' | 'squareformer_v2';
-  variant?: string;
-  input_dim: number;
-  token_features?: number;
-  input_mode?: 'onehot' | 'embedding' | string;
-  input_format?: 'float_onehot_rules' | 'compact_uint8_embeddings' | 'compact_uint8_tokens' | string;
-  policy_size: number;
-  history_plies: number;
-  relation_bias?: boolean;
-  av_head_exported?: boolean;
-  action_value_move_encoding?: 'chessbench_compact_20480' | string;
-  max_legal_moves?: number;
-  onnx_fixed_legal_moves?: number;
-  outputs?: string[];
-  onnx_dynamic_batch?: boolean;
-  board_normalization?: string;
-  input_index_dtype?: CompactIndexDtype | string;
-  attack_summary_feature_count?: number;
-  attack_summary_schema?: 'threatgraph_square_summary_v1' | 'threatgraph_square_summary_v2' | string | null;
-  attack_summary_scale?: number;
-}
+export type SquareFormerMeta = v.InferOutput<typeof SquareFormerMetaSchema>;
 
 function pieceId(piece: string | null): number {
   if (!piece) return 0;

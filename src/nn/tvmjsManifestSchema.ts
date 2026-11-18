@@ -4,7 +4,7 @@
  * public/runtimes/centipawn-tvmjs-webgpu/ by
  * scripts/stage_lc0_tvmjs_webgpu_artifacts.mjs). Loose objects throughout:
  * the manifest carries provenance fields the evaluator does not consume.
- * Mirrors the TvmjsManifest type kept in the evaluator module.
+ * The evaluator's TvmjsManifest type is inferred from it.
  */
 
 import * as v from 'valibot';

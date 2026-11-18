@@ -30,20 +30,7 @@ const EVAL_TIMING_KEYS = [
   'outputDecodeMs',
 ] as const;
 
-interface RuntimeManifestModel {
-  batch: number;
-  wasm: string;
-  bytes?: number;
-  sha256?: string;
-}
-
-interface RuntimeManifest {
-  runtime?: Record<string, string | undefined>;
-  parameterStrategy?: { current?: string };
-  tensorCache?: { directory?: string; manifest?: string };
-  models: RuntimeManifestModel[];
-  files?: Array<{ path: string; sha256?: string }>;
-}
+type RuntimeManifest = v.InferOutput<typeof WholeOnnxRuntimeManifestSchema>;
 
 interface WholeModelTensor {
   shape: number[];
