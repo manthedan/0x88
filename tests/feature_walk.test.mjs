@@ -9,20 +9,25 @@ import {
   chooseAction,
   chooseTargetIndex,
   chooseValue,
+  createCheckLog,
   createRng,
   eligibilityExpression,
   evaluateInvariants,
+  landedOnDeclaredRoute,
   locateRoute,
   parseSeed,
+  pollUntil,
   replayCommand,
   routeActions,
   routeInvariants,
   routeOwnedIds,
+  shellQuote,
   snapshotExpression,
   usableNodes,
-  walkStoragePreset,
+  walkStoragePresets,
 } from '../scripts/lib/feature_walk_core.mjs';
-import { FEATURES, ROUTES } from '../src/features/registry.ts';
+import { FEATURES, ROUTES, routeForPath } from '../src/features/registry.ts';
+import { ARENA_SEAT_STORAGE_KEY, engineResourceProfile } from '../src/lc0/engineCatalog.ts';
 import { loadPlayPreferences, PLAY_PREFERENCES_STORAGE_KEY } from '../src/lc0/playPreferences.ts';
 
 const draws = (rng, n) => Array.from({ length: n }, () => rng());
@@ -448,10 +453,99 @@ test('Arena quick match pins the single start position before Start', () => {
   assert.ok(order.indexOf('#startingPositionSelect') < order.indexOf('#start'));
 });
 
-test('walk storage preset makes the default Maia3 opponent play its deterministic top move', () => {
-  const preset = walkStoragePreset();
-  assert.equal(preset.key, PLAY_PREFERENCES_STORAGE_KEY);
-  const loaded = loadPlayPreferences({ getItem: (key) => (key === preset.key ? preset.value : null) }, new Set(['maia3']));
+test('walk storage presets: Maia3 plays its deterministic top move; Arena seats only CPU engines', () => {
+  const presets = new Map(walkStoragePresets().map(({ key, value }) => [key, value]));
+  assert.ok(presets.has(PLAY_PREFERENCES_STORAGE_KEY));
+  const loaded = loadPlayPreferences({ getItem: (key) => presets.get(key) ?? null }, new Set(['maia3']));
   assert.equal(loaded.engineId, 'maia3');
   assert.equal(loaded.maiaStyle, 'argmax');
+  const seats = JSON.parse(presets.get(ARENA_SEAT_STORAGE_KEY));
+  // Arena restores a roster of two or more seats; quickMatch never touches the families.
+  assert.ok(seats.length >= 2);
+  for (const seat of seats) assert.equal(engineResourceProfile(seat.family).resourceClass, 'cpu', seat.family);
+  const pickSeat = routeActions('arena').find(({ action }) => action.name === 'pickSeat').action;
+  for (const family of pickSeat.steps[0].values) assert.equal(engineResourceProfile(family).resourceClass, 'cpu', family);
+});
+
+test('navigation is judged against the registry-declared route, not the rendered link', () => {
+  const base = 'http://127.0.0.1:5181';
+  const toAnalysis = { navigatesTo: 'analysis' };
+  assert.equal(landedOnDeclaredRoute(toAnalysis, `${base}/app/analysis/?fen=x`, base), true);
+  // A regressed href="#" leaves the page where it was; that must not count as arriving.
+  assert.equal(landedOnDeclaredRoute(toAnalysis, `${base}/app/play/#`, base), false);
+  assert.equal(landedOnDeclaredRoute(toAnalysis, 'https://evil.example/app/analysis/', base), false);
+  assert.equal(landedOnDeclaredRoute({}, `${base}/app/play/#`, base), true);
+});
+
+test('every in-app link and navigating button action declares where it lands', () => {
+  for (const feature of FEATURES)
+    for (const action of feature.actions)
+      for (const step of action.steps) {
+        const href = step.target?.match(/\ba\b[^\s]*\[href="([^"]+)"\]/)?.[1];
+        if (href) assert.equal(action.navigatesTo, routeForPath(href), `${feature.id}/${action.name}`);
+      }
+  const declared = (route, name) => routeActions(route).find((candidate) => candidate.action.name === name).action.navigatesTo;
+  assert.equal(declared('play', 'analyzeGame'), 'analysis');
+  assert.equal(declared('analysis', 'playFromHere'), 'play');
+  for (const route of ['analysis', 'play', 'arena']) assert.equal(declared('home', `heroCta:${route}`), route);
+});
+
+test('Play analyzeGame is offered only as the same-tab link (mid-game it opens a new tab)', () => {
+  const { action } = routeActions('play').find((candidate) => candidate.action.name === 'analyzeGame');
+  assert.equal(action.when, '#analyzeGame:not([target])');
+  assert.equal(action.steps[0].target, action.when);
+});
+
+test('pollUntil resolves once the check passes, retries throws, and times out', async () => {
+  let calls = 0;
+  assert.equal(
+    await pollUntil(
+      () => {
+        calls++;
+        if (calls === 1) throw new Error('context destroyed');
+        return calls >= 3;
+      },
+      1000,
+      1,
+    ),
+    true,
+  );
+  assert.equal(calls, 3);
+  assert.equal(await pollUntil(() => false, 20, 5), false);
+  // The last sleep stops at the deadline and nothing is evaluated after it.
+  let late = 0;
+  const started = Date.now();
+  assert.equal(
+    await pollUntil(
+      () => {
+        late++;
+        return false;
+      },
+      30,
+      5_000,
+    ),
+    false,
+  );
+  assert.ok(Date.now() - started < 1_000);
+  assert.equal(late, 1);
+});
+
+test('check logs hand every entry to exactly one check, including ones logged between steps', () => {
+  const log = createCheckLog();
+  log.push('during start');
+  assert.deepEqual(log.take(), ['during start']);
+  log.push('after the check, before the next action');
+  log.push('during the action');
+  assert.deepEqual(log.take(), ['after the check, before the next action', 'during the action']);
+  assert.deepEqual(log.take(), []);
+});
+
+test('replay command shell-quotes values (zsh globs IPv6 brackets)', () => {
+  assert.equal(shellQuote('http://127.0.0.1:5181'), 'http://127.0.0.1:5181');
+  assert.equal(shellQuote('http://[::1]:5181'), "'http://[::1]:5181'");
+  assert.equal(shellQuote("it's"), "'it'\\''s'");
+  const args = parseArgs(['--base-url', 'http://[::1]:5181/app/']);
+  assert.match(replayCommand(args, 5), /^node scripts\/feature_walk\.mjs --base-url 'http:\/\/\[::1\]:5181' --seed 5 /);
+  const shell = spawnSync('sh', ['-c', `printf '%s' ${shellQuote("a'b $HOME [x]")}`], { encoding: 'utf8' });
+  assert.equal(shell.stdout, "a'b $HOME [x]");
 });

@@ -51,6 +51,8 @@ export type Action = {
   weight?: number;
   /** The action may legitimately reload the document (e.g. a query-carrying link). */
   allowsReload?: true;
+  /** Route the action must land on; the walk fails the action if the URL never gets there. */
+  navigatesTo?: RouteKey;
 };
 
 export type InvariantName = 'noPageErrors' | 'noConsoleErrors' | 'noHorizontalOverflow' | 'uniqueIds' | 'ownedIdsPresent' | 'noFullReload' | 'routeReady';
@@ -109,6 +111,7 @@ function navActions(route: RouteKey): Action[] {
       when: `.site-header nav.primary a[href="${href}"]`,
       whenExpr: away,
       steps: [{ do: 'click', target: `.site-header nav.primary a[href="${href}"]` }],
+      navigatesTo: route,
     },
     {
       // Toggle only a closed menu: a cancelled navigation can leave it open.
@@ -119,12 +122,14 @@ function navActions(route: RouteKey): Action[] {
         { do: 'click', target: '.site-header .menu-toggle' },
         { do: 'click', target: `.mobile-nav-menu a[href="${href}"]` },
       ],
+      navigatesTo: route,
     },
     {
       name: `go:${route}:menuOpen`,
       when: `.mobile-nav-menu a[href="${href}"]`,
       whenExpr: away,
       steps: [{ do: 'click', target: `.mobile-nav-menu a[href="${href}"]` }],
+      navigatesTo: route,
     },
   ];
 }
@@ -160,13 +165,16 @@ export const FEATURES = [
     id: 'home.landing',
     routes: ['home'],
     ids: ['main', 'hero-h1', 'device-details', 'engines-h'],
-    actions: [
-      {
-        name: 'heroCta',
-        when: '.hero a.btn[href^="/app/"]',
-        steps: [{ do: 'click', target: '.hero a.btn[href^="/app/"]', pick: true }],
-      },
-    ],
+    // One action per hero link so each declares where it must land (together as likely as one action).
+    actions: APP_ROUTES.map(
+      (route): Action => ({
+        name: `heroCta:${route}`,
+        when: `.hero a.btn[href="${ROUTES[route].path}"]`,
+        steps: [{ do: 'click', target: `.hero a.btn[href="${ROUTES[route].path}"]` }],
+        weight: 1 / APP_ROUTES.length,
+        navigatesTo: route,
+      }),
+    ),
     invariants: OWNED,
   },
   {
@@ -321,7 +329,15 @@ export const FEATURES = [
     ids: ['copyPgn', 'downloadPgn', 'analyzeGame', 'analyzeGameCta'],
     actions: [
       { name: 'copyPgn', when: '#copyPgn', steps: [{ do: 'click', target: '#copyPgn' }], weight: 0.5 },
-      { name: 'analyzeGame', when: '#analyzeGame', steps: [{ do: 'click', target: '#analyzeGame' }], weight: 0.5, allowsReload: true },
+      // Mid-game the link opens a new tab (target=_blank), which the walk cannot follow; only the same-tab variant.
+      {
+        name: 'analyzeGame',
+        when: '#analyzeGame:not([target])',
+        steps: [{ do: 'click', target: '#analyzeGame:not([target])' }],
+        weight: 0.5,
+        allowsReload: true,
+        navigatesTo: 'analysis',
+      },
     ],
     invariants: OWNED,
   },
@@ -404,7 +420,14 @@ export const FEATURES = [
         ],
       },
       { name: 'reset', when: '#reset', steps: [{ do: 'click', target: '#reset' }], weight: 0.5 },
-      { name: 'playFromHere', when: '#playFromHere', steps: [{ do: 'click', target: '#playFromHere' }], weight: 0.3, allowsReload: true },
+      {
+        name: 'playFromHere',
+        when: '#playFromHere',
+        steps: [{ do: 'click', target: '#playFromHere' }],
+        weight: 0.3,
+        allowsReload: true,
+        navigatesTo: 'play',
+      },
     ],
     invariants: OWNED,
   },

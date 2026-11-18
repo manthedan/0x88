@@ -115,6 +115,7 @@ import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { DisposableVariantPool } from './disposableVariantPool.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import {
+  ARENA_SEAT_STORAGE_KEY,
   canonicalEngineFamily,
   centipawnEngineLabel,
   centipawnVariantOptions,
@@ -587,7 +588,6 @@ const seatRows: EngineRow[] = [
   { family: 'lc0', variant: 'small', strength: 100 },
   { family: 'sf', variant: 'lite', strength: 8 },
 ];
-const ARENA_SEAT_STORAGE_KEY = '0x88-arena-seats-v1';
 let bt4AvailabilityResolved = false;
 
 function persistedVariantOrDefault(family: EngineFamily, value: unknown): string {
