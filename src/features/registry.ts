@@ -321,7 +321,14 @@ export const FEATURES = [
     ids: ['copyPgn', 'downloadPgn', 'analyzeGame', 'analyzeGameCta'],
     actions: [
       { name: 'copyPgn', when: '#copyPgn', steps: [{ do: 'click', target: '#copyPgn' }], weight: 0.5 },
-      { name: 'analyzeGame', when: '#analyzeGame', steps: [{ do: 'click', target: '#analyzeGame' }], weight: 0.5, allowsReload: true },
+      // Mid-game the link opens a new tab (target=_blank), which the walk cannot follow; only the same-tab variant.
+      {
+        name: 'analyzeGame',
+        when: '#analyzeGame:not([target])',
+        steps: [{ do: 'click', target: '#analyzeGame:not([target])' }],
+        weight: 0.5,
+        allowsReload: true,
+      },
     ],
     invariants: OWNED,
   },
