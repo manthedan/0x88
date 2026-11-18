@@ -18,7 +18,7 @@
 // symlinked directory that leads out of the worktree. Verification stats every model and every lc0web pack
 // (metadata + shards) in public/models/{lc0,maia3}/manifest.json: exists, byte size matches; no hashing.
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync, symlinkSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
 const realOrNull = (path) => {
@@ -57,11 +57,10 @@ function ensureLink(link, target, expected, root, log) {
   if (present) {
     const actual = realOrNull(link);
     if (actual === expected) return;
-    if (actual !== null) {
-      log.problems.push(`${link} resolves to ${actual}, expected ${expected}; left alone`);
-      return;
-    }
-    unlinkSync(link); // dangling link from an older layout
+    // A dangling link may point at an unmounted volume rather than a stale layout, so never replace it.
+    if (actual === null) log.problems.push(`${link} -> ${readlinkSync(link)} does not resolve (unmounted or moved?); left alone, remove it to relink`);
+    else log.problems.push(`${link} resolves to ${actual}, expected ${expected}; left alone`);
+    return;
   }
   mkdirSync(dirname(link), { recursive: true });
   symlinkSync(target, link);
