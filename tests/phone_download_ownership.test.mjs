@@ -369,6 +369,31 @@ test('Arena Start carries its consent to the load: a cache hit approves no downl
   assert.deepEqual(prompts, []);
 });
 
+test('a saved Arena run with no games shows its own opening, not the replaced run', () => {
+  const calls = [];
+  const opening = { name: 'new opening' };
+  const deps = {
+    showCheckpointResults() {},
+    arenaRemainingIndices: () => [0],
+    arenaMatchState: 'final',
+    el: () => ({}),
+    inputEl: () => ({}),
+    finishedTrails: [],
+    liveTrail: { label: 'old game' },
+    reviewing: true,
+    exitReview: () => calls.push('exitReview'),
+    resultsSchedule: [{ opening }],
+    setOpeningPreview: (shown) => calls.push(shown),
+  };
+  const present = new Function(
+    'deps',
+    `let { ${Object.keys(deps)} } = deps; ${extract(source.arena, 'function presentSavedCheckpoint(', 'function showCheckpointResults(')}; return presentSavedCheckpoint;`,
+  )(deps);
+  present({ completed: [] });
+  // setOpeningPreview resets the board, last move and side labels.
+  assert.deepEqual(calls, ['exitReview', opening]);
+});
+
 const restoreGuard = extract(source.play, 'async function ctxCheckRestoredDownloadConsent(', '/** Imported setup must not make');
 const readinessEntry = extract(source.play, 'async function ctxVerifySelectedEngineReady(', '  const generation =', 'await retirement;\nadmit();\n}');
 const moveEntry = extract(source.play, 'async function ctxEngineTurn(', '  ctxSetEngineThinking(ctx, true);', 'await admit();\n}');

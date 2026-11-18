@@ -4180,10 +4180,11 @@ function presentSavedCheckpoint(saved: ArenaCheckpoint): void {
     const scheduled = saved.schedule[last.scheduleIndex];
     setBoardSideEngines(null, resultsNames.get(scheduled.whiteId)!, null, resultsNames.get(scheduled.blackId)!);
     enterReview(trail, trail.entries.length - 1);
-  } else if (reviewing || liveTrail) {
-    // The replaced run's game must not stay on the board as this run's.
+  } else {
+    // Nothing played yet: show this run's first opening, not the replaced run's last game.
     liveTrail = null;
-    exitReview();
+    if (reviewing) exitReview();
+    setOpeningPreview(resultsSchedule[0].opening);
   }
 }
 
