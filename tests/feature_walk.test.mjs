@@ -530,6 +530,26 @@ test('pollUntil resolves once the check passes, retries throws, and times out', 
   assert.equal(late, 1);
 });
 
+test('pollUntil does not check again when the last timer fires before Date.now() reaches the deadline', async (t) => {
+  let now = 1_000;
+  t.mock.method(Date, 'now', () => now);
+  t.mock.method(globalThis, 'setTimeout', (resolve, ms) => {
+    now += ms - 1;
+    resolve();
+  });
+  let checks = 0;
+  const result = await pollUntil(
+    () => {
+      checks++;
+      return false;
+    },
+    30,
+    5_000,
+  );
+  assert.equal(result, false);
+  assert.equal(checks, 1);
+});
+
 test('check logs hand every entry to exactly one check, including ones logged between steps', () => {
   const log = createCheckLog();
   log.push('during start');
