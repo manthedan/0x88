@@ -1,4 +1,4 @@
-import { version } from '$app/environment';
+import { version } from '$app/env';
 
 /**
  * The worker's script URL carries the build version. A different script URL

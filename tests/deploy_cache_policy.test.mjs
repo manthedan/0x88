@@ -4,9 +4,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
+import svelteConfig from '../kit.config.js';
 import { checkHeadersFileUpToDate, generateHeadersFile, renderHeadersFile } from '../scripts/generate_netlify_headers_file.mjs';
 import { parseBuildTable, parseHeaderBlocks } from '../scripts/netlify_headers.mjs';
-import svelteConfig from '../svelte.config.js';
 
 const repoRoot = process.cwd();
 const checker = resolve(repoRoot, 'scripts/check_deploy_cache_policy.mjs');
@@ -103,7 +103,7 @@ test("the non-R2 build rejects connect-src 'none' with regenerated headers befor
   const dir = await fixture((toml) => toml.replace(/connect-src 'self'[^;]*/, "connect-src 'none'"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const { scripts } = JSON.parse(await readFile('package.json', 'utf8'));
-  await writeFile(join(dir, 'svelte.config.js'), `export default ${JSON.stringify(svelteConfig)};`);
+  await writeFile(join(dir, 'kit.config.js'), `export default ${JSON.stringify(svelteConfig)};`);
   await writeFile(
     join(dir, 'package.json'),
     JSON.stringify({
@@ -255,6 +255,22 @@ test('write-once release manifests keep their immutable policy', async () => {
   assert.equal(result.status, 1);
   assert.ok(
     failures(result).some((entry) => entry.includes('missing write-once release manifest Cache-Control')),
+    result.stderr,
+  );
+});
+
+test('Vite hashed bundles, which carry the global CSS, keep their immutable policy', async () => {
+  const dir = await fixture((toml) =>
+    replaceOnce(
+      toml,
+      '  for = "/_app/immutable/*"\n  [headers.values]\n    Cache-Control = "public, max-age=31536000, immutable"',
+      '  for = "/_app/immutable/*"\n  [headers.values]\n    Cache-Control = "public, max-age=14400"',
+    ),
+  );
+  const result = await runChecker(dir);
+  assert.equal(result.status, 1);
+  assert.ok(
+    failures(result).some((entry) => entry.includes('missing Vite hashed bundle (JS and global CSS) immutable Cache-Control')),
     result.stderr,
   );
 });

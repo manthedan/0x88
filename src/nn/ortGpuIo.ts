@@ -34,24 +34,6 @@ export type OrtGpuIoTensorSpec = {
 
 export type OrtGpuIoOutputs = Record<string, Uint16Array | Float32Array>;
 
-// Minimal WebGPU shapes (the repo has no @webgpu/types).
-type GPUBuffer = {
-  mapAsync(mode: number, offset?: number, size?: number): Promise<void>;
-  getMappedRange(offset?: number, size?: number): ArrayBuffer;
-  unmap(): void;
-  destroy(): void;
-};
-type GPUCommandEncoder = {
-  copyBufferToBuffer(source: GPUBuffer, sourceOffset: number, destination: GPUBuffer, destinationOffset: number, size: number): void;
-  finish(): unknown;
-};
-export type OrtGpuIoDevice = {
-  createBuffer(descriptor: { size: number; usage: number; label?: string }): GPUBuffer;
-  createCommandEncoder(): GPUCommandEncoder;
-  queue: { writeBuffer(buffer: GPUBuffer, offset: number, data: ArrayBufferLike, dataOffset?: number, size?: number): void; submit(buffers: unknown[]): void };
-};
-type GPUDevice = OrtGpuIoDevice;
-
 export type OrtGpuIoTensorCtor = {
   fromGpuBuffer(buffer: never, options: { dataType: OrtGpuIoTensorType; dims: readonly number[] }): ort.Tensor;
 };

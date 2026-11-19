@@ -1,6 +1,6 @@
 <script lang="ts">
 import { onMount } from 'svelte';
-import { detectBrowserCapabilities } from '$lib/browserCapabilities';
+import { detectBrowserCapabilities } from '#lib/browserCapabilities.ts';
 
 let ready = false;
 let webgpu = false;

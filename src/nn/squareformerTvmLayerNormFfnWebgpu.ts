@@ -1,31 +1,10 @@
 import {
-  type SquareformerGpuBuffer,
   type SquareformerTvmFfnKernels,
   type SquareformerTvmFfnShape,
   SquareformerTvmFfnWebgpuBlock,
   type SquareformerTvmFfnWeights,
 } from './squareformerTvmFfnWebgpu.ts';
 
-type GPUBuffer = SquareformerGpuBuffer;
-type GPUDevice = {
-  queue: { writeBuffer(buffer: GPUBuffer, bufferOffset: number, data: unknown): void; submit(commandBuffers: unknown[]): void };
-  createBindGroup(descriptor: unknown): unknown;
-  createBuffer(descriptor: { label?: string; size: number; usage: number; mappedAtCreation?: boolean }): GPUBuffer;
-  createCommandEncoder(descriptor?: unknown): GPUCommandEncoder;
-  createComputePipelineAsync(descriptor: unknown): Promise<GPUComputePipeline>;
-  createShaderModule(descriptor: { label?: string; code: string }): unknown;
-};
-type GPUComputePipeline = { getBindGroupLayout(index: number): unknown };
-type GPUCommandEncoder = {
-  beginComputePass(descriptor?: unknown): {
-    setPipeline(pipeline: GPUComputePipeline): void;
-    setBindGroup(index: number, bindGroup: unknown): void;
-    dispatchWorkgroups(x: number, y?: number, z?: number): void;
-    end(): void;
-  };
-  copyBufferToBuffer(source: GPUBuffer, sourceOffset: number, destination: GPUBuffer, destinationOffset: number, size: number): void;
-  finish(): unknown;
-};
 declare const GPUBufferUsage: Record<'STORAGE' | 'COPY_DST' | 'UNIFORM', number>;
 
 export type SquareformerTvmLayerNormFfnWeights = SquareformerTvmFfnWeights & {
@@ -116,14 +95,16 @@ export class SquareformerTvmLayerNormFfnWebgpuBlock {
   private layerNormBias: GPUBuffer;
   private podArgs: GPUBuffer;
   private ffn: SquareformerTvmFfnWebgpuBlock;
+  private readonly device: GPUDevice;
 
   private constructor(
-    private device: GPUDevice,
+    device: GPUDevice,
     shape: SquareformerTvmFfnShape,
     layerNormPipeline: GPUComputePipeline,
     ffn: SquareformerTvmFfnWebgpuBlock,
     buffers: { residual: GPUBuffer; normalized: GPUBuffer; layerNormWeight: GPUBuffer; layerNormBias: GPUBuffer; podArgs: GPUBuffer },
   ) {
+    this.device = device;
     this.shape = shape;
     this.layerNormPipeline = layerNormPipeline;
     this.ffn = ffn;
@@ -189,11 +170,11 @@ export class SquareformerTvmLayerNormFfnWebgpuBlock {
     );
     pass.dispatchWorkgroups(this.shape.rows, 1, 1);
     pass.end();
-    return this.ffn.encode(commandEncoder as never, this.normalized as never, residualBuffer as never) as never;
+    return this.ffn.encode(commandEncoder, this.normalized, residualBuffer);
   }
 
   copyOutputToReadback(commandEncoder: GPUCommandEncoder): void {
-    this.ffn.copyOutputToReadback(commandEncoder as never);
+    this.ffn.copyOutputToReadback(commandEncoder);
   }
 
   async readOutput(): Promise<Float32Array> {

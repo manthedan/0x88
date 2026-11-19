@@ -4,21 +4,12 @@ import {
   SquareformerTvmAttnOutLnFfnWebgpuBlock,
   type SquareformerTvmAttnOutLnFfnWeights,
 } from './squareformerTvmAttnOutLnFfnWebgpu.ts';
-import type { SquareformerGpuBuffer, SquareformerTvmFfnShape } from './squareformerTvmFfnWebgpu.ts';
+import type { SquareformerTvmFfnShape } from './squareformerTvmFfnWebgpu.ts';
 import {
   type SquareformerTvmLayerNormQkvKernels,
   SquareformerTvmLayerNormQkvWebgpuBlock,
   type SquareformerTvmLayerNormQkvWeights,
 } from './squareformerTvmLayerNormQkvWebgpu.ts';
-
-type GPUBuffer = SquareformerGpuBuffer;
-type GPUDevice = {
-  queue: { submit(commandBuffers: unknown[]): void };
-  createCommandEncoder(descriptor?: unknown): GPUCommandEncoder;
-};
-type GPUCommandEncoder = {
-  finish(): unknown;
-};
 
 export type SquareformerTvmFullLayerKernels = SquareformerTvmLayerNormQkvKernels & SquareformerTvmAttnOutLnFfnKernels;
 export type SquareformerTvmFullLayerWeights = Omit<SquareformerTvmLayerNormQkvWeights, 'layerNormWeight' | 'layerNormBias'> &
@@ -36,14 +27,16 @@ export class SquareformerTvmFullLayerWebgpuBlock {
   private qkv: SquareformerTvmLayerNormQkvWebgpuBlock;
   private attention: SquareformerTvmAttentionWebgpuBlock;
   private output: SquareformerTvmAttnOutLnFfnWebgpuBlock;
+  private readonly device: GPUDevice;
 
   private constructor(
-    private device: GPUDevice,
+    device: GPUDevice,
     shape: SquareformerTvmFullLayerShape,
     qkv: SquareformerTvmLayerNormQkvWebgpuBlock,
     attention: SquareformerTvmAttentionWebgpuBlock,
     output: SquareformerTvmAttnOutLnFfnWebgpuBlock,
   ) {
+    this.device = device;
     this.shape = shape;
     this.qkv = qkv;
     this.attention = attention;
@@ -64,9 +57,9 @@ export class SquareformerTvmFullLayerWebgpuBlock {
       qkvBias: weights.qkvBias,
     };
     const [qkv, attention, output] = await Promise.all([
-      SquareformerTvmLayerNormQkvWebgpuBlock.create(device as never, kernels, qkvWeights, shape, epsilons.n1 ?? 1e-5),
-      SquareformerTvmAttentionWebgpuBlock.create(device as never, shape as SquareformerTvmAttentionShape),
-      SquareformerTvmAttnOutLnFfnWebgpuBlock.create(device as never, kernels, weights, shape, epsilons.n2 ?? 1e-5),
+      SquareformerTvmLayerNormQkvWebgpuBlock.create(device, kernels, qkvWeights, shape, epsilons.n1 ?? 1e-5),
+      SquareformerTvmAttentionWebgpuBlock.create(device, shape as SquareformerTvmAttentionShape),
+      SquareformerTvmAttnOutLnFfnWebgpuBlock.create(device, kernels, weights, shape, epsilons.n2 ?? 1e-5),
     ]);
     return new SquareformerTvmFullLayerWebgpuBlock(device, shape, qkv, attention, output);
   }
@@ -82,13 +75,13 @@ export class SquareformerTvmFullLayerWebgpuBlock {
   }
 
   encode(commandEncoder: GPUCommandEncoder, inputBuffer?: GPUBuffer): GPUBuffer {
-    const qkvBuffer = this.qkv.encode(commandEncoder as never, inputBuffer as never);
-    const contextBuffer = this.attention.encode(commandEncoder as never, qkvBuffer as never);
-    return this.output.encode(commandEncoder as never, contextBuffer as never, inputBuffer as never) as never;
+    const qkvBuffer = this.qkv.encode(commandEncoder, inputBuffer);
+    const contextBuffer = this.attention.encode(commandEncoder, qkvBuffer);
+    return this.output.encode(commandEncoder, contextBuffer, inputBuffer);
   }
 
   copyOutputToReadback(commandEncoder: GPUCommandEncoder): void {
-    this.output.copyOutputToReadback(commandEncoder as never);
+    this.output.copyOutputToReadback(commandEncoder);
   }
 
   async readOutput(): Promise<Float32Array> {

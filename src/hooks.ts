@@ -1,4 +1,4 @@
-import type { Reroute } from '@sveltejs/kit';
+import type { Reroute } from '@sveltejs/kit/hooks';
 import { refuseLabRoute } from './lib/buildScope.ts';
 
 // __BUILD_SCOPE__ is defined from BUILD_SCOPE in vite.config.ts; outside product builds this folds away.

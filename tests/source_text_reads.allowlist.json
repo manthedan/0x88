@@ -99,6 +99,10 @@
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/arenaBrowser.ts"]
     },
+    "tests/arrow_geometry.test.mjs": {
+      "reason": "checks CHESSGROUND_SHAPES_LAYER_OPACITY matches the .cg-shapes opacity in the vendored chessground.base.css (moved from public/ to src/styles/)",
+      "reads": ["src/styles/chessground.base.css"]
+    },
     "tests/batching_strength.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": [
@@ -262,6 +266,10 @@
     "tests/mobile_soak_controller.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/mobileSoakEngines.ts"]
+    },
+    "tests/not_found_page.test.mjs": {
+      "reason": "checks the mounted site error page removes the static no-JS not-found copy that 404.html ships",
+      "reads": ["src/routes/+error.svelte"]
     },
     "tests/onnx_dequant_fold.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",

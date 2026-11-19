@@ -488,7 +488,7 @@ export function requestedOrtExecutionProvider(): OrtExecutionProviderPreference 
 }
 
 function webgpuAvailable(): boolean {
-  return typeof navigator !== 'undefined' && !!(navigator as unknown as { gpu?: unknown }).gpu;
+  return typeof navigator !== 'undefined' && !!navigator.gpu;
 }
 
 let probedWebGpuAdapterUsable: boolean | null = null;

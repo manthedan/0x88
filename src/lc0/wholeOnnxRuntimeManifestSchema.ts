@@ -3,8 +3,8 @@
  * wholeOnnxWebgpuEvaluator.ts (public/runtimes/lc0-tvmjs-webgpu/..., staged by
  * scripts/stage_lc0_tvmjs_webgpu_artifacts.mjs). Loose objects throughout:
  * the manifest carries compiler provenance and tensor-cache metadata the
- * evaluator does not consume. Mirrors the RuntimeManifest interface kept in
- * the evaluator module.
+ * evaluator does not consume. The evaluator's RuntimeManifest type is
+ * inferred from it.
  */
 
 import * as v from 'valibot';

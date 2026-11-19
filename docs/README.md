@@ -107,6 +107,7 @@ proposals. A historical record is not an instruction to restore its old defaults
 - [`plentychess_upgrade_v8.md`](plentychess_upgrade_v8.md) — PlentyChess 8.0.0 upgrade audit (2026-10-10).
 - [`viridithas_v20_upgrade.md`](viridithas_v20_upgrade.md) — Viridithas move from the pre-release commit to the v20.0.0 tag.
 - [`reckless_upgrade_2026-10-10.md`](reckless_upgrade_2026-10-10.md) — Reckless upgrade audit: NO-GO, production stays on `00106174`.
+- [`dependency_audit_2026-11-17.md`](dependency_audit_2026-11-17.md) — SvelteKit 3 migration, npm dependency keep/remove/replace audit, unpatched picomatch residual, vendored Chessground CSS edits.
 
 ## Dated investigation records
 

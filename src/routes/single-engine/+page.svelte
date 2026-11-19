@@ -1,7 +1,7 @@
 <script lang="ts">
 import { onMount } from 'svelte';
+import SiteHeader from '#lib/components/SiteHeader.svelte';
 import { afterNavigate } from '$app/navigation';
-import SiteHeader from '$lib/components/SiteHeader.svelte';
 
 let mountedUrl: URL | null = null;
 afterNavigate(({ to }) => {

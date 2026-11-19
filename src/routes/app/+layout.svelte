@@ -1,5 +1,5 @@
 <script lang="ts">
-import { primaryNav } from '$lib/nav';
+import { primaryNav } from '#lib/nav.ts';
 </script>
 
 <slot />

@@ -99,7 +99,7 @@ function reviewHandoffPage() {
     let reviewAbort = null, reviewRunSignature = '', lastReview = null, lastReviewReviewer = null;
     let lastReviewNodes = [], lastReviewSignature = '', retry = null, retryReviewer = null;
     let analysisAbort = null, hiddenTab = initialHiddenTabPause(false);
-    let retryModeGeneration = 0, retryHumanGeneration = 0, orientation = 'white';
+    let retryModeGeneration = 0, retryHumanGeneration = 0, orientation = 'white', arrowPreview = null;
     let retryOriginalOrientation, retryOriginalAuto, retryOriginalShapes = [], restoreRetryPanels = null;
     const elements = new Map();
     const el = (id) => elements.get(id) ?? (elements.set(id, {

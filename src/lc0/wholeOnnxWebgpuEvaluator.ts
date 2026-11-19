@@ -30,20 +30,7 @@ const EVAL_TIMING_KEYS = [
   'outputDecodeMs',
 ] as const;
 
-interface RuntimeManifestModel {
-  batch: number;
-  wasm: string;
-  bytes?: number;
-  sha256?: string;
-}
-
-interface RuntimeManifest {
-  runtime?: Record<string, string | undefined>;
-  parameterStrategy?: { current?: string };
-  tensorCache?: { directory?: string; manifest?: string };
-  models: RuntimeManifestModel[];
-  files?: Array<{ path: string; sha256?: string }>;
-}
+type RuntimeManifest = v.InferOutput<typeof WholeOnnxRuntimeManifestSchema>;
 
 interface WholeModelTensor {
   shape: number[];
@@ -84,15 +71,6 @@ interface WholeModelRuntime {
 interface WholeModelRuntimeApi {
   instantiate(bytes: ArrayBuffer, wasi: unknown, logger?: (message: string) => void): Promise<WholeModelRuntime>;
   createPolyfillWASI(): unknown;
-}
-
-interface GpuAdapterLike {
-  features: { has(feature: string): boolean };
-  requestDevice(options?: { requiredFeatures?: string[] }): Promise<unknown>;
-}
-
-interface NavigatorWithGpu extends Navigator {
-  gpu?: { requestAdapter(): Promise<GpuAdapterLike | null> };
 }
 
 interface SubmittedBatch {
@@ -271,12 +249,12 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
     const bundleFile = manifest.files?.find((entry) => entry.path === bundle);
     if (!bundleFile?.sha256) throw new Error(`Runtime bundle integrity metadata missing for ${bundle}`);
     const api = await timed('runtimeBundleLoadMs', () => loadRuntimeBundle(bundle, base, bundleFile.sha256!, options.signal));
-    const nav = navigator as NavigatorWithGpu;
-    if (!nav.gpu) throw new Error('navigator.gpu missing');
-    const adapter = await timed('requestAdapterMs', () => nav.gpu!.requestAdapter());
+    const gpu = navigator.gpu;
+    if (!gpu) throw new Error('navigator.gpu missing');
+    const adapter = await timed('requestAdapterMs', () => gpu.requestAdapter());
     options.signal?.throwIfAborted();
     if (!adapter) throw new Error('WebGPU adapter unavailable');
-    const requiredFeatures = ['shader-f16'];
+    const requiredFeatures: GPUFeatureName[] = ['shader-f16'];
     for (const feature of requiredFeatures) if (!adapter.features.has(feature)) throw new Error(`WebGPU adapter missing required feature: ${feature}`);
     const device = await timed('requestDeviceMs', () => adapter.requestDevice({ requiredFeatures }));
     let ownedRuntime: WholeModelRuntime | undefined;
@@ -314,15 +292,7 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
           }
           if (!detachedParams.length) throw new Error('detached tensor-cache manifest but no param_N tensors loaded');
         }
-        return new Lc0WholeOnnxWebgpuEvaluator(
-          runtime,
-          device as { destroy?: () => void } | null,
-          vmMod,
-          model.batch,
-          detachedParams,
-          startupTimings,
-          tensorCacheInfo,
-        );
+        return new Lc0WholeOnnxWebgpuEvaluator(runtime, device, vmMod, model.batch, detachedParams, startupTimings, tensorCacheInfo);
       } catch (error) {
         runtime.endScope();
         throw error;
@@ -336,7 +306,7 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
       } catch {
         /* best effort */
       }
-      (device as { destroy?: () => void } | null)?.destroy?.();
+      device.destroy();
       throw error;
     }
   }

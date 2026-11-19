@@ -3,7 +3,7 @@
 //
 // Every prerendered page is governed by TWO enforced policies: the header from
 // netlify.toml's `/*` block, and the <meta http-equiv> policy SvelteKit writes
-// from svelte.config.js (kit.csp, hash mode). A browser runs an inline script
+// from kit.config.js (csp, hash mode). A browser runs an inline script
 // only when every policy in force at that point allows it, and a <meta> policy
 // is only in force for elements parsed after the <meta> itself.
 //
@@ -33,7 +33,7 @@ import { effectiveValue, parseHeaderBlocks, valuesByName } from './netlify_heade
 
 const KEYWORDS = new Set(['self', 'none', 'unsafe-inline', 'unsafe-eval', 'wasm-unsafe-eval', 'strict-dynamic', 'unsafe-hashes', 'report-sample']);
 
-// SvelteKit takes keywords unquoted in svelte.config.js and quotes them on
+// SvelteKit takes keywords unquoted in kit.config.js and quotes them on
 // output; hash and nonce sources are quoted as well.
 function quoteSource(source) {
   return KEYWORDS.has(source) || /^(sha256|sha384|sha512|nonce)-/.test(source) ? `'${source}'` : source;
@@ -52,10 +52,10 @@ export function parseCsp(text) {
   return directives;
 }
 
-/** kit.csp.directives from svelte.config.js, in the same shape as parseCsp. */
+/** csp.directives from kit.config.js, in the same shape as parseCsp. */
 export function metaDirectivesFromSvelteConfig(config) {
   const directives = new Map();
-  for (const [name, sources] of Object.entries(config?.kit?.csp?.directives ?? {})) {
+  for (const [name, sources] of Object.entries(config?.csp?.directives ?? {})) {
     directives.set(name.toLowerCase(), Array.isArray(sources) ? sources.map(quoteSource) : []);
   }
   return directives;
@@ -115,9 +115,9 @@ function checkConfiguredOrigins(header, meta, env) {
     `Content-Security-Policy ${directive} in netlify.toml [[headers]] for "/*", then run \`npm run deploy:generate-headers\` to update public/_headers`;
   return [
     ...checkOrigins(header, 'connect-src', required, 'header', headerEdit('connect-src')),
-    ...checkOrigins(meta, 'connect-src', required, 'meta', 'connect-src in svelte.config.js'),
+    ...checkOrigins(meta, 'connect-src', required, 'meta', 'connect-src in kit.config.js'),
     ...checkOrigins(header, 'script-src', scripts, 'header', headerEdit('script-src')),
-    ...checkOrigins(meta, 'script-src', scripts, 'meta', 'script-src in svelte.config.js'),
+    ...checkOrigins(meta, 'script-src', scripts, 'meta', 'script-src in kit.config.js'),
   ];
 }
 
@@ -134,7 +134,7 @@ export function checkPolicyConsistency(header, meta) {
       continue;
     }
     if (metaSources === undefined) {
-      if (!rule.headerOnly) failures.push(`header policy declares ${name}, which the meta policy does not; add it to svelte.config.js or document why`);
+      if (!rule.headerOnly) failures.push(`header policy declares ${name}, which the meta policy does not; add it to kit.config.js or document why`);
       continue;
     }
     const headerSet = new Set(headerSources);
@@ -205,9 +205,9 @@ export async function checkCspPolicy(rootPath = process.cwd(), distDir = undefin
   const headerText = headerPolicyFromNetlifyToml(readFileSync(resolve(rootPath, 'netlify.toml'), 'utf8'));
   if (headerText === undefined) throw new Error('netlify.toml declares no Content-Security-Policy on /*');
   const header = parseCsp(headerText);
-  const configModule = await import(pathToFileURL(resolve(rootPath, 'svelte.config.js')).href);
+  const configModule = await import(pathToFileURL(resolve(rootPath, 'kit.config.js')).href);
   const meta = metaDirectivesFromSvelteConfig(
-    configModule.createCspDirectives ? { kit: { csp: { directives: configModule.createCspDirectives(env) } } } : configModule.default,
+    configModule.createCspDirectives ? { csp: { directives: configModule.createCspDirectives(env) } } : configModule.default,
   );
   failures.push(...checkPolicyConsistency(header, meta));
   failures.push(...checkConfiguredOrigins(header, meta, env));
@@ -229,7 +229,7 @@ export async function checkCspPolicy(rootPath = process.cwd(), distDir = undefin
     error.failures = failures;
     throw error;
   }
-  return { ok: true, checked: ['netlify.toml', 'svelte.config.js', ...pages] };
+  return { ok: true, checked: ['netlify.toml', 'kit.config.js', ...pages] };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

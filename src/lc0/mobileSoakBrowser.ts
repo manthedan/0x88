@@ -28,7 +28,7 @@ import type { SoakEngine } from './mobileSoakEngines.ts';
 
 const iso = () => new Date().toISOString();
 export async function collectSoakEnvironment(): Promise<Record<string, unknown>> {
-  const nav = navigator as Navigator & {
+  const nav = navigator as Omit<Navigator, 'gpu'> & {
     deviceMemory?: number;
     gpu?: {
       requestAdapter(

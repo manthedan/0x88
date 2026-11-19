@@ -1,6 +1,7 @@
 import { lstatSync } from 'node:fs';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Plugin } from 'vite';
+import kitConfig from './kit.config.js';
 import { patchChessgroundSvg } from './src/lc0/chessgroundArrowPatch.ts';
 
 const crossOriginIsolationHeaders = {
@@ -35,7 +36,7 @@ function chessgroundArrows(): Plugin {
 
 export default defineConfig({
   cacheDir: sharedNodeModules ? '.vite-cache' : undefined,
-  plugins: labOnly ? [] : [chessgroundArrows(), sveltekit()],
+  plugins: labOnly ? [] : [chessgroundArrows(), sveltekit(kitConfig)],
   // Build-time constant: src/hooks.ts refuses lab routes in product builds. A bare
   // global, not import.meta.env.VITE_*, which Vite would also copy into every bundled env object.
   define: { __BUILD_SCOPE__: JSON.stringify(process.env.BUILD_SCOPE ?? '') },

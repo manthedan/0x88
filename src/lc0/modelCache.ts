@@ -1,6 +1,11 @@
 import * as v from 'valibot';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
-import { Lc0ArtifactChannelManifestSchema, Lc0ArtifactReleaseManifestSchema, Lc0ModelManifestSchema } from './modelManifestSchema.ts';
+import {
+  Lc0ArtifactChannelManifestSchema,
+  Lc0ArtifactReleaseManifestSchema,
+  type Lc0ModelManifestEntrySchema,
+  Lc0ModelManifestSchema,
+} from './modelManifestSchema.ts';
 
 type ImportMetaWithEnv = ImportMeta & { env?: Record<string, string | undefined> };
 const env = (import.meta as ImportMetaWithEnv).env ?? {};
@@ -9,18 +14,8 @@ export type Lc0ModelCacheMode = 'url' | 'cache' | 'memory';
 export type Lc0ModelLoadSource = 'url' | 'memory' | 'cache-storage' | 'network';
 export type Lc0ModelVerificationMode = 'hashed' | 'metadata' | 'length-only' | 'unchecked';
 
-export interface Lc0ModelManifestEntry {
-  file: string;
-  url: string;
-  /** Optional immutable/content-addressed URL for the bytes named by `url`. */
-  artifactUrl?: string;
-  bytes?: number;
-  sha256?: string;
-}
-
-export interface Lc0ModelManifest {
-  models?: Lc0ModelManifestEntry[];
-}
+export type Lc0ModelManifestEntry = v.InferOutput<typeof Lc0ModelManifestEntrySchema>;
+export type Lc0ModelManifest = v.InferOutput<typeof Lc0ModelManifestSchema>;
 
 export interface Lc0ModelLoadTelemetry {
   source: Lc0ModelLoadSource;

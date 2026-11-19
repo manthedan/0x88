@@ -28,6 +28,7 @@ const INVARIANTS = [
   'no forced .br redirects',
   'no custom Content-Encoding headers',
   'one-year immutable only on write-once paths (content-addressed artifacts, release manifests, Vite immutable bundles)',
+  'Vite hashed bundles (JS and global CSS) are one-year immutable',
   'HTML (including pretty page URLs) and channel pointers revalidate',
   'no path declared twice',
   'content-addressed artifacts carry cross-origin CORP under COEP',
@@ -120,6 +121,9 @@ const REQUIRED = [
   // cross-origin CORP or they are blocked once served from the asset host.
   ['/artifacts/sha256/*', 'cross-origin-resource-policy', 'cross-origin', 'cross-origin CORP'],
   ['/releases/*', 'cache-control', 'public, max-age=31536000, immutable', 'write-once release manifest Cache-Control'],
+  // Global CSS is Vite output under /_app/immutable/ (src/routes/+layout.svelte), not unhashed
+  // public/ files, so this rule is what keeps returning visitors from revalidating it.
+  ['/_app/immutable/*', 'cache-control', 'public, max-age=31536000, immutable', 'Vite hashed bundle (JS and global CSS) immutable Cache-Control'],
   // Logical aliases whose bytes change between releases. Without these the gate
   // only rejected the exact immutable combination, so a plain `max-age=86400`
   // would have let a stale model or engine stay fresh in the browser for a day.

@@ -36,8 +36,8 @@ jobs:
       - name: Biome
         run: npm run check:biome
 
-  # Reports advisories without gating tests or the build. Four low advisories
-  # remain in the SvelteKit chain that only a SvelteKit 3 major resolves.
+  # Reports advisories without gating tests or the build. See
+  # docs/dependency_audit_2026-11-17.md for the unpatched picomatch advisory.
   audit:
     # Report-only by owner decision (2026-11-17): advisories show in CI without failing it.
     continue-on-error: true

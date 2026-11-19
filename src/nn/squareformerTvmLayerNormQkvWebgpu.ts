@@ -1,25 +1,5 @@
-import type { SquareformerGpuBuffer, SquareformerTvmFfnShape } from './squareformerTvmFfnWebgpu.ts';
+import type { SquareformerTvmFfnShape } from './squareformerTvmFfnWebgpu.ts';
 
-type GPUBuffer = SquareformerGpuBuffer;
-type GPUDevice = {
-  queue: { writeBuffer(buffer: GPUBuffer, bufferOffset: number, data: unknown): void; submit(commandBuffers: unknown[]): void };
-  createBindGroup(descriptor: unknown): unknown;
-  createBuffer(descriptor: { label?: string; size: number; usage: number; mappedAtCreation?: boolean }): GPUBuffer;
-  createCommandEncoder(descriptor?: unknown): GPUCommandEncoder;
-  createComputePipelineAsync(descriptor: unknown): Promise<GPUComputePipeline>;
-  createShaderModule(descriptor: { label?: string; code: string }): unknown;
-};
-type GPUComputePipeline = { getBindGroupLayout(index: number): unknown };
-type GPUCommandEncoder = {
-  beginComputePass(descriptor?: unknown): {
-    setPipeline(pipeline: GPUComputePipeline): void;
-    setBindGroup(index: number, bindGroup: unknown): void;
-    dispatchWorkgroups(x: number, y?: number, z?: number): void;
-    end(): void;
-  };
-  copyBufferToBuffer(source: GPUBuffer, sourceOffset: number, destination: GPUBuffer, destinationOffset: number, size: number): void;
-  finish(): unknown;
-};
 declare const GPUBufferUsage: Record<'STORAGE' | 'COPY_SRC' | 'COPY_DST' | 'MAP_READ' | 'UNIFORM', number>;
 declare const GPUMapMode: Record<'READ', number>;
 
@@ -104,9 +84,10 @@ export class SquareformerTvmLayerNormQkvWebgpuBlock {
   private qkvBias: GPUBuffer;
   private layerNormPodArgs: GPUBuffer;
   private qkvPodArgs: GPUBuffer;
+  private readonly device: GPUDevice;
 
   private constructor(
-    private device: GPUDevice,
+    device: GPUDevice,
     shape: SquareformerTvmFfnShape,
     layerNormPipeline: GPUComputePipeline,
     qkvPipeline: GPUComputePipeline,
@@ -123,6 +104,7 @@ export class SquareformerTvmLayerNormQkvWebgpuBlock {
       qkvPodArgs: GPUBuffer;
     },
   ) {
+    this.device = device;
     this.shape = shape;
     this.layerNormPipeline = layerNormPipeline;
     this.qkvPipeline = qkvPipeline;

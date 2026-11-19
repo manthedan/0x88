@@ -120,7 +120,7 @@ function adapterInfo(adapter: AnyGpuAdapter | null): JsonRecord | null {
 }
 
 async function probeMainWebGpu(): Promise<JsonRecord> {
-  const gpu = (navigator as Navigator & { gpu?: { requestAdapter: (opts?: JsonRecord) => Promise<AnyGpuAdapter | null> } }).gpu;
+  const gpu = (navigator as Omit<Navigator, 'gpu'> & { gpu?: { requestAdapter: (opts?: JsonRecord) => Promise<AnyGpuAdapter | null> } }).gpu;
   if (!gpu) return { hasNavigatorGpu: false, adapter: null };
   const started = performance.now();
   try {
@@ -201,7 +201,7 @@ async function probeWasmSimd(): Promise<JsonRecord> {
 }
 
 async function runWgslSmoke(): Promise<JsonRecord> {
-  const gpu = (navigator as Navigator & { gpu?: { requestAdapter: (opts?: JsonRecord) => Promise<AnyGpuAdapter | null> } }).gpu;
+  const gpu = (navigator as Omit<Navigator, 'gpu'> & { gpu?: { requestAdapter: (opts?: JsonRecord) => Promise<AnyGpuAdapter | null> } }).gpu;
   if (!gpu) return { skipped: 'navigator.gpu unavailable' };
   const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) return { skipped: 'requestAdapter returned null' };

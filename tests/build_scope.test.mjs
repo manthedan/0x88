@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { readdirSync } from 'node:fs';
 import test from 'node:test';
+import { LAB_ROUTE_ID, PRODUCT_ROUTES, prerenderConfig } from '../kit.config.js';
 import { LAB_PATH, UNROUTED_PATH } from '../src/lib/buildScope.ts';
-import { LAB_ROUTE_ID, PRODUCT_ROUTES, prerenderConfig } from '../svelte.config.js';
 
 const routeFiles = () => readdirSync(new URL('../src/routes', import.meta.url), { recursive: true }).map((file) => file.split('\\').join('/'));
 
@@ -32,7 +32,7 @@ test('every page route is either a product entry or a lab route', () => {
   assert.deepEqual(
     routes.filter((id) => !LAB_ROUTE_ID.test(id)),
     [...product].sort(),
-    'classify the new route in svelte.config.js',
+    'classify the new route in kit.config.js',
   );
   for (const id of ['/lab/mobile-soak', '/single-engine']) assert.ok(routes.includes(id), `${id} disappeared; update this test`);
 });

@@ -66,7 +66,7 @@ test('the chessground patch fails loudly when chessground changes the patched co
 
 test('the shapes-layer opacity constant matches chessground.base.css', async () => {
   const { CHESSGROUND_SHAPES_LAYER_OPACITY } = await import('../src/lc0/analysisFormat.ts');
-  const css = readFileSync(new URL('../public/chessground.base.css', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../src/styles/chessground.base.css', import.meta.url), 'utf8');
   const rule = css.match(/\.cg-wrap \.cg-shapes \{([^}]*)\}/)[1];
   assert.equal(Number(rule.match(/opacity:\s*([\d.]+)/)[1]), CHESSGROUND_SHAPES_LAYER_OPACITY);
 });

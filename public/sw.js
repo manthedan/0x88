@@ -12,25 +12,27 @@
 // Handled:
 //   - navigations: network first, falling back to the cached page (or the
 //     /app/play/ shell) after NAVIGATION_TIMEOUT_MS or on network failure;
-//   - /_app/immutable/*: content-hashed build output, cache first;
-//   - a few small shell files the HTML links: network first.
+//   - /_app/immutable/*: content-hashed build output (JS and CSS), cache first;
+//   - the favicon and web manifest the HTML links: network first.
 //
 // Everything lives in one cache per build. src/lib/pwa/register.ts registers
 // /sw.js?v=<SvelteKit build version>; a new version is a new script URL, so
 // each deploy installs a fresh worker whose activate step deletes every older
 // build's cache instead of letting hashed chunks accumulate forever.
-const CACHE_PREFIX = '0x88-app-';
-const LEGACY_CACHE_PREFIXES = ['0x88-app-shell-', 'lc0-app-shell-'];
+//
+// The prefix changes whenever cached pages from earlier builds would break
+// under this script. A worker registered at an old ?v= URL can reinstall
+// with new code under its old version; a new prefix still gives it a fresh
+// cache, and activate drops the old one. '0x88-app-' caches hold pages that
+// link the pre-Vite global stylesheets (/app-shell.css etc.), which this
+// worker neither routes nor precaches. Those files stay in public/ until
+// 2026-12-18 for pages an older worker still serves.
+const CACHE_PREFIX = '0x88-app2-';
+const LEGACY_CACHE_PREFIXES = ['0x88-app-', 'lc0-app-shell-'];
 const APP_SHELL_FALLBACK = '/app/play/';
 const NAVIGATION_TIMEOUT_MS = 3500;
-const SHELL_ASSETS = new Set([
-  '/app-shell.css',
-  '/chessground.base.css',
-  '/chessground.brown.css',
-  '/chessground.cburnett.css',
-  '/favicon.svg',
-  '/manifest.webmanifest',
-]);
+// Stylesheets are not here: they are Vite build output under /_app/immutable/.
+const SHELL_ASSETS = new Set(['/favicon.svg', '/manifest.webmanifest']);
 // Never cache these even under an allowlisted prefix.
 const HEAVY_EXTENSIONS = ['.wasm', '.data', '.nnue', '.onnx', '.bin', '.pack', '.br', '.gz', '.tar'];
 
