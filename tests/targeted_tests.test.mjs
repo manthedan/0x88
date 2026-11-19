@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { buildImportGraph, selectTargetedTests } from '../scripts/lib/targeted_tests.mjs';
@@ -7,8 +10,8 @@ import { buildImportGraph, selectTargetedTests } from '../scripts/lib/targeted_t
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const graph = buildImportGraph(repoRoot);
 
-function runCli(args) {
-  return spawnSync(process.execPath, ['scripts/run_targeted_tests.mjs', ...args], { cwd: repoRoot, encoding: 'utf8' });
+function runCli(args, cwd = repoRoot) {
+  return spawnSync(process.execPath, [join(repoRoot, 'scripts/run_targeted_tests.mjs'), ...args], { cwd, encoding: 'utf8' });
 }
 
 test('import graph build stays cheap enough for the quick path', () => {
@@ -72,6 +75,26 @@ test('a known non-source mapping still selects its test', () => {
   const decision = selectTargetedTests(['.github/workflows/production-smoke.yml'], graph);
   assert.equal(decision.status, 'run');
   assert.ok(decision.tests.includes('tests/production_browser_smoke.test.mjs'));
+});
+
+test('Git deletions still select mapped tests without failing on an unmapped deletion', (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), 'targeted-test-deletions-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd });
+  git('init', '-q');
+  mkdirSync(join(cwd, 'src'));
+  mkdirSync(join(cwd, 'tests'));
+  const removed = ['src/obsolete.ts', 'tests/obsolete.test.mjs', 'src/covered.ts'];
+  const retained = 'tests/covered.test.mjs';
+  for (const file of [...removed, retained]) writeFileSync(join(cwd, file), '');
+  git('add', ...removed, retained);
+  git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'fixture');
+  for (const file of removed) rmSync(join(cwd, file));
+
+  const result = runCli(['--base', 'HEAD', '--dry-run'], cwd);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /tests\/covered\.test\.mjs/);
+  assert.doesNotMatch(result.stdout, /tests\/obsolete\.test\.mjs/);
 });
 
 test('CLI refuses a zero-test pass for puct no longer, and refuses an unknown source file', () => {
