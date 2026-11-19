@@ -203,6 +203,7 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
   readonly tensorCacheInfo?: { url: string; metadata: unknown };
   readonly startupTimings: Record<string, number>;
   private disposed = false;
+  private closePromise: Promise<void> | null = null;
   private readbackDrainFailed = false;
   private readonly inFlight = new Set<Promise<unknown>>();
   // Explicit fields rather than constructor parameter properties so the module
@@ -283,8 +284,8 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
       options.signal?.throwIfAborted();
       const wasmBytes = await timed('wasmFetchVerifyMs', () => fetchChecked(base, model.wasm, model, options.signal));
       const runtime = await timed('runtimeInstantiateMs', () => api.instantiate(wasmBytes, api.createPolyfillWASI(), options.logger));
-      options.signal?.throwIfAborted();
       ownedRuntime = runtime;
+      options.signal?.throwIfAborted();
       timedSync('runtimeInitWebGpuMs', () => runtime.initWebGPU(device));
       runtime.beginScope();
       try {
@@ -366,10 +367,10 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
    * create()-time scope (VM, pipelines, detached params), the wasm instance and
    * the GPUDevice this evaluator owns. Evaluations started afterwards reject.
    */
-  dispose(): void {
-    if (this.disposed) return;
+  dispose(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
     this.disposed = true;
-    const release = () => {
+    const release = async () => {
       // A rejected sync does not prove that all mapAsync continuations have
       // stopped writing to WASM. Retain the runtime and its allocations.
       if (this.readbackDrainFailed) return;
@@ -379,7 +380,7 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
         /* already unwound */
       }
       try {
-        this.runtime.dispose();
+        await this.runtime.dispose();
       } catch {
         /* best effort */
       }
@@ -389,7 +390,8 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
         /* best effort */
       }
     };
-    void Promise.allSettled([...this.inFlight]).then(release);
+    this.closePromise = Promise.allSettled([...this.inFlight]).then(release);
+    return this.closePromise;
   }
 
   private track<T>(run: () => Promise<T>): Promise<T> {

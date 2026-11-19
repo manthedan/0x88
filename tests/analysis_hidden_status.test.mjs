@@ -37,7 +37,7 @@ function statusPage({ hidden = false, active = false, aborted = false, reload = 
     let hiddenTab = initialHiddenTabPause(hidden);
     const analysisRunState = { execution: { tag: reload ? 'maintaining' : active && !aborted ? 'running' : 'idle' } };
     const retry = null, lineCache = new Map(), tree = { current: { fen: 'current' } };
-    const document = { getElementById: el };
+    const document = { getElementById: el }, maybeEl = el;
     const renderPgnImportNotice = () => {};
     const analysisEngineName = (name) => name;
     ${slice('function hasActiveAnalysisRun(', 'function applyAnalysisEvent(')}

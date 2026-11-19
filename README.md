@@ -19,6 +19,9 @@ your machine.
 Smoke, probe, and benchmark pages live under `lab/` — plus the unlisted,
 noindexed `/single-engine` harness endpoint that the scripts in `scripts/`
 drive — so the app routes stay limited to product-facing entry points.
+`BUILD_SCOPE=product` builds (every deploy) prerender only the product pages
+listed in `kit.config.js`; `/lab/*` and `/single-engine/` exist in dev and
+in a plain `npm run build:client`.
 
 ## Engines
 

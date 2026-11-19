@@ -294,7 +294,7 @@ Retain the 122.47 ms LQO outlier. This is a shared fanless host; benchlock exclu
 
 ### Reproduction, verification and remaining work
 
-Build each source with `BUILD_SCOPE=product npm run build:client`; serve it with `scripts/serve_isolated_static.mjs`. Pass a cells JSON containing both per-cell `base` URLs and `build` labels to `scripts/perf_matrix/run_matrix.mjs --cells <file> --out <dir> --benchlock <scratchpad/benchlock>`. Use local pinned model files so the counting proxy sees every model byte; a direct CDN `assetBase` would bypass that evidence. For native-tool Chrome, open a fresh instance with `ForceEagerMeasureMemory`, obtain `get cdp-url`, and set `sessionDefaults.cdpUrl` for that one pair. The runner closes only that leased instance. No direct agent-browser CLI was used by this phase's caller.
+Build each source with a plain `npm run build:client` (`BUILD_SCOPE=product` builds omit `/lab/mobile-soak/`); serve it with `scripts/serve_isolated_static.mjs`. Pass a cells JSON containing both per-cell `base` URLs and `build` labels to `scripts/perf_matrix/run_matrix.mjs --cells <file> --out <dir> --benchlock <scratchpad/benchlock>`. Use local pinned model files so the counting proxy sees every model byte; a direct CDN `assetBase` would bypass that evidence. For native-tool Chrome, open a fresh instance with `ForceEagerMeasureMemory`, obtain `get cdp-url`, and set `sessionDefaults.cdpUrl` for that one pair. The runner closes only that leased instance. No direct agent-browser CLI was used by this phase's caller.
 
 Parity: `/lab/kernel-hillclimb/ort-profile.html?preset=<lqo|bt4>&parity=wasm&ortDequantFold=0&warmup=5&iters=15&profileInvokes=0`. Timing uses the same page without `parity=wasm`, and the explicit fold arm. Overlay with `node scripts/kernel_hillclimb/build_lab.mjs` after the product build.
 
@@ -494,3 +494,24 @@ Validation: product build; Svelte typecheck **zero errors/warnings**; repository
 Required Codex command: `~/.pi/agent/skills/autoreview/scripts/autoreview --mode branch --base main --engine codex --model gpt-6.1-sol --thinking xhigh`. The first review found one accepted issue in the inherited mini wrapper: persisted PID files were checked only with `kill -0`, allowing PID reuse to target a foreign helper. `086c831d` now persists/verifies **start time + exact command**, refuses unverified live records before reuse/stop, and adds eight executable tests with mocked signals (no real process is killed by the tests). The second review identified two additional accepted defects: an aborted Maia initialization could lose its awaitable cleanup handle at a route remount, and Chrome's monotonic single-step phase accounting could accept incomplete sequence peaks. `5158c60e` retains/awaits aborted-init cleanup without delaying logical cancellation, with actual-adapter remount/failure and real-create timeout tests. `b3ed910c` explicitly rejects multi-step Chrome specs **before** acquiring proxy/browser resources; Safari remains the sequence measurement path. No successful mini measurement exercised either defective path. The final same-command whole-branch rerun (`autoreview-3.log`) exited **0: clean, no accepted/actionable findings**. All three accepted findings were fixed; none was waived. No redundant review was run after that clean result. The final product rebuild also passed (`final-reviewed-build.log`); `npm-test-final-reviewed.log` records the green full suite. Only the four verified helper PIDs started here (69088/69089/69159/69160) were stopped; mini mutex was free and driver 36158 remained running.
 
 **Task-5 verdict: complete — Phase 4 records all tables, protocol/provenance, corrected premises, implementation/test verdicts and limits. Overall: Small-switch carryover improves on the mini; graceful teardown is bounded and verified; delayed reclaim is measurable; Arena remains unresolved on the iPhone.**
+
+## Phase 5: iPhone reclaim matrix (2026-11-18)
+
+Owner iPhone, built reclaim branch, fresh origin per config, Play (Maia3 game) → Analysis → swap row 0 to BT4, three runs each
+(run 1 cold, runs 2–3 cached). Per-tab jetsam limit unchanged (ActiveHard 2048 MB).
+
+| Config | Run 1 (cold) | Run 2 | Run 3 | Consent → BT4 load starts |
+|---|---|---|---|---|
+| C: no CPU retire, gap 0 | BT4 unavailable: `[webgpu] RangeError: Out of memory` (tab survived) | ok | ok | ~10 s |
+| B: CPU retire, gap 0 | ok | ok | ok | ~10 s |
+| A: CPU retire, 20 s gap | ok | ok | inconclusive (free phase 45 s; still loading at the 90 s capture cutoff) | 26 / 26 / 55 s |
+| P: CPU retire, gap 0, cold prefetch worker | 5 cold runs: 5 pass, 0 kills (BT4 ~44 v/s after load) | — | — | — |
+
+Under A, `play-bt4` and `analysis-t3` also passed. The device log shows no WebContent kill of the active tab in any run; all ten
+WebContent kills were `long-idle-exit` of earlier tabs. The only failure needed CPU engines left resident on a cold load, so the
+default gap is now **0** with CPU retirement kept; `0x88-reclaim-gap-ms` remains a diagnostic override. n=3 per config is
+small: the evidence that CPU retirement matters rests on one cold failure.
+
+Row P (fix/phone-cold-prefetch, served from Yukon): a phone cold load downloads, verifies and caches the net in a throwaway
+worker, terminates it, then loads from cache. In comparison runs, CPU retire with gap 0 and no prefetch got 5/6 (one WebContent
+kill), and CPU retire with a 20 s gap got 6/6. Gap 0 stays the default because the prefetch removes the cold-path peak; n=5 is small.

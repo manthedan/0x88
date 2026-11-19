@@ -15,14 +15,34 @@ export function showPhoneLargeNetFallback(modelOverride = false): void {
 
 let activeConsent: AbortController | undefined;
 
+/**
+ * 'cached' approves no download: the model was cached when checked, and storage
+ * can evict it before the load. 'download' covers a download.
+ */
+export type LargeNetConsent = false | 'cached' | 'download';
+
+/**
+ * A 'cached' approval's load found the model evicted or its body unreadable. The cache key can
+ * still be there, so the inspection is overridden to ask as for a download, never 'cached'.
+ */
+export function requestLargeNetRedownloadConsent(config: BigNetConfig, signal?: AbortSignal): Promise<LargeNetConsent> {
+  const uncached = (inspected: BigNetConfig, inspectSignal?: AbortSignal) =>
+    inspectLargeNetDownload(inspected, inspectSignal).then((state) => ({ ...state, cached: false }));
+  return requestLargeNetDownloadConsent(config, signal, true, undefined, uncached);
+}
+
 /** A newer picker choice supersedes an earlier metadata probe or open dialog. */
-export async function requestLargeNetConsent(
+export async function requestLargeNetConsent(...args: Parameters<typeof requestLargeNetDownloadConsent>): Promise<boolean> {
+  return (await requestLargeNetDownloadConsent(...args)) !== false;
+}
+
+export async function requestLargeNetDownloadConsent(
   config: BigNetConfig,
   signal?: AbortSignal,
   desktopWarning = true,
   downloadNotice?: string,
   inspect = inspectLargeNetDownload,
-): Promise<boolean> {
+): Promise<LargeNetConsent> {
   if (signal?.aborted) return false;
   const request = new AbortController();
   activeConsent?.abort();
@@ -41,10 +61,10 @@ async function showLargeNetConsent(
   desktopWarning = true,
   downloadNotice?: string,
   inspect = inspectLargeNetDownload,
-): Promise<boolean> {
+): Promise<LargeNetConsent> {
   const phone = isMemoryConstrainedDevice();
   if (signal?.aborted) return false;
-  if (!phone && !desktopWarning) return true;
+  if (!phone && !desktopWarning) return 'download';
   const previousFocus = document.activeElement as HTMLElement | null;
   const previousFocusId = previousFocus?.id;
   const previousFocusLabel = previousFocus?.getAttribute('aria-label');
@@ -59,7 +79,7 @@ async function showLargeNetConsent(
   }
   if (signal?.aborted) return false;
   const phoneRisk = phone && config.key !== 'lqo';
-  if (phone && state?.cached && !phoneBigNetBlocked(config.key)) return true;
+  if (phone && state?.cached && !phoneBigNetBlocked(config.key)) return 'cached';
   const name = config.key === 'bt4' ? 'BT4' : config.key === 't3' ? 't3' : 'Queen Odds';
   const bytes = state?.downloadBytes;
   const mb = typeof bytes === 'number' && Number.isFinite(bytes) && bytes > 0 ? Math.max(1, Math.round(bytes / 1_000_000)) : undefined;
@@ -97,7 +117,7 @@ async function showLargeNetConsent(
   actions.append(cancel, use);
   dialog.append(title, description, actions);
   document.body.append(dialog);
-  return new Promise<boolean>((resolve) => {
+  return new Promise<LargeNetConsent>((resolve) => {
     let accepted = false;
     const abort = () => dialog.close();
     cancel.addEventListener('click', () => dialog.close());
@@ -132,7 +152,7 @@ async function showLargeNetConsent(
           if (notice) notice.hidden = true;
           phoneLargeNetPreference.setEnabled(true);
         }
-        resolve(accepted && !signal?.aborted);
+        resolve(accepted && !signal?.aborted && (state?.cached ? 'cached' : 'download'));
       },
       { once: true },
     );

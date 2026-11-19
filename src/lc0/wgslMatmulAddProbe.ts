@@ -8056,6 +8056,8 @@ function wgslHeadsFootprintCategories(): Record<string, Lc0WebExecutionFootprint
 
 export type Lc0WebHybridRuntimeCreateOptions = Omit<Lc0WebHybridEvaluationOptions, 'input'> & {
   encoderProfileOnly?: boolean;
+  /** Owner cancellation for the lazy pack download. */
+  signal?: AbortSignal;
 };
 
 class Lc0WebHybridRuntime {
@@ -8173,6 +8175,7 @@ class Lc0WebHybridRuntime {
     const initialization = await Promise.allSettled([
       loadLc0WebModelPack(options.packUrl, {
         verifyShards: options.verifyShards ?? true,
+        signal: options.signal,
         tensorNames: Array.from(
           new Set([
             ...inputBodyTensorNameList(),
@@ -8182,8 +8185,8 @@ class Lc0WebHybridRuntime {
         ),
       }),
       requestDevice({ timestampQuery: options.timestampQuery }),
-      inputBackend === 'wasm' ? createLc0WasmInputEncoder() : Promise.resolve(undefined),
-      legalPriorsBackend === 'wasm' ? createLc0WasmLegalPriors() : Promise.resolve(undefined),
+      inputBackend === 'wasm' ? createLc0WasmInputEncoder(undefined, options.signal) : Promise.resolve(undefined),
+      legalPriorsBackend === 'wasm' ? createLc0WasmLegalPriors(undefined, options.signal) : Promise.resolve(undefined),
     ]);
     const initializationFailure = initialization.find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined;
     if (initializationFailure) {
@@ -8198,6 +8201,8 @@ class Lc0WebHybridRuntime {
     const buffers: BufferLike[] = [];
     let headSession: CachedPolicyValueHeadSession | undefined;
     try {
+      // A canceled owner may already have been replaced: stop before each allocation stage.
+      options.signal?.throwIfAborted();
       const inputTensors = prepareInitialInputTensors(loadInitialInputTensors(pack));
       const tensorsByLayer = layerTensorNames.map((names) => loadEncoder0FfnInputs(pack, names));
       const headTensors = encoderProfileOnly ? undefined : loadPolicyValueHeadTensors(pack);
@@ -8216,6 +8221,7 @@ class Lc0WebHybridRuntime {
       }
       const pipelineCache = (initializedResources[0] as PromiseFulfilledResult<WgslPipelineCache>).value;
       headSession = (headSessionResult as PromiseFulfilledResult<CachedPolicyValueHeadSession | undefined>).value;
+      options.signal?.throwIfAborted();
       const inputBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.STORAGE | usage.COPY_DST });
       const readbackBuffer = device.createBuffer({ size: outputElements * 4, usage: usage.MAP_READ | usage.COPY_DST });
       buffers.push(inputBuffer, readbackBuffer);

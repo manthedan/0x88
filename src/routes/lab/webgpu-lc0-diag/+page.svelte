@@ -1,5 +1,6 @@
 <script lang="ts">
 import { onMount } from 'svelte';
+import { terminateEngineWorker } from '../../../lc0/engineRetirement.ts';
 
 type JsonRecord = Record<string, unknown>;
 type RunState = 'idle' | 'running' | 'done' | 'error';
@@ -184,7 +185,7 @@ async function probeWorkerWebGpu(): Promise<JsonRecord> {
       };
       worker.postMessage({});
     });
-    worker.terminate();
+    terminateEngineWorker(worker);
     return { workerAvailable: true, ...result };
   } finally {
     URL.revokeObjectURL(url);

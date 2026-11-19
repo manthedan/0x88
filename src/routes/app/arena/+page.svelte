@@ -111,6 +111,7 @@ onMount(() => {
         <div id="engineWarmupDetail" class="engine-warmup-detail"></div>
       </div>
       <div id="downloadProgress" class="model-load-progress" hidden></div>
+      <button id="cancelSetupLoad" type="button" hidden>Cancel model load</button>
     </div>
     <section id="checkpointSection" class="checkpoint-block" aria-label="Saved tournament" hidden>
       <p id="checkpointText" role="status"></p>

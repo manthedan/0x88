@@ -13,6 +13,7 @@ export const HELP = `npm run perf:routes -- --baseline <built-dir|commit> --cand
   --repeats 1                   same-build smoke only; cannot pass the merge gate
   --report DIR                  regenerate summary from runs.jsonl
   --build-only                  prepare archived product builds, no measurements
+  --resume                      continue an existing --out DIR (same arms/options); start it if absent
   --dry-run                     validate/print plan without building or writing
 Full gate: seven journeys, >=5 interleaved repeats, 60s analysis, 20s settle.
 Exit: 0 clean, 1 regressed, 2 incomplete/noisy/invalid. No push or deployment.`;
@@ -33,7 +34,7 @@ export function parseArgs(argv) {
     'journey',
     'report',
   ]);
-  const flags = new Set(['dry-run', 'build-only', 'help']);
+  const flags = new Set(['dry-run', 'build-only', 'help', 'resume']);
   const seen = new Set();
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i].replace(/^--/, '');
@@ -63,6 +64,7 @@ export function parseArgs(argv) {
   if (!['http:', 'https:'].includes(driver.protocol) || driver.username || driver.password) throw Error('Invalid --driver');
   for (const key of ['baseline-url', 'candidate-url']) if (options[key]) buildOrigin(options[key]);
   if (!!options['baseline-url'] !== !!options['candidate-url']) throw Error('Both served build URLs are required');
+  if (options.resume && !options.out) throw Error('--resume needs the --out DIR to continue');
   if (!options.help && !options.report && (!options.baseline || !options.candidate)) throw Error('--baseline and --candidate are required');
   if (!options.help && !options.report && !options['dry-run'] && !options['build-only'] && !options.benchlock && !options['lock-dir'])
     throw Error('A machine-wide --benchlock or --lock-dir is required');

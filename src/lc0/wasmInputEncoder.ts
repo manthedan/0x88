@@ -123,14 +123,17 @@ export class Lc0WasmInputEncoder {
   }
 }
 
-export async function createLc0WasmInputEncoder(source: Lc0WasmInputEncoderSource = LC0_INPUT_ENCODER_WASM_URL): Promise<Lc0WasmInputEncoder> {
+export async function createLc0WasmInputEncoder(
+  source: Lc0WasmInputEncoderSource = LC0_INPUT_ENCODER_WASM_URL,
+  signal?: AbortSignal,
+): Promise<Lc0WasmInputEncoder> {
   if (source instanceof WebAssembly.Module) return new Lc0WasmInputEncoder(await WebAssembly.instantiate(source, {}));
   if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
     const bytes = source instanceof ArrayBuffer ? source : source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength);
     const result = (await WebAssembly.instantiate(bytes, {})) as WebAssembly.Instance | WebAssembly.WebAssemblyInstantiatedSource;
     return new Lc0WasmInputEncoder(result instanceof WebAssembly.Instance ? result : result.instance);
   }
-  const response = await fetch(source);
+  const response = await fetch(source, { signal });
   if (!response.ok) throw new Error(`Failed to fetch LC0 WASM input encoder ${source}: HTTP ${response.status}`);
   const result = (await WebAssembly.instantiate(await response.arrayBuffer(), {})) as WebAssembly.Instance | WebAssembly.WebAssemblyInstantiatedSource;
   return new Lc0WasmInputEncoder(result instanceof WebAssembly.Instance ? result : result.instance);

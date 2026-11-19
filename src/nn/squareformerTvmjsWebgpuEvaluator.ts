@@ -6,7 +6,7 @@ import { moveToSquareformerPolicyIndex } from '../chess/moveEncodings.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { isTrustedExecutableAssetUrl } from '../lc0/assetUrls.ts';
 import { ExclusiveQueue } from '../lc0/exclusiveQueue.ts';
-import { loadLc0ModelForOrt } from '../lc0/modelCache.ts';
+import { loadLc0ModelForOrt, untilAborted } from '../lc0/modelCache.ts';
 import type { Evaluation, EvaluationContext, Evaluator } from './evaluator.ts';
 import { softmax } from './numerics.ts';
 import {
@@ -107,7 +107,8 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function fetchVerified(url: URL, expected?: { bytes?: number; sha256?: string }): Promise<ArrayBuffer> {
+async function fetchVerified(url: URL, expected?: { bytes?: number; sha256?: string }, signal?: AbortSignal): Promise<ArrayBuffer> {
+  signal?.throwIfAborted();
   if (expected?.sha256) {
     // Content identity lives in the existing modelCache bucket/metadata store,
     // not an independent TVMJS cache. A changed manifest gets a distinct key.
@@ -117,29 +118,34 @@ async function fetchVerified(url: URL, expected?: { bytes?: number; sha256?: str
       const result = await loadLc0ModelForOrt(cacheUrl.href, {
         cache: true,
         channelUrl: null,
+        signal,
         manifestEntry: { file: url.pathname.split('/').pop()!, url: cacheUrl.href, ...expected },
       });
       if (result.model instanceof ArrayBuffer && result.sha256Valid) return result.model;
     } catch {
+      signal?.throwIfAborted();
       // Storage failures are optional; the uncached path below still hashes.
     }
     // Quota/Cache Storage/WebCrypto unavailable: preserve executable integrity
     // rather than allowing the loader's URL/length-only fallback to bypass it.
   }
-  const response = await fetch(url);
+  const response = await fetch(url, { signal });
   if (!response.ok) throw new Error(`Fetch failed ${response.status}: ${url}`);
   const bytes = await response.arrayBuffer();
+  signal?.throwIfAborted();
   if (expected?.bytes !== undefined && bytes.byteLength !== expected.bytes) {
     throw new Error(`Artifact size mismatch for ${url}: ${bytes.byteLength} != ${expected.bytes}`);
   }
   if (expected?.sha256) {
     const actual = await sha256Hex(bytes);
+    signal?.throwIfAborted();
     if (actual !== expected.sha256) throw new Error(`Artifact SHA-256 mismatch for ${url}: ${actual} != ${expected.sha256}`);
   }
   return bytes;
 }
 
-async function loadTvmjsBundle(url: URL, expected: { sha256: string }): Promise<TvmjsApi> {
+async function loadTvmjsBundle(url: URL, expected: { sha256: string }, signal?: AbortSignal): Promise<TvmjsApi> {
+  signal?.throwIfAborted();
   if (!isTrustedExecutableAssetUrl(url.toString())) throw new Error(`Untrusted TVMJS runtime URL: ${url}`);
   const existing = currentTvmjsApi();
   const loadedSha = loadedTvmjsBundleSha();
@@ -174,7 +180,9 @@ async function loadTvmjsBundle(url: URL, expected: { sha256: string }): Promise<
     });
     bundleLoad = { sha256: expected.sha256, promise };
   }
-  return bundleLoad.promise;
+  // The attested runtime script is shared code, not a per-model native session.
+  // Keep its integrity stamp while letting this owner cancel its wait promptly.
+  return untilAborted(bundleLoad.promise, signal);
 }
 
 function validateManifest(manifest: TvmjsManifest): void {
@@ -208,6 +216,7 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
   private readonly queue = new ExclusiveQueue();
   private failureReason: string | undefined;
   private destroyed = false;
+  private closePromise?: Promise<void>;
   private readonly runtime: TvmRuntime;
   private readonly device: GpuDevice;
   private readonly vmModule: { getFunction(name: string): TvmPackedFunction };
@@ -237,12 +246,14 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
     });
   }
 
-  static async create(manifestUrl: string, meta: SquareFormerMeta): Promise<SquareformerTvmjsWebgpuEvaluator> {
+  static async create(manifestUrl: string, meta: SquareFormerMeta, signal?: AbortSignal): Promise<SquareformerTvmjsWebgpuEvaluator> {
+    signal?.throwIfAborted();
     const manifestResolved = new URL(manifestUrl, location.href);
     if (!isTrustedExecutableAssetUrl(manifestResolved.toString())) throw new Error(`Untrusted TVMJS manifest URL: ${manifestResolved}`);
-    const response = await fetch(manifestResolved, { cache: 'no-cache' });
+    const response = await fetch(manifestResolved, { cache: 'no-cache', signal });
     if (!response.ok) throw new Error(`TVMJS manifest fetch failed ${response.status}: ${manifestResolved}`);
     const manifest = v.parse(TvmjsManifestSchema, await response.json());
+    signal?.throwIfAborted();
     validateManifest(manifest);
     const model = manifest.models?.find((entry) => Number(entry.batch) === 16) ?? manifest.models?.[0];
     if (!model || !Number.isInteger(model.batch) || model.batch <= 0) throw new Error('TVMJS manifest has no fixed-batch model');
@@ -254,6 +265,7 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
     const gpu = (navigator as Omit<Navigator, 'gpu'> & { gpu?: { requestAdapter(options?: unknown): Promise<GpuAdapter | null> } }).gpu;
     if (!gpu) throw new Error('WebGPU is unavailable');
     const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' });
+    signal?.throwIfAborted();
     if (!adapter) throw new Error('WebGPU adapter unavailable');
     if (
       manifest.version === 'v3-subgroups' &&
@@ -264,9 +276,10 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
       // These versioned artifacts are siblings. Keep any configured asset-base
       // path prefix (e.g. /preview) instead of resolving a root-relative URL.
       const fallbackUrl = new URL('../v2-shape-k16/manifest.json', manifestResolved);
-      return SquareformerTvmjsWebgpuEvaluator.create(fallbackUrl.toString(), meta);
+      return SquareformerTvmjsWebgpuEvaluator.create(fallbackUrl.toString(), meta, signal);
     }
-    const api = await loadTvmjsBundle(bundleUrl, { sha256: bundleFile.sha256 });
+    const api = await loadTvmjsBundle(bundleUrl, { sha256: bundleFile.sha256 }, signal);
+    signal?.throwIfAborted();
     const requiredFeatures = (manifest.requiredFeatures ?? []).filter((feature) => feature !== 'webgpu');
     for (const feature of requiredFeatures) {
       if (!adapter.features.has(feature)) throw new Error(`WebGPU adapter missing required feature: ${feature}`);
@@ -285,19 +298,27 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
     const device = await adapter.requestDevice({ requiredFeatures, requiredLimits });
     let runtime: TvmRuntime | undefined;
     try {
+      signal?.throwIfAborted();
       const wasmUrl = new URL(model.wasm, baseUrl);
       if (!isTrustedExecutableAssetUrl(wasmUrl.toString())) throw new Error(`Untrusted TVMJS model URL: ${wasmUrl}`);
-      const wasmBytes = await fetchVerified(wasmUrl, model);
+      const wasmBytes = await fetchVerified(wasmUrl, model, signal);
+      signal?.throwIfAborted();
       runtime = await api.instantiate(wasmBytes, api.createPolyfillWASI(), () => {});
+      signal?.throwIfAborted();
       runtime.initWebGPU(device);
       runtime.beginScope();
       const systemLib = runtime.systemLib();
       await runtime.asyncLoadWebGPUPipelines(systemLib);
+      signal?.throwIfAborted();
       const vm = runtime.createVirtualMachine(runtime.webgpu());
       return new SquareformerTvmjsWebgpuEvaluator(runtime, device, vm.getInternalModule(), meta, model.batch, manifestResolved.toString());
     } catch (error) {
-      runtime?.dispose();
-      device.destroy();
+      // The device must be destroyed even if runtime cleanup throws, or the ORT fallback starts beside live GPU allocations.
+      try {
+        runtime?.dispose();
+      } finally {
+        device.destroy();
+      }
       throw error;
     }
   }
@@ -408,17 +429,17 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
     });
   }
 
-  destroy(): void {
-    if (this.destroyed) return;
+  dispose(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
     this.destroyed = true;
-    const dispose = () => {
+    const dispose = async () => {
       try {
         this.runtime.endScope();
       } catch {
         /* already unwound */
       }
       try {
-        this.runtime.dispose();
+        await this.runtime.dispose();
       } catch {
         /* best effort */
       }
@@ -428,6 +449,11 @@ export class SquareformerTvmjsWebgpuEvaluator implements Evaluator {
         /* best effort */
       }
     };
-    void this.queue.idle().then(dispose);
+    this.closePromise = this.queue.idle().then(dispose);
+    return this.closePromise;
+  }
+
+  destroy(): void {
+    void this.dispose();
   }
 }

@@ -36,7 +36,7 @@ function controller() {
   const code = ts.transpile(
     `
     let tree = new GameTree(), workspaceHeaders = {}, workspaceResult = '*';
-    const el = id => document.getElementById(id), inputEl = el;
+    const el = id => document.getElementById(id), inputEl = el, maybeEl = el;
     const reviewMetadata = new Map(), lineCache = new Map(), completeAnalysisKeys = new Set();
     const retry = false, reviewSignature = () => '', clearAnalysisWorkspace = () => {};
     const analysisEngineName = engine => engine;

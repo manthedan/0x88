@@ -12,7 +12,7 @@ const EVAL_TIMEOUT_MS = 15_000;
 const ENGINE_FAMILIES = ['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess', 'stormphrax', 'centipawn'];
 const RUNTIME_TOKENS = ['Centipawn:', 'Reckless:', 'Viridithas:', 'Berserk:', 'PlentyChess:', 'Stormphrax:'];
 
-const USAGE = `Usage: node scripts/production_browser_smoke.mjs [options]\n\nRuns a production browser journey across Play, Arena, and Analysis. Centipawn and Stormphrax must each complete a first move. The smoke also verifies engine order, runtime diagnostics, page errors, failed network requests, and production cache headers.\n\nRequires a Playwright Chromium build: npx playwright install chromium\n\nOptions:\n  --base-url URL        Production origin (default ${DEFAULT_BASE_URL})\n  --timeout MS          Per-engine/browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --headed              Run Chromium with a visible window (debugging)\n  --out PATH            JSON artifact path\n  --dry-run             Print the planned journey without opening a browser\n  -h, --help            Show this help\n`;
+const USAGE = `Usage: node scripts/production_browser_smoke.mjs [options]\n\nRuns a production browser journey across Play, Arena, and Analysis. Centipawn and Stormphrax must each complete a first move. On builds advertising worker retirement, Analysis -> Play -> Analysis must stay client-side, retire the previous workers, and reduce worker count on leaving Analysis. The smoke also verifies engine order, runtime diagnostics, page errors, failed network requests, and production cache headers.\n\nRequires a Playwright Chromium build: npx playwright install chromium\n\nOptions:\n  --base-url URL        Production origin (default ${DEFAULT_BASE_URL})\n  --timeout MS          Per-engine/browser wait timeout (default ${DEFAULT_TIMEOUT_MS})\n  --headed              Run Chromium with a visible window (debugging)\n  --out PATH            JSON artifact path\n  --dry-run             Print the planned journey without opening a browser\n  -h, --help            Show this help\n`;
 
 function parseArgs(argv) {
   const args = parseScriptArgs(argv, {
@@ -140,7 +140,13 @@ export function failedRequestEntries(payload) {
   });
 }
 
+export async function assertClientDocument(session, surface) {
+  if ((await evaluate(session, 'window.__productionSmokeDocument')) !== session.documentToken)
+    throw new Error(`${surface} performed a full navigation instead of client-side navigation`);
+}
+
 async function inspectBrowser(session, surface) {
+  await assertClientDocument(session, surface);
   const errors = [...actionableErrorEntries(session.pageErrors), ...actionableErrorEntries(session.consoleErrors)];
   if (errors.length) throw new Error(`${surface} emitted actionable browser errors: ${JSON.stringify(errors)}`);
   return { surface, errors: [] };
@@ -150,6 +156,7 @@ async function navigateSurface(session, path, fullNavigation = false) {
   const url = new URL(path, session.args.baseUrl);
   if (fullNavigation) {
     await session.page.goto(String(url), { waitUntil: 'domcontentloaded', timeout: 45_000 });
+    session.documentToken = await evaluate(session, 'window.__productionSmokeDocument = crypto.randomUUID()');
     return String(url);
   }
   const clicked = await evaluate(
@@ -168,6 +175,7 @@ async function navigateSurface(session, path, fullNavigation = false) {
     (value) => value === url.pathname.replace(/\/$/, ''),
     30_000,
   );
+  await assertClientDocument(session, url.pathname);
   return String(url);
 }
 
@@ -314,6 +322,38 @@ async function inspectAnalysis(session) {
   return { url, ...result };
 }
 
+export function workerRetirementReport(previous, current, requireDrop = false) {
+  if (!previous.length) throw new Error('Worker retirement guard had no live workers to exercise');
+  const retained = previous.filter((worker) => current.includes(worker));
+  if (retained.length) throw new Error(`Navigation retained ${retained.length} previous worker(s): ${retained.map((worker) => worker.url()).join(', ')}`);
+  if (requireDrop && current.length >= previous.length)
+    throw new Error(`Worker count did not drop after leaving Analysis: ${previous.length} -> ${current.length}`);
+  return { before: previous.map((worker) => worker.url()), after: current.map((worker) => worker.url()), retired: previous.length };
+}
+
+async function waitForWorkerRetirement(session, previous, requireDrop = false) {
+  const deadline = Date.now() + 10_000;
+  let current;
+  do {
+    current = session.page.workers();
+    if (!previous.some((worker) => current.includes(worker))) break;
+    await delay(100);
+  } while (Date.now() < deadline);
+  await assertClientDocument(session, 'Worker retirement');
+  return workerRetirementReport(previous, current, requireDrop);
+}
+
+async function waitForAnalysisWorkers(session) {
+  await waitForEval(
+    session,
+    `window.__analysisSchedulingState?.()`,
+    (state) => state?.workerRuntime && state.workerRuntime === state.runtime && state.phase === 'idle',
+    session.args.timeoutMs,
+  );
+  await assertClientDocument(session, 'Analysis workers ready');
+  return session.page.workers();
+}
+
 export function parseCacheControl(value) {
   const directives = new Map();
   const duplicates = new Set();
@@ -390,6 +430,10 @@ async function probeHttp(args) {
   return results;
 }
 
+export async function advertisesWorkerRetirement(session) {
+  return (await evaluate(session, `document.getElementById('main')?.dataset.workerRetirement`)) === '1';
+}
+
 async function runSmoke(args) {
   const report = {
     status: 'PRODUCTION_BROWSER_SMOKE_RUNNING',
@@ -402,9 +446,20 @@ async function runSmoke(args) {
     report.http = await probeHttp(args);
     session = await openBrowserSession(args);
     report.play.centipawn = await playFirstMove(session, 'centipawn', true);
+    // The scheduled smoke uses the current script against whatever is deployed.
+    const retirementSupported = await advertisesWorkerRetirement(session);
     report.arena = await inspectArena(session);
     report.analysis = await inspectAnalysis(session);
+    const analysisWorkers = retirementSupported ? await waitForAnalysisWorkers(session) : null;
     report.play.stormphrax = await playFirstMove(session, 'stormphrax');
+    if (analysisWorkers) {
+      report.navigation = { analysisToPlay: await waitForWorkerRetirement(session, analysisWorkers, true) };
+      const playWorkers = session.page.workers();
+      report.analysisReturn = await inspectAnalysis(session);
+      await waitForAnalysisWorkers(session);
+      report.navigation.playToAnalysis = await waitForWorkerRetirement(session, playWorkers);
+      await inspectBrowser(session, 'Analysis -> Play -> Analysis');
+    } else report.navigation = { skipped: 'Deployed Play does not advertise worker retirement' };
     report.failedRequests = failedRequestEntries(session.failedRequests);
     if (report.failedRequests.length) throw new Error(`Production journey had failed network requests: ${JSON.stringify(report.failedRequests)}`);
     report.status = 'PRODUCTION_BROWSER_SMOKE_DONE';
@@ -434,7 +489,11 @@ async function main() {
   if (args.dryRun) {
     console.log(
       JSON.stringify(
-        { status: 'PRODUCTION_BROWSER_SMOKE_DRY_RUN', baseUrl: args.baseUrl, journey: ['Play/Centipawn', 'Arena', 'Analysis', 'Play/Stormphrax'] },
+        {
+          status: 'PRODUCTION_BROWSER_SMOKE_DRY_RUN',
+          baseUrl: args.baseUrl,
+          journey: ['Play/Centipawn', 'Arena', 'Analysis', 'Play/Stormphrax', 'Analysis/return'],
+        },
         null,
         2,
       ),

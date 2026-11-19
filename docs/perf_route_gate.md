@@ -22,11 +22,17 @@ npm run perf:routes -- --baseline /path/to/baseline/dist-client --candidate dist
 npm run perf:routes -- --baseline main --candidate HEAD --dry-run
 # Regenerate verdicts without opening browsers or discarding failed attempts:
 npm run perf:routes -- --report .local-dev-artifacts/perf-routes/main-vs-branch
+# Continue a stopped run: repeat the original command and add --resume:
+npm run perf:routes -- --baseline main --candidate HEAD \
+  --browser all --repeats 5 --benchlock /absolute/path/to/machine-wide/benchlock \
+  --out .local-dev-artifacts/perf-routes/main-vs-branch --resume
 ```
 
 Commit inputs are resolved to immutable SHAs, archived and built under the **current worktree's** ignored output directory with `BUILD_SCOPE=product npm run build:client`. Neither source checkout nor another worktree is modified. The build is the same product build served by `web:isolated:static` (`scripts/serve_isolated_static.mjs`), not a benchmark-only page. A self-comparison builds once and serves identical bytes on two origins. Uncommitted source edits are not part of `HEAD`: commit first, or explicitly pass the newly built directory.
 
 Same-lockfile archives use the worktree's installed dependencies read-only; changed lockfiles get an isolated `npm ci --ignore-scripts`. Historical tracked assets/manifests are preserved; missing ignored model assets are linked from existing local sources and still undergo the app's normal pinned verification. Assets must stay same-origin through the proxy: a `VITE_LC0_BROWSER_ASSET_BASE_URL`/other asset-hosted build with traffic bypassing it is incomplete, never a JS-byte saving. Main fetch/resource URLs, worker bootstrap/init/ready URLs, and Chrome context requests detect such traffic; stage the pinned assets locally rather than suppress that check. Keep dependencies, model bytes, hardware, browser, viewport and settings fixed unless that is the treatment. `builds.json`, session specs, ready messages, UA, process IDs and host load retain provenance. Externally served URLs must be origins (no path prefix, query or fragment). They are operator-supplied build identities: preserve their build manifests alongside the results.
+
+Ignored local assets (models, runtimes, engine binaries: about 6 GB) are **not copied** into archived arm builds. Vite and SvelteKit each dereference-copy `public/`, which used to leave about 9 GB per arm and filled the disk. The harness leaves them out of the arm's `public/` during the build, then symlinks each one into `dist-client` at its served path, pointing at the real file (`scripts/perf_routes/assets.mjs`). `serve_isolated_static.mjs` follows the links, so bytes, `Content-Length`, cache and CORP/COEP headers, and the origin through the counting proxy are the same as for a copy (covered by a test). Two differences: linked bytes are live, so do not restage models during a run. And an arm whose build reads or prerender-links one of those ignored files fails at build time instead of building. `builds/<arm>/.svelte-kit/output` is deleted after each build.
 
 ### Mac mini transport
 
@@ -47,6 +53,8 @@ scripts/perf_matrix/mini.sh fetch production-self-safari \
   .local-dev-artifacts/perf-routes/production-self-safari
 scripts/perf_matrix/mini.sh down
 ```
+
+To continue a stopped mini run, repeat the same `run-routes NAME …` command with `--resume`; it continues `out/NAME`.
 
 For different builds, run `up` with **two distinct local state directories, local ports and mini ports**, then pass `--baseline-url http://127.0.0.1:<baseline-mini-port> --candidate-url http://127.0.0.1:<candidate-mini-port>` to `run-routes`. Both servers remain live; only the measured session is serialized. Default URL flags intentionally use the same upstream for a self-comparison.
 
@@ -88,11 +96,21 @@ For each browser/journey/metric, retain both arms' **unrounded** samples and com
 - At least five valid samples **per arm per metric** are required. Missing required metrics, failed journeys or partial cohorts are incomplete. Both-zero baselines are unchanged; zero→positive cost is an absolute regression, not division-by-zero or an automatic pass.
 - Exit **0** means clean measured cells, **1** regression, **2** incomplete/noisy. A subset or missing browser still needs its remaining coverage before merge. Owner sign-off must name the adverse metric, magnitude and accepted tradeoff; a signed-off regression is not relabeled an improvement.
 
+### Resume
+
+`--resume` (with `--out DIR`) continues a stopped run in that directory. It starts a new run if the directory does not exist. Without `--resume`, an existing `--out` is still refused, so a reused directory name never silently picks up old sessions from another day or load. A fresh run writes `manifest.json` with the resolved arm identities (commit SHA; prebuilt `dist` path + `_app/version.json`; served URL), browser/repeats/journeys, hostname, and a hash of every file a session's measurements depend on. That hash covers `session.mjs`'s import graph (including the `src/chess` modules that choose moves), `probe.js`, `pidfp.c` and the static server. Resume refuses on any difference and names the differing fields. Arms are compared by resolved SHA. The typed ref is kept only as provenance, so after `main` moves you can resume by passing the SHAs recorded in `manifest.json`. Paths, locks and the driver URL are not part of the identity.
+
+A run holds `<out>/coordinator.lock` from before it inspects the directory until after the final report, so a resume cannot run alongside a live run or another resume. The lock is never taken over automatically. A coordinator killed with SIGKILL leaves it behind, and the operator removes it once that process is gone. Each session's detached session/benchlock wrapper PID is recorded in `sessions/<id>.json.owner` before it waits for the mutex. That process can outlive a killed coordinator, so a resume refuses while it is alive.
+
+- An arm build is reused when `builds/<arm>.json` records the same commit and its `dist-client` exists. That record is written atomically, and only after a complete build. A missing, unreadable or mismatched record means a rebuild from scratch.
+- A session is reused when its result file parses and records an outcome: `ok`, **or a genuine failure**. A fresh run keeps failures in the denominator, and retrying only failed sessions until the run is clean would be selective outlier removal. To retry failures, start a new cohort. Missing or truncated results run again. So do sessions stopped by the operator (`Interrupted …`) and Safari-busy attempts that a fresh run would have retried. A `.cancelled` marker alone does not count: a benchlock cancel can land after the browser started, and that session's finished result is kept. Failures that only the coordinator sees are written into the session file, so a resume keeps them as outcomes. These are a session process that exits without a result, and unconfirmed browser cleanup. A `.cleanup-pending` marker blocks the resume until the operator confirms the browser is closed.
+- `runs.jsonl` is rebuilt in plan order from the reused and new results. The old index is kept as `runs.<ms>.prev.jsonl`. `plan.json` is left unchanged, so `summary.md`/`summary.json` have the same form as a fresh run's. Resumed sessions run later than the originals; they still alternate arm order, and host load is recorded per session.
+
 Raw specs, full time series, process/context/worker evidence and immutable failure records stay under `.local-dev-artifacts/perf-routes/`. The coordinator appends completed attempts to `runs.jsonl`; `--report` regenerates `summary.json` and `summary.md` from that index. Attach the summary (and local evidence location), not model binaries or browser profiles. Nothing is pushed, deployed or published by the runner.
 
 ### Known limitations
 
-- `--report` does not reconstruct a missing or incomplete `runs.jsonl` from per-session files. If the coordinator stops before indexing a session result, that result remains on disk but is absent from regenerated reports.
+- `--report` does not reconstruct a missing or incomplete `runs.jsonl` from per-session files. If the coordinator stops before indexing a session result, that result remains on disk but is absent from regenerated reports until a `--resume` rebuilds the index.
 - On SIGINT or SIGTERM the coordinator stops scheduling attempts. It waits for the owned session to clean up before releasing a verified `--lock-dir`. If browser closure cannot be confirmed, it retains that mutex for owner recovery and records a `.cleanup-pending` marker next to the session result. With an external `--benchlock` wrapper it lets the current invocation finish, but a queued session will not open a browser after cancellation. It retries deletion of a known owned Safari session if needed. If recovery requires manual intervention, verify the owned browser is closed before removing its `.cleanup-pending` marker to let the wrapper finish.
 
 ## Initial production baseline

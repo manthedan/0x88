@@ -121,6 +121,7 @@ test('Arena unload confirmation is consumed once and resets after bfcache or abo
     const window = new EventTarget();
     const code = `
       let lastArenaMountHref = null, mountAbort, arenaMountedCallbackCache;
+      const pageDom = { mount: () => () => {} }, document = { getElementById: () => ({}) };
       const location = {href: 'https://example.test/app/arena/?dev'};
       const resetArenaPageState = () => {}, isArenaRunActive = () => true;
       ${stripTypeScriptTypes(setup.replaceAll('export ', '') + 'return () => controller.abort(); }')}

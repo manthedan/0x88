@@ -51,6 +51,9 @@ export class Lc0WebHybridEvaluator {
   private runtimePromise?: Promise<Lc0WebHybridEvaluatorRuntime>;
   private currentRuntime?: Lc0WebHybridEvaluatorRuntime;
   private readonly evaluationQueue = new ExclusiveQueue();
+  // The pack loads lazily inside the first evaluation, which dispose() drains.
+  // Each init has its own abort: a stopped warmup cancels it, a later one retries.
+  private initAbort?: AbortController;
   private disposed = false;
   private disposePromise?: Promise<void>;
 
@@ -77,6 +80,10 @@ export class Lc0WebHybridEvaluator {
 
   private runtime(): Promise<Lc0WebHybridEvaluatorRuntime> {
     if (!this.runtimePromise) {
+      // A queued evaluation must not restart the init that dispose() cancelled.
+      if (this.disposed) throw new DOMException('LC0 WebGPU hybrid evaluator has been disposed', 'AbortError');
+      const initAbort = new AbortController();
+      this.initAbort = initAbort;
       const runtimePromise = this.createRuntime({
         packUrl: this.packUrl,
         layers: this.layers,
@@ -88,6 +95,7 @@ export class Lc0WebHybridEvaluator {
         inputBackend: this.inputBackend,
         legalPriorsBackend: this.legalPriorsBackend,
         encoderKernelVariant: this.encoderKernelVariant,
+        signal: initAbort.signal,
       });
       runtimePromise
         .then((runtime) => {
@@ -95,10 +103,18 @@ export class Lc0WebHybridEvaluator {
         })
         .catch(() => {
           if (this.runtimePromise === runtimePromise) this.runtimePromise = undefined;
+        })
+        .finally(() => {
+          if (this.initAbort === initAbort) this.initAbort = undefined;
         });
       this.runtimePromise = runtimePromise;
     }
     return this.runtimePromise;
+  }
+
+  /** Cancels a lazy init still loading (Stop during the first warmup); the next evaluation starts afresh. */
+  abortPendingInit(): void {
+    this.initAbort?.abort();
   }
 
   executionFootprint(): Lc0WebExecutionFootprint | undefined {
@@ -144,6 +160,7 @@ export class Lc0WebHybridEvaluator {
   async dispose(): Promise<void> {
     if (this.disposePromise) return this.disposePromise;
     this.disposed = true;
+    this.abortPendingInit();
     this.disposePromise = (async () => {
       await this.evaluationQueue.idle();
       const runtimePromise = this.runtimePromise;

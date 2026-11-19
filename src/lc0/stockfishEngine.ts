@@ -8,6 +8,7 @@ import {
   uciPositionCommand,
 } from './browserUciEngine.ts';
 import { engineArtifactWorkerScript, resolveEngineArtifactUrl } from './engineArtifacts.ts';
+import { terminateEngineWorker } from './engineRetirement.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import { supportsWasmRelaxedSimd } from './wasmFeatures.ts';
 
@@ -324,7 +325,7 @@ export class StockfishEngine implements BrowserUciEngine {
     this.rejectInit = null;
     this.analyzeLines = null;
     this.lastInfoLines = [];
-    this.worker?.terminate();
+    terminateEngineWorker(this.worker);
     this.worker = null;
     this.appliedOptions.clear();
     this.revokeWorkerObjectUrl();

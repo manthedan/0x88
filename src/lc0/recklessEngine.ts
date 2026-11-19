@@ -1,5 +1,6 @@
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { type BrowserUciAnalysisOptions, type BrowserUciEngine, type BrowserUciSearchOptions, uciPositionCommand } from './browserUciEngine.ts';
+import { terminateEngineWorker } from './engineRetirement.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './stockfishEngine.ts';
 import { fenAfterUciMoves } from './uciGameHistory.ts';
@@ -390,7 +391,7 @@ export class RecklessEngine implements BrowserUciEngine {
     const wasBrowserApi = this.workerMode === 'browser-api';
     if (this.sharedInput) closeSharedInput(this.sharedInput);
     if (wasBrowserApi) this.worker?.postMessage({ type: 'dispose' });
-    this.worker?.terminate();
+    terminateEngineWorker(this.worker);
     this.worker = null;
     this.workerMode = null;
     this.sharedInput = null;

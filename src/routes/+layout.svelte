@@ -5,6 +5,8 @@ import { boardStyle, syncThemeToDom, theme } from '#lib/stores/theme.ts';
 
 onMount(() => {
   registerServiceWorker();
+  // Hydration-complete signal for automated walks (scripts/feature_walk.mjs); prerendered pages look ready earlier.
+  document.documentElement.dataset.hydrated = '';
   const stop = syncThemeToDom();
   // Sync stores with any DOM state set by the early FOUC-prevention script
   const root = document.documentElement;

@@ -25,6 +25,16 @@ The Lc0 model tests skip when their networks are missing;
 `npm run test:stage-lc0-assets` fetches the hash-pinned parity set into
 `../models/lc0-bestnets/` so they run.
 
+Working in an extra `git worktree`? It has no `node_modules` and none of the
+gitignored model links. `node scripts/worktree_setup.mjs <worktree-path>` links
+both from the main checkout (plus `<worktree>/../models`, where the model links
+point), then checks every model in the lc0 and Maia3 manifests resolves at the
+right size. Rerunning it is safe; `--check` only verifies. A branch that
+changes `package-lock.json` needs its own install: run `rm node_modules`
+first (it removes only the symlink), then `npm ci`. Running `npm ci` through the
+symlink deletes the main checkout's packages. A linked install gets its own Vite cache (`.vite-cache/`) so the two
+checkouts' dev servers do not clobber each other's optimized deps.
+
 `npm run hooks:install` installs an opt-in git pre-push hook. It is not
 installed by `npm install`.
 
@@ -132,6 +142,13 @@ Two things people usually miss:
 - Comments explain *why*, especially for anything that looks arbitrary. Several
   constants in this repo encode a hard-won browser or toolchain constraint; if
   you find one that is unexplained, documenting it is a good first PR.
+- Some tests read `src/` files as text, sometimes through computed paths, so
+  grep misses them. Before moving or renaming code, run
+  `npm run test:who-reads -- src/lc0/<file>.ts`. A new test that reads source
+  fails `tests/source_text_reads.test.mjs` until it is listed, with a reason, in
+  `tests/source_text_reads.allowlist.json`
+  (`node scripts/check_source_text_reads.mjs --update --reason "<why>"`).
+  Prefer testing behaviour through exports.
 - Don't commit generated engine binaries unless the distribution policy says
   that family is deploy-tracked.
 - Documentation belongs in `docs/` when it is durable product, runtime,

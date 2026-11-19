@@ -12,6 +12,9 @@ export interface EngineRow {
   strength: number;
 }
 
+/** localStorage key for Arena's seat roster (an EngineRow[]); scripts/feature_walk.mjs presets it. */
+export const ARENA_SEAT_STORAGE_KEY = '0x88-arena-seats-v1';
+
 export interface EngineVariantOption {
   value: string;
   label: string;

@@ -85,14 +85,14 @@ test('subgroups requested only for v3 with a fixed size-32 adapter', async () =>
     assert.deepEqual(calls.devices[0].requiredFeatures, ['subgroups']);
     assert.match(evaluator.manifestUrl, /v3-subgroups\/manifest.json$/);
     evaluator.destroy();
-    await Promise.resolve();
+    await evaluator.dispose();
     assert.equal(calls.destroyed, 1);
   });
   await withGpu({}, async (calls) => {
     const evaluator = await SquareformerTvmjsWebgpuEvaluator.create(`${prefix}v2-shape-k16/manifest.json`, {});
     assert.deepEqual(calls.devices[0].requiredFeatures, []);
     evaluator.destroy();
-    await Promise.resolve();
+    await evaluator.dispose();
   });
 });
 
@@ -106,7 +106,7 @@ for (const adapter of [{ features: false }, { min: 16, max: 32 }, { min: 32, max
       assert.ok(calls.fetches.some((url) => url.endsWith('/v2-shape-k16/manifest.json')));
       assert.ok(!calls.fetches.some((url) => url.endsWith('/v3-subgroups/model.wasm')));
       evaluator.destroy();
-      await Promise.resolve();
+      await evaluator.dispose();
     });
   });
 }
@@ -121,7 +121,7 @@ test('v2 fallback preserves same-origin and configured CDN asset-base path prefi
       assert.ok(calls.fetches.every((url) => url.startsWith(`${baseUrl}/`)));
       assert.deepEqual(calls.devices[0].requiredFeatures, []);
       evaluator.destroy();
-      await Promise.resolve();
+      await evaluator.dispose();
     });
   }
 });

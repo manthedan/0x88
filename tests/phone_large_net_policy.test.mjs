@@ -455,7 +455,7 @@ test('Play revocation distinguishes live opponents, pending restart drafts, and 
 test('every picker uses consent and shared restore policy before engine acquisition', () => {
   for (const surface of ['analysis', 'arena', 'play']) {
     const source = readFileSync(new URL(`../src/lc0/${surface}Browser.ts`, import.meta.url), 'utf8');
-    assert.match(source, /await requestLargeNetConsent\(/);
+    assert.match(source, /await requestLargeNet(Download)?Consent\(/);
     assert.match(source, /phoneSafeEngineVariant\(/);
     assert.match(source, /PHONE_LARGE_NET_CHANGE_EVENT/);
     assert.doesNotMatch(source, /window\.confirm\(`\$\{bigNetLoadWarning/);

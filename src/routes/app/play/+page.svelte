@@ -42,7 +42,7 @@ onMount(() => {
 </svelte:head>
 
 <SiteHeader pageTitle="Play" />
-<main id="main" class="app-main play-workspace" data-phase="setup">
+<main id="main" class="app-main play-workspace" data-phase="setup" data-worker-retirement="1">
   <section class="panel board-panel" aria-label="Board">
     <div id="topStrip" class="player-strip" data-player="engine" data-turn="false">
       <span class="player-avatar" data-avatar aria-hidden="true">M3</span>
