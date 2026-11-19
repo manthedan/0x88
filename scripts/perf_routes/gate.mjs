@@ -55,8 +55,7 @@ export function parseArgs(argv) {
     }
   }
   options.repeats = Number(options.repeats);
-  const selfComparison = options.baseline === options.candidate && options['baseline-url'] === options['candidate-url'];
-  if (!Number.isInteger(options.repeats) || (options.repeats < 5 && !(options.repeats === 1 && selfComparison)))
+  if (!Number.isInteger(options.repeats) || (options.repeats < 5 && options.repeats !== 1))
     throw Error('--repeats must be an integer >=5 (or 1 for a same-build smoke)');
   if (!['chrome', 'safari', 'all'].includes(options.browser)) throw Error('Invalid --browser');
   if (options.benchlock && options['lock-dir']) throw Error('Use --benchlock OR --lock-dir');
@@ -189,7 +188,7 @@ export function footprintSum(pids, readings, label) {
 function gpuFootprint(pids, readings) {
   const gpu = footprintSum(pids, readings, 'Chrome GPU');
   if (gpu.vram === null) throw Error(`nvidia-smi does not list Chrome GPU PID ${pids.join(',')}: VRAM unavailable`);
-  return gpu;
+  return gpu.vram === undefined ? gpu : { ...gpu, vramPeak: gpu.vram };
 }
 
 export async function chromeFootprint(discover, read) {
@@ -216,6 +215,7 @@ export async function chromeFootprint(discover, read) {
   }, 0);
   retryRender.interval = Math.max(retryRender.interval, observedRendererInterval);
   retryGpu.interval = Math.max(retryGpu.interval, gpu.interval);
+  if (retryGpu.vramPeak !== undefined) retryGpu.vramPeak = Math.max(retryGpu.vramPeak, gpu.vramPeak);
   return { render: retryRender, gpu: retryGpu };
 }
 

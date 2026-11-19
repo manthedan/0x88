@@ -138,18 +138,25 @@ export async function shutdownDelay(ms, signal) {
 export async function runOwnedSession(bin, argv, signal, wrappedResultFile, ownedResultFile) {
   signal.throwIfAborted();
   // Separate from terminal Ctrl-C; don't interrupt a benchlock wrapper that holds a live session's mutex.
-  const child = spawn(bin, argv, { stdio: 'inherit', detached: true });
+  const child = ownedResultFile
+    ? spawn('/bin/sh', ['-c', 'read -r start <&3 || exit 2; exec 3<&-; exec "$@"', 'perf:routes', bin, ...argv], {
+        stdio: ['inherit', 'inherit', 'inherit', 'pipe'],
+        detached: true,
+      })
+    : spawn(bin, argv, { stdio: 'inherit', detached: true });
   const closed = once(child, 'close');
-  if (ownedResultFile && child.pid)
+  if (ownedResultFile && child.pid) {
+    const startPipe = child.stdio[3];
+    startPipe.on('error', () => {});
     try {
       writeFileSync(ownerRecord(ownedResultFile), `${child.pid}\n`);
     } catch (error) {
-      // An unrecorded child could outlive a SIGKILLed coordinator unseen by resume. Stop it before the
-      // caller releases the mutex; it has not reached the browser yet (or cleans up on SIGTERM).
-      child.kill('SIGTERM');
+      startPipe.end();
       await closed;
       throw error;
     }
+    startPipe.end('start\n');
+  }
   const stop = () => {
     if (!wrappedResultFile) child.kill('SIGTERM');
     else {

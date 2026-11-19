@@ -128,7 +128,7 @@ async function sample() {
       gpuMb: gpu?.cur ?? null,
       rendererIntervalMb: render.interval,
       gpuIntervalMb: gpu?.interval ?? null,
-      ...(gpu?.vram === undefined ? {} : { gpuVramMb: gpu.vram }),
+      ...(gpu?.vram === undefined ? {} : { gpuVramMb: gpu.vram, gpuVramPeakMb: gpu.vramPeak }),
     });
   } catch (e) {
     samplingError ??= e;
@@ -294,7 +294,7 @@ try {
   const active = result.samples.filter((s) => s.phase !== 'residual');
   result.metrics['memory.rendererPeakMb'] = Math.max(result.navigationPeakMb ?? 0, ...active.map((s) => s.rendererIntervalMb));
   if (cdp) result.metrics['memory.gpuPeakMb'] = Math.max(...active.map((s) => s.gpuIntervalMb));
-  if (linux) result.metrics['memory.gpuVramPeakMb'] = Math.max(...active.map((s) => s.gpuVramMb));
+  if (linux) result.metrics['memory.gpuVramPeakMb'] = Math.max(...active.map((s) => s.gpuVramPeakMb));
   // Total is the simultaneous sampled sum, NOT the sum of independent high-water marks.
   result.metrics['memory.peakMb'] = peakFootprint(spec.browser, active, result.navigationPeakMb ?? 0);
   const settled = active.filter((s) => s.ms >= active.at(-1).ms - 2000);

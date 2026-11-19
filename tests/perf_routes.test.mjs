@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import fs, { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer, get } from 'node:http';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -81,7 +82,6 @@ test('route gate strict parsing, mandatory arms, mutex, URLs, repeats, subsets',
   }
   assert.deepEqual(args('--journey', 'navigation', '--journey', 'navigation').journeys, ['navigation']);
   assert.throws(() => args('--out', 'a', '--out', 'b'), /Duplicate/);
-  assert.throws(() => args('--repeats', '1'), /same-build smoke/);
 });
 
 test('a one-repeat same-build smoke measures sessions without passing the gate', () => {
@@ -95,7 +95,6 @@ test('a one-repeat same-build smoke measures sessions without passing the gate',
   assert.equal(summary.invalid.length, 0);
   assert.equal(summary.metrics.find((m) => m.name === 'jsBytes').status, 'insufficient');
   assert.equal(summary.status, 'incomplete');
-  assert.throws(() => parseArgs([...smokeArgs, '--baseline-url', 'http://localhost:80', '--candidate-url', 'http://localhost:81']));
 });
 
 test('served build URLs must be origins; path prefixes cannot be measured', async () => {
@@ -786,6 +785,7 @@ test('interrupt marks a benchlock-wrapped session cancelled before browser start
     ],
     controller.signal,
     output,
+    output,
   );
   controller.abort(Error('test interrupt'));
   assert.equal(await done, 2);
@@ -976,9 +976,7 @@ test('resume reuses every recorded outcome and reruns only missing or operator-s
   assert.throws(() => selectSessions(cells, (id) => (id === ids[6] ? { result: null, owner: 4242 } : { result: null })), /006.*live process 4242/);
 });
 
-test('resume checks the browser identity of later saved sessions before replacing a truncated first result', {
-  skip: !!platformProblem({ browser: 'chrome' }),
-}, (t) => {
+function routeHarnessFixture(t) {
   const root = scratch(t);
   for (const file of [
     'perf_routes/run.mjs',
@@ -994,6 +992,90 @@ test('resume checks the browser identity of later saved sessions before replacin
     mkdirSync(dirname(dst), { recursive: true });
     copyFileSync(new URL(`../scripts/${file}`, import.meta.url), dst);
   }
+  return root;
+}
+
+function invokeRoutes(root, argv, env = {}) {
+  return spawnSync(process.execPath, ['scripts/perf_routes/run.mjs', ...argv], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 10000,
+    env: { ...process.env, ...env },
+  });
+}
+
+function fixtureGit(root, ...args) {
+  return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+}
+
+function fixtureCommit(root, message) {
+  fixtureGit(root, 'add', 'package-lock.json', 'public');
+  fixtureGit(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--no-gpg-sign', '-qm', message);
+}
+
+function archivedArmFixture(t) {
+  const root = routeHarnessFixture(t);
+  fixtureGit(root, 'init', '-q', '-b', 'main');
+  writeFileSync(join(root, 'package-lock.json'), '{}');
+  for (const family of ['lc0', 'maia3']) {
+    const manifest = join(root, 'public/models', family, 'manifest.json');
+    mkdirSync(dirname(manifest), { recursive: true });
+    writeFileSync(manifest, '{}');
+  }
+  fixtureCommit(root, 'baseline');
+  return root;
+}
+
+test('a single-repeat dry run accepts two refs only if they resolve to the same commit', (t) => {
+  const root = archivedArmFixture(t);
+  const argv = (candidate, ...extra) => [
+    '--baseline', 'main', '--candidate', candidate, '--repeats', '1', '--browser', 'chrome', '--journey', 'navigation', '--dry-run', ...extra,
+  ];
+  const smoke = invokeRoutes(root, argv('HEAD'));
+  assert.equal(smoke.status, 0, smoke.stderr);
+  assert.deepEqual(JSON.parse(smoke.stdout.slice(smoke.stdout.indexOf('\n') + 1)).map((cell) => cell.arm), ['baseline', 'candidate']);
+
+  fixtureGit(root, 'checkout', '-qb', 'candidate');
+  writeFileSync(join(root, 'package-lock.json'), '{"candidate":true}');
+  fixtureCommit(root, 'candidate');
+  const different = invokeRoutes(root, argv('HEAD'));
+  assert.notEqual(different.status, 0);
+  assert.match(different.stderr, /same-build smoke/);
+
+  const served = invokeRoutes(root, argv('main', '--baseline-url', 'http://localhost:80', '--candidate-url', 'http://localhost:81'));
+  assert.notEqual(served.status, 0);
+  assert.match(served.stderr, /same-build smoke/);
+});
+
+test('a failed archived build cleans up only its own staging files', (t) => {
+  const root = archivedArmFixture(t);
+  writeFileSync(join(root, 'package-lock.json'), '{"worktree":true}');
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'npm'), `#!/bin/sh
+case "$1" in
+  ci) mkdir node_modules; touch node_modules/installed ;;
+  run) test "$2" = build:client && test -f node_modules/installed && exit 23; exit 24 ;;
+esac
+`, { mode: 0o755 });
+  const builds = join(root, 'out/builds');
+  const oldStage = 'baseline.staging-earlier-attempt';
+  const argv = ['--baseline', 'HEAD', '--candidate', 'HEAD', '--build-only', '--out', 'out', '--resume'];
+  const failBuild = () => {
+    const result = invokeRoutes(root, argv, { PATH: `${bin}:${process.env.PATH}` });
+    assert.match(result.stderr, /env exited 23/);
+  };
+  failBuild();
+  assert.deepEqual(readdirSync(builds), []);
+  mkdirSync(join(builds, oldStage));
+  failBuild();
+  assert.deepEqual(readdirSync(builds), [oldStage]);
+});
+
+test('resume checks the browser identity of later saved sessions before replacing a truncated first result', {
+  skip: !!platformProblem({ browser: 'chrome' }),
+}, (t) => {
+  const root = routeHarnessFixture(t);
   writeFileSync(
     join(root, 'scripts/perf_routes/session.mjs'),
     `
@@ -1029,13 +1111,7 @@ test('resume checks the browser identity of later saved sessions before replacin
     '--lock-dir',
     'mutex',
   ];
-  const invoke = (version, flag) =>
-    spawnSync(process.execPath, ['scripts/perf_routes/run.mjs', ...argv, flag], {
-      cwd: root,
-      encoding: 'utf8',
-      timeout: 10000,
-      env: { ...process.env, TEST_BROWSER_VERSION: version },
-    });
+  const invoke = (version, flag) => invokeRoutes(root, [...argv, flag], { TEST_BROWSER_VERSION: version });
   const prepare = invoke('149.0', '--build-only');
   assert.equal(prepare.status, 0, prepare.stderr);
   const cells = plan(parseArgs(argv));
@@ -1045,6 +1121,7 @@ test('resume checks the browser identity of later saved sessions before replacin
   for (const i of [1, 2, 3]) save(i, '149.0');
 
   const updated = invoke('150.0', '--resume');
+  assert.equal(updated.status, 2, updated.stderr);
   assert.match(updated.stderr, /browser build changed mid-cohort \(150\.0\); restore 149\.0/);
   assert.equal(readJson(path(0)).browserMismatch, '150.0');
   assert.equal(existsSync(join(root, 'out/runs.jsonl')), false);
@@ -1257,21 +1334,29 @@ test('a session wrapper records its PID before waiting and clears it on exit; on
   }
 });
 
-test('a failed owner record stops the just-spawned session before the caller can release the mutex', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'perf-routes-owner-fail-'));
-  const pidFile = join(dir, 'child.pid');
-  try {
-    const child = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 30000)`;
-    // The sessions directory is missing, so the owner record cannot be written.
-    await assert.rejects(runOwnedSession(process.execPath, ['-e', child], new AbortController().signal, null, join(dir, 'missing/000.json')), /ENOENT/);
-    // A child left running would have written its PID by now.
-    await new Promise((r) => setTimeout(r, 500));
-    if (existsSync(pidFile)) {
-      const pid = Number(readFileSync(pidFile, 'utf8'));
-      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, 'the unrecorded child must be stopped');
+test('a slow, failed owner registration never starts the benchlock wrapper', { timeout: 5000 }, async (t) => {
+  const resultFile = join(scratch(t), 'attempt.json');
+  const started = `${resultFile}.started`;
+  const write = fs.writeFileSync;
+  const sleeper = new Int32Array(new SharedArrayBuffer(4));
+  const failure = t.mock.method(fs, 'writeFileSync', (file, ...args) => {
+    if (file === ownerRecord(resultFile)) {
+      const until = Date.now() + 500;
+      while (!existsSync(started) && Date.now() < until) Atomics.wait(sleeper, 0, 0, 5);
+      throw Error('Owner write failed');
     }
+    return write(file, ...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(
+      runOwnedSession('/bin/sh', ['-c', ': > "$1"', 'benchlock-fixture', started], new AbortController().signal, resultFile, resultFile),
+      /Owner write failed/,
+    );
+    assert.equal(existsSync(started), false);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    failure.mock.restore();
+    syncBuiltinESMExports();
   }
 });
 
