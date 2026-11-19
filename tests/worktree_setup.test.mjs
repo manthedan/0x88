@@ -108,12 +108,18 @@ test('svelte-check rejects a public env export that only exists in the main chec
   write(join(repo, 'node_modules/vite/client.d.ts'), '');
   assert.equal(setup(worktree).status, 0);
 
-  for (const [dir, name] of [[repo, 'MAIN_ONLY'], [worktree, 'WORKTREE_ONLY']]) {
+  for (const [dir, name] of [
+    [repo, 'MAIN_ONLY'],
+    [worktree, 'WORKTREE_ONLY'],
+  ]) {
     write(join(dir, APP_TYPES), `import '@sveltejs/kit';\nimport './env.js';\n`);
     write(join(dir, 'node_modules/$app/types/env.d.ts'), `declare module '$app/env/public' { export const ${name}: string; }`);
   }
   write(join(worktree, 'node_modules/$app/tsconfig.json'), '{}');
-  write(join(worktree, 'src/probe.svelte'), `<script lang="ts">\nimport { MAIN_ONLY, WORKTREE_ONLY } from '$app/env/public';\n</script>\n<p>{MAIN_ONLY} {WORKTREE_ONLY}</p>\n`);
+  write(
+    join(worktree, 'src/probe.svelte'),
+    `<script lang="ts">\nimport { MAIN_ONLY, WORKTREE_ONLY } from '$app/env/public';\n</script>\n<p>{MAIN_ONLY} {WORKTREE_ONLY}</p>\n`,
+  );
 
   const config = join(worktree, 'tsconfig.json');
   cpSync(new URL('../tsconfig.json', import.meta.url), config);
@@ -253,13 +259,16 @@ test('setup and --check reject a dangling $app symlink', (t) => {
 test('a perf:routes archive with the same lockfile generates its own $app types', (t) => {
   const { ws, repo, worktree } = fixture(t);
   write(join(worktree, 'package.json'), JSON.stringify({ scripts: { 'build:client': 'node fake-build.mjs' } }));
-  write(join(worktree, 'fake-build.mjs'), `import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+  write(
+    join(worktree, 'fake-build.mjs'),
+    `import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 realpathSync('node_modules/.bin/vite');
 for (const [dir, file] of [['node_modules/$app/types', 'index.d.ts'], ['dist-client/app/analysis', 'index.html']]) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(dir + '/' + file, 'archive build');
 }
-`);
+`,
+  );
   run('git', ['add', 'package.json', 'fake-build.mjs'], worktree);
   run('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'test build'], worktree);
   for (const file of ['perf_routes', 'lib', 'perf_matrix/proxy.mjs', 'serve_isolated_static.mjs']) {

@@ -138,15 +138,18 @@ export async function shutdownDelay(ms, signal) {
 export async function runOwnedSession(bin, argv, signal, wrappedResultFile, ownedResultFile) {
   signal.throwIfAborted();
   // Separate from terminal Ctrl-C; don't interrupt a benchlock wrapper that holds a live session's mutex.
+  const gatedExec = 'shopt -s execfail; read -r start <&3 || exit 2; { exec "$@"; } 3>&-; printf "%s" "$?" >&3; exit 2';
   const child = ownedResultFile
-    ? spawn('/bin/sh', ['-c', 'read -r start <&3 || exit 2; exec 3<&-; exec "$@"', 'perf:routes', bin, ...argv], {
+    ? spawn('/bin/bash', ['-p', '-c', gatedExec, 'perf:routes', bin, ...argv], {
         stdio: ['inherit', 'inherit', 'inherit', 'pipe'],
         detached: true,
       })
     : spawn(bin, argv, { stdio: 'inherit', detached: true });
   const closed = once(child, 'close');
+  let execErrorStatus = '';
   if (ownedResultFile && child.pid) {
     const startPipe = child.stdio[3];
+    startPipe.setEncoding('utf8').on('data', (chunk) => (execErrorStatus += chunk));
     startPipe.on('error', () => {});
     try {
       writeFileSync(ownerRecord(ownedResultFile), `${child.pid}\n`);
@@ -171,6 +174,7 @@ export async function runOwnedSession(bin, argv, signal, wrappedResultFile, owne
   try {
     const [status] = await closed;
     if (ownedResultFile) rmSync(ownerRecord(ownedResultFile), { force: true });
+    if (execErrorStatus) throw Error(`Unable to launch ${bin} (exec exited ${execErrorStatus})`);
     return status;
   } finally {
     signal.removeEventListener('abort', stop);

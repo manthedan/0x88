@@ -1,7 +1,19 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import fs, { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import fs, {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer, get } from 'node:http';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -1004,6 +1016,65 @@ function invokeRoutes(root, argv, env = {}) {
   });
 }
 
+test('a non-executable benchlock aborts without recording an outcome and can be fixed for resume', { skip: !!platformProblem({ browser: 'chrome' }) }, (t) => {
+  const root = routeHarnessFixture(t);
+  const benchlock = join(root, 'benchlock');
+  writeFileSync(benchlock, '#!/bin/sh\nexec "$@"\n', { mode: 0o644 });
+  writeFileSync(
+    join(root, 'scripts/perf_routes/session.mjs'),
+    `
+    import { readFileSync, writeFileSync } from 'node:fs';
+    const [spec, out] = process.argv.slice(2);
+    const cell = JSON.parse(readFileSync(spec, 'utf8'));
+    writeFileSync(out, JSON.stringify({ ...cell, status: 'ok', metrics: {} }));
+  `,
+  );
+  const origin = 'http://127.0.0.1:1';
+  const argv = [
+    '--baseline',
+    'a',
+    '--candidate',
+    'a',
+    '--baseline-url',
+    origin,
+    '--candidate-url',
+    origin,
+    '--browser',
+    'chrome',
+    '--repeats',
+    '1',
+    '--journey',
+    'navigation',
+    '--benchlock',
+    benchlock,
+    '--out',
+    'out',
+  ];
+  const sessions = join(root, 'out/sessions');
+  const index = join(root, 'out/runs.jsonl');
+  const refused = invokeRoutes(root, argv);
+  assert.deepEqual(readdirSync(sessions), ['000-chrome-navigation-baseline-r0.spec.json'], refused.stderr);
+  assert.equal(existsSync(index), false);
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /Unable to launch .*benchlock/);
+
+  fs.chmodSync(benchlock, 0o755);
+  const resumed = invokeRoutes(root, [...argv, '--resume']);
+  assert.equal(resumed.status, 2, resumed.stderr); // One repeat cannot pass the gate.
+  assert.match(resumed.stdout, /reusing 0\/2 sessions/);
+  const rows = readFileSync(index, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    rows.map(({ arm, status }) => [arm, status]),
+    [
+      ['baseline', 'ok'],
+      ['candidate', 'ok'],
+    ],
+  );
+});
+
 function fixtureGit(root, ...args) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
@@ -1029,11 +1100,25 @@ function archivedArmFixture(t) {
 test('a single-repeat dry run accepts two refs only if they resolve to the same commit', (t) => {
   const root = archivedArmFixture(t);
   const argv = (candidate, ...extra) => [
-    '--baseline', 'main', '--candidate', candidate, '--repeats', '1', '--browser', 'chrome', '--journey', 'navigation', '--dry-run', ...extra,
+    '--baseline',
+    'main',
+    '--candidate',
+    candidate,
+    '--repeats',
+    '1',
+    '--browser',
+    'chrome',
+    '--journey',
+    'navigation',
+    '--dry-run',
+    ...extra,
   ];
   const smoke = invokeRoutes(root, argv('HEAD'));
   assert.equal(smoke.status, 0, smoke.stderr);
-  assert.deepEqual(JSON.parse(smoke.stdout.slice(smoke.stdout.indexOf('\n') + 1)).map((cell) => cell.arm), ['baseline', 'candidate']);
+  assert.deepEqual(
+    JSON.parse(smoke.stdout.slice(smoke.stdout.indexOf('\n') + 1)).map((cell) => cell.arm),
+    ['baseline', 'candidate'],
+  );
 
   fixtureGit(root, 'checkout', '-qb', 'candidate');
   writeFileSync(join(root, 'package-lock.json'), '{"candidate":true}');
@@ -1052,12 +1137,16 @@ test('a failed archived build cleans up only its own staging files', (t) => {
   writeFileSync(join(root, 'package-lock.json'), '{"worktree":true}');
   const bin = join(root, 'bin');
   mkdirSync(bin);
-  writeFileSync(join(bin, 'npm'), `#!/bin/sh
+  writeFileSync(
+    join(bin, 'npm'),
+    `#!/bin/sh
 case "$1" in
   ci) mkdir node_modules; touch node_modules/installed ;;
   run) test "$2" = build:client && test -f node_modules/installed && exit 23; exit 24 ;;
 esac
-`, { mode: 0o755 });
+`,
+    { mode: 0o755 },
+  );
   const builds = join(root, 'out/builds');
   const oldStage = 'baseline.staging-earlier-attempt';
   const argv = ['--baseline', 'HEAD', '--candidate', 'HEAD', '--build-only', '--out', 'out', '--resume'];
@@ -1331,6 +1420,13 @@ test('a session wrapper records its PID before waiting and clears it on exit; on
     assert.equal(liveOwner(resultFile), null);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a launched wrapper can return 126 or 127 as an ordinary exit status', async (t) => {
+  const file = join(scratch(t), 'attempt.json');
+  for (const status of [126, 127]) {
+    assert.equal(await runOwnedSession('/bin/sh', ['-c', `exit ${status}`], new AbortController().signal, file, file), status);
   }
 });
 

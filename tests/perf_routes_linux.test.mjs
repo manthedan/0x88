@@ -160,7 +160,10 @@ test('Chrome sampling accepts the async Linux reader and keeps VRAM separately v
 });
 
 test('a renderer exit preserves the initial VRAM peak without replacing the refreshed reading', async () => {
-  const discoveries = [{ rendererPids: [1], gpuPids: [3] }, { rendererPids: [2], gpuPids: [3] }];
+  const discoveries = [
+    { rendererPids: [1], gpuPids: [3] },
+    { rendererPids: [2], gpuPids: [3] },
+  ];
   const reads = [
     new Map([[3, { cur: 400, life: 400, interval: 400, vram: 300 }]]),
     new Map([
@@ -168,7 +171,10 @@ test('a renderer exit preserves the initial VRAM peak without replacing the refr
       [3, { cur: 200, life: 400, interval: 200, vram: 100 }],
     ]),
   ];
-  const { gpu } = await chromeFootprint(async () => discoveries.shift(), async () => reads.shift());
+  const { gpu } = await chromeFootprint(
+    async () => discoveries.shift(),
+    async () => reads.shift(),
+  );
   assert.equal(gpu.cur, 200);
   assert.equal(gpu.vram, 100);
   assert.equal(gpu.vramPeak, 300);
