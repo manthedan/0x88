@@ -104,3 +104,28 @@ test('the local static server answers unknown paths like Netlify: 404 status, 40
   assert.equal(missing.headers.get('cross-origin-embedder-policy'), 'require-corp');
   assert.equal(await missing.text(), 'not found shell');
 });
+
+// adapter-static skips its "every route must prerender" check once `fallback` is set; ours keeps it.
+test('the static adapter refuses a route that does not prerender, before touching the output dir', async (t) => {
+  const out = await mkdtemp(join(tmpdir(), 'kit-strict-'));
+  t.after(() => rm(out, { recursive: true, force: true }));
+  await writeFile(join(out, 'keep.txt'), 'untouched');
+  const { createAdapter } = await import('../kit.config.js');
+  const calls = [];
+  const builder = {
+    config: { kit: {}, router: {} },
+    routes: [
+      { id: '/app/play', prerender: true },
+      { id: '/app/analysis', prerender: false },
+      { id: '/docs', prerender: 'auto' },
+    ],
+    log: Object.assign(() => undefined, { info() {}, warn() {}, error() {}, minor() {} }),
+    generateEnvModule: () => calls.push('env'),
+    writeClient: () => calls.push('client'),
+    writePrerendered: () => calls.push('prerendered'),
+    generateFallback: async () => calls.push('fallback'),
+  };
+  await assert.rejects(createAdapter(out).adapt(builder), /every route must prerender.*\/app\/analysis, \/docs/);
+  assert.deepEqual(calls, []);
+  assert.equal(await readFile(join(out, 'keep.txt'), 'utf8'), 'untouched');
+});

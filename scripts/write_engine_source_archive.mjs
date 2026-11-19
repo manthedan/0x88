@@ -398,7 +398,9 @@ async function writeArchiveDocs(config, archiveRoot) {
       : config.engine === 'plentychess'
         ? 'Install Node, Emscripten, a native C++ compiler, make, curl and git (no npm dependencies are needed for the engine build), then run:'
         : 'Install Node dependencies and the documented upstream toolchain, then run:';
-  const install = config.engine === 'stockfish' || config.engine === 'plentychess' ? '' : 'npm ci\n';
+  // --ignore-scripts: the app's prepare hook (svelte-kit sync) loads vite.config.ts and its
+  // imports, which this partial tree omits. The engine scripts need no package install scripts.
+  const install = config.engine === 'stockfish' || config.engine === 'plentychess' ? '' : 'npm ci --ignore-scripts\n';
   await writeFile(
     join(archiveRoot, 'BUILDING.md'),
     `# ${config.engine} ${config.flavor} corresponding source\n\nThis archive contains the upstream source snapshot, local browser integration scripts/adapters, docs, and required network/model asset provenance for the generated ${config.engine} browser artifacts.\n\n## Rebuild\n\n${setup}\n\n\`\`\`sh\n${install}${rebuildCommand(config)}\n\`\`\`\n\n${patchNote}\n\nThe build writes outputs under \`out/public/${config.engine}/\` or the upstream build directory as noted by the command above.\n\nSee \`ASSET_PROVENANCE.json\` for network/model source URLs and hashes.\n`,

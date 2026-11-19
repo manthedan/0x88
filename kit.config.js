@@ -68,6 +68,10 @@ export function createAdapter(dir) {
   return {
     ...staticAdapter,
     async adapt(builder) {
+      // Setting `fallback` turns off adapter-static's strict check, so a page that opted out of
+      // prerendering would be left out of the static output and 404 on direct visits. Keep it.
+      const dynamic = builder.routes.filter((route) => route.prerender !== true).map((route) => route.id);
+      if (dynamic.length) throw new Error(`static build: every route must prerender, but these do not: ${dynamic.join(', ')}`);
       await staticAdapter.adapt(builder);
       const file = join(dir, '404.html');
       const html = await readFile(file, 'utf8');
