@@ -13,7 +13,8 @@ export function showPhoneLargeNetFallback(modelOverride = false): void {
   }
 }
 
-let activeConsent: AbortController | undefined;
+type ConsentRequest = { controller: AbortController; dialog?: HTMLDialogElement };
+let activeConsent: ConsentRequest | undefined;
 
 /**
  * 'cached' approves no download: the model was cached when checked, and storage
@@ -27,6 +28,8 @@ type LargeNetConsentResult = LargeNetConsent | 'aborted';
  * still be there, so the inspection is overridden to ask as for a download, never 'cached'.
  */
 export async function requestLargeNetRedownloadConsent(config: BigNetConfig, signal?: AbortSignal): Promise<LargeNetConsentResult> {
+  // HTML dialogs clear `open` synchronously and dispatch `close` in a later task.
+  if (activeConsent?.dialog?.open === false) activeConsent = undefined;
   if (activeConsent) return 'aborted';
   const uncached = (inspected: BigNetConfig, inspectSignal?: AbortSignal) =>
     inspectLargeNetDownload(inspected, inspectSignal).then((state) => ({ ...state, cached: false }));
@@ -52,11 +55,13 @@ async function requestDownloadConsent(
   inspect = inspectLargeNetDownload,
 ): Promise<LargeNetConsentResult> {
   if (signal?.aborted) return 'aborted';
-  const request = new AbortController();
-  activeConsent?.abort();
+  const controller = new AbortController();
+  const request: ConsentRequest = { controller };
+  activeConsent?.controller.abort();
   activeConsent = request;
   try {
-    return await showLargeNetConsent(config, signal ? AbortSignal.any([signal, request.signal]) : request.signal, desktopWarning, downloadNotice, inspect);
+    const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    return await showLargeNetConsent(request, config, requestSignal, desktopWarning, downloadNotice, inspect);
   } finally {
     if (activeConsent === request) activeConsent = undefined;
   }
@@ -64,6 +69,7 @@ async function requestDownloadConsent(
 
 /** Native modal, like Analysis's engine manager: inert background, focus trap and Escape. */
 async function showLargeNetConsent(
+  request: ConsentRequest,
   config: BigNetConfig,
   signal?: AbortSignal,
   desktopWarning = true,
@@ -165,6 +171,7 @@ async function showLargeNetConsent(
       { once: true },
     );
     signal?.addEventListener('abort', abort, { once: true });
+    request.dialog = dialog;
     dialog.showModal();
     cancel.focus();
   });

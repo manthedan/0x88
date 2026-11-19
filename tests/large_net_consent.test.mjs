@@ -28,8 +28,9 @@ function browser(t, device = 'phone') {
       this.open = true;
     }
     close() {
+      if (!this.open) return;
       this.open = false;
-      this.dispatchEvent(new Event('close'));
+      setImmediate(() => this.dispatchEvent(new Event('close')));
     }
     remove() {
       this.isConnected = false;
@@ -257,6 +258,22 @@ test('a BT4 cache retry leaves an open t3 picker prompt alone', async (t) => {
   assert.ok(activeDialog === dialog, 'the picker still owns the dialog');
   assert.equal(await retry, 'aborted');
   assert.equal(await picker, true);
+});
+
+test('a BT4 cache retry can prompt before the dismissed t3 picker fires its close event', async (t) => {
+  const f = browser(t, 'desktop');
+  const picker = f.request(BIG_NETS.t3, { desktopWarning: true });
+  const pickerDialog = await f.dialog();
+  choose(pickerDialog, false);
+  assert.equal(pickerDialog.open, false);
+  assert.equal(pickerDialog.isConnected, true, 'the picker close event has not fired');
+
+  const retry = requestLargeNetRedownloadConsent(BIG_NETS.bt4, f.abort.signal);
+  assert.equal(await picker, false);
+  const retryDialog = await f.dialog();
+  assert.notEqual(retryDialog, pickerDialog);
+  choose(retryDialog, true);
+  assert.equal(await retry, 'download');
 });
 
 test('a t3 picker supersedes an open BT4 cache retry without dismissing it', async (t) => {
