@@ -533,8 +533,10 @@ test('pollUntil resolves once the check passes, retries throws, and times out', 
 test('pollUntil does not check again when the last timer fires before Date.now() reaches the deadline', async (t) => {
   let now = 1_000;
   t.mock.method(Date, 'now', () => now);
+  let early = true;
   t.mock.method(globalThis, 'setTimeout', (resolve, ms) => {
-    now += ms - 1;
+    now += early ? ms - 1 : ms;
+    early = false;
     resolve();
   });
   let checks = 0;
