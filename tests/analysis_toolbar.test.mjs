@@ -30,4 +30,6 @@ test('the Stop progress slot reserves no width while empty and never clips the b
   assert.match(template, /\.stop-progress:empty\{display:none\}/);
   assert.doesNotMatch(template, /\.stop-progress\{[^}]*flex:0 0 \d/);
   assert.match(template, /\.stop-action\{[^}]*min-width:max-content/);
+  // "searching" is ~58px at 12px; percentages are narrower. One floor keeps Stop's width fixed during a run.
+  assert.match(template, /\.stop-progress\{[^}]*min-width:5em/);
 });
