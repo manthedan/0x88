@@ -60,7 +60,6 @@ function abortError(): Error {
   return error;
 }
 
-/** Wait for `previous` to settle, or reject with AbortError when `signal` aborts first. */
 function goCommand(options: RecklessOptions): string {
   if (options.movetimeMs && options.movetimeMs > 0) return `go movetime ${Math.floor(options.movetimeMs)}`;
   return `go depth ${Math.max(1, Math.floor(options.depth ?? 4))}`;
@@ -104,7 +103,6 @@ export function canUsePersistentViridithasWasi(): boolean {
   return typeof SharedArrayBuffer !== 'undefined' && (globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
 }
 
-/** Experimental WASI adapter for patched Viridithas. */
 export class ViridithasEngine implements BrowserUciEngine {
   readonly name = 'viridithas-wasi';
   private worker: Worker | null = null;
@@ -239,12 +237,6 @@ export class ViridithasEngine implements BrowserUciEngine {
     this.persistentMultipvCommand = null;
   }
 
-  /**
-   * Run `fn` after every earlier request. A request cancelled while it waits
-   * for its turn rejects with AbortError at once instead of waiting for another
-   * caller's work. Releasing its gate early is safe: the queue tail still
-   * chains through `previous`, so later requests keep their order.
-   */
   private runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     return this.queue.run(async () => {
       // Work queued before dispose() must not recreate (and leak) a worker.

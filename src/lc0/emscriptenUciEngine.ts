@@ -240,15 +240,6 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
     return this.abortError(`${this.config.label} engine disposed`);
   }
 
-  /**
-   * Run `fn` after every earlier request. A request cancelled while it waits
-   * for its turn rejects with AbortError at once instead of waiting for another
-   * caller's work (which may be a cold init with no timeout). Releasing its
-   * gate early is safe: the queue tail still chains through `previous`, so
-   * later requests keep their order. Every `fn` starts with
-   * prewarmUnlocked(signal), whose first request rejects an aborted signal the
-   * same way, so the early rejection only changes when it settles.
-   */
   private runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     return this.queue.run(async () => {
       try {

@@ -355,7 +355,6 @@ export function engineResourceProfile(family: EngineFamily): EngineFamilyResourc
   return engineFamilyDefinition(family).resource;
 }
 
-/** Lc0 variants backed by the lazy WebGPU big-net worker (bt4Engine.ts). */
 export function isLc0BigNetVariant(variant: string): variant is 'bt4' | 't3' {
   return variant === 'bt4' || variant === 't3';
 }

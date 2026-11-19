@@ -1,10 +1,11 @@
 import { terminateEngineWorker } from './engineRetirement.ts';
 
+const closing = new WeakMap<Worker, Promise<void>>();
+
 /** Terminal worker handshake. Detach the owner synchronously before calling this.
  * The dedicated listener still observes the ack after the owner's transport is retired.
  * Timeout/error means best effort failed; termination remains the hard boundary.
  */
-const closing = new WeakMap<Worker, Promise<void>>();
 export function disposeOrtWorker(worker: Worker, timeoutMs = 1500): Promise<void> {
   const existing = closing.get(worker);
   if (existing) return existing;

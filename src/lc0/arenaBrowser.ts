@@ -1170,10 +1170,8 @@ function stmScoreToWhiteScore(fen: string, stmScore: number): number {
   return fenTurn(fen) === 'w' ? score : 1 - score;
 }
 
-// All engine scores are displayed from White's perspective (positive = good for
-// White), matching the eval bar and standard chess GUIs, so the sign no longer
-// flips with the side to move. Engines report from the side-to-move POV, so flip
-// when Black is to move (WDL swaps win/loss; Q and cp negate).
+// Scores are displayed from White's perspective (positive = good for White), matching the
+// eval bar. Engines report from the side to move, so Black-to-move scores are flipped.
 function toWhiteWdl(wdl: [number, number, number], fen: string): [number, number, number] {
   return fenTurn(fen) === 'w' ? wdl : [wdl[2], wdl[1], wdl[0]];
 }
@@ -1760,8 +1758,6 @@ function chartPlyFromClick(chartId: 'evalChart' | 'timeChart' | 'npsChart', targ
   return Math.round(xMin + frac * (xMax - xMin));
 }
 
-// The arena is a two-seat head-to-head. Each seat uses the same staged selector
-// pattern as the analysis page: family → variant → strength.
 function strengthMeta(family: EngineFamily) {
   return engineStrengthMeta(family, 'arena');
 }

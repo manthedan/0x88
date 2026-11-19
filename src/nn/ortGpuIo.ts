@@ -1,9 +1,8 @@
 // GPU-resident IO for an ORT WebGPU session (docs/ort_invoke_overhead_2026-11.md).
 //
-// The shipped path hands ORT a CPU input tensor and asks for CPU outputs. ORT
-// then uploads the input through a fresh staging buffer and runs one
-// MemcpyToHost per output, each its own submit + mapAsync + wait, one after
-// the other. This binding instead:
+// With CPU tensors (ioMode 'cpu'), ORT uploads the input through a fresh staging
+// buffer and runs one MemcpyToHost per output, each its own submit + mapAsync +
+// wait, one after the other. This binding instead:
 //
 //   - writes the input with queue.writeBuffer into one persistent GPU buffer;
 //   - binds persistent, preallocated GPU output buffers (ORT IO binding);

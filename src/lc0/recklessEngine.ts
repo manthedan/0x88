@@ -112,7 +112,6 @@ function abortError(): Error {
   return error;
 }
 
-/** Wait for `previous` to settle, or reject with AbortError when `signal` aborts first. */
 function createSharedInput(capacity = PERSISTENT_STDIN_CAPACITY_BYTES): SharedInput {
   const buffer = new SharedArrayBuffer(SHARED_STDIN_HEADER_BYTES + capacity);
   const control = new Int32Array(buffer, 0, SHARED_STDIN_HEADER_INTS);

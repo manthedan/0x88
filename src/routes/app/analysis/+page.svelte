@@ -451,7 +451,6 @@ onMount(() => {
   .copy-button:global([data-copied=true]){border-color:var(--accent); color:var(--accent-soft-text)}
   .copy-button:global([data-copied=true]) .copy-icon{display:none}
   .copy-button:global([data-copied=true]) .copied-icon{display:block}
-  /* Copied: check icon + accent outline in place (no width change); the live message line says what was copied. */
   .position-toggle:global([aria-expanded=true]){border-color:var(--accent)}
   .tool-button svg, .analysis-overview svg{width:16px; height:16px; flex:0 0 16px; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round}
   .nav svg{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2.3; stroke-linecap:round; stroke-linejoin:round}

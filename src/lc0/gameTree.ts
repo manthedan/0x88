@@ -5,8 +5,7 @@ import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { moveToSan } from '../chess/san.ts';
 
 /**
- * A branching game/variation tree, the shared spine for the analysis board and
- * single-engine play modes. Each node stores the move that led to it (from its
+ * A branching game/variation tree. Each node stores the move that led to it (from its
  * parent) and the resulting FEN; children[0] is the mainline continuation and
  * additional children are variations.
  */

@@ -140,7 +140,7 @@ export function reviewGame(positions: readonly ReviewPosition[], moves: readonly
   return { moves: reviewed, accuracy, counts, criticalMoves };
 }
 
-/** Pure hook for later practice/report workflows. Ranked by loss, limited to real errors. */
+/** Plies of inaccuracies, mistakes and blunders, ranked by loss. */
 export function criticalReviewPlies(review: GameReview, limit = 5): number[] {
   return review.moves
     .filter((move) => ['inaccuracy', 'mistake', 'blunder'].includes(move.class))

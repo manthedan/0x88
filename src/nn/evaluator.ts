@@ -115,13 +115,6 @@ function evalCacheKey(board: BoardState, context: EvaluationContext | undefined,
   return `${fen}\nh:${history}\nl:${moves}\na:${attackMask}`;
 }
 
-/**
- * Browser-side neural-eval cache for playable frontend search/render paths.
- *
- * Keyed by current FEN + history FENs + ordered legal move action IDs by default.
- * Including legal moves matters for MoveFormer/SquareFormer move-token exports where
- * the provided legal list is part of the evaluator input, not just a convenience.
- */
 export interface BrokeredEvaluatorMetrics {
   logicalRequests: number;
   logicalPositions: number;
@@ -143,6 +136,11 @@ export interface BrokeredEvaluatorOptions {
   label?: string;
 }
 
+/**
+ * Neural-eval cache keyed by current FEN + history FENs + ordered legal move action IDs by default.
+ * Legal moves are part of the key because MoveFormer/SquareFormer move-token exports take the
+ * provided legal list as evaluator input.
+ */
 export class CachedEvaluator implements Evaluator {
   readonly inner: Evaluator;
   readonly label: string;

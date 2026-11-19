@@ -134,7 +134,7 @@ export function analysisMoveGroups(bestLines: AnalysisLine[]): AnalysisMoveGroup
   return [...groups.values()].sort((a, b) => b.engines.length - a.engines.length);
 }
 
-/** Spread (pawns) at or above which differing best moves are worth calling a real disagreement. */
+/** Spread at or above which differing best moves are worth calling a real disagreement. */
 export const STRONG_DISAGREEMENT_CP = 100;
 
 /** Verdict first: a tie at the top is a split, never a winner; otherwise say how many engines back the move. */
@@ -175,7 +175,6 @@ const ENGINE_MONOGRAMS: [RegExp, string][] = [
   [/^maia/i, 'MA'],
 ];
 
-/** Two-character uppercase monogram for the engine's colour avatar (one rule for every engine). */
 export function engineMonogram(engine: string): string {
   const name = analysisEngineName(engine).trim();
   const known = ENGINE_MONOGRAMS.find(([pattern]) => pattern.test(name));

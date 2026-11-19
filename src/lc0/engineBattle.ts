@@ -5,14 +5,6 @@ import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import type { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import type { Lc0PuctSearcher } from './search.ts';
 
-/**
- * Minimal engine-vs-engine battle harness. The core game loop is engine-
- * agnostic: any opponent (LC0 policy-only, LC0 fixed-visit search, or an
- * external UCI engine such as Stockfish.wasm) is a BattleEngine. LC0 adapters
- * are provided; a Stockfish opponent is wired by implementing the same
- * interface around its UCI loop.
- */
-
 export type GameResultCode = '1-0' | '0-1' | '1/2-1/2';
 
 export interface BattleEngine {

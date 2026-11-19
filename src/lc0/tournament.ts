@@ -10,7 +10,7 @@
 export type TournamentMode = 'match' | 'round-robin' | 'gauntlet';
 
 export interface TournamentPairing {
-  /** Participant ids; `a` holds white in even-numbered games of the pairing. */
+  /** Participant ids; `a` is White in even passes over the opening suite. */
   a: string;
   b: string;
 }
@@ -47,9 +47,8 @@ export function tournamentPairings(mode: TournamentMode, ids: readonly string[])
 }
 
 /**
- * Expand pairings into a per-game schedule: for each pairing, every opening
- * is played `gamesPerOpening` times with colors alternating per game index —
- * the same color-balance rule as the existing two-engine arena loop.
+ * Expand pairings into a per-game schedule: each pairing plays the whole opening
+ * suite `gamesPerOpening` times, swapping colors between passes.
  */
 export function buildSchedule<TOpening>(
   pairings: readonly TournamentPairing[],
