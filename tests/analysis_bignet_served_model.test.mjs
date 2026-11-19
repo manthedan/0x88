@@ -763,7 +763,10 @@ test('an Analysis cache-only load failure asks for forced redownload with a sign
       await running;
       await t3.dispose();
     }
-    assert.deepEqual(FakeWorker.instances.map((worker) => worker.init.noModelDownload), [true]);
+    assert.deepEqual(
+      FakeWorker.instances.map((worker) => worker.init.noModelDownload),
+      [true],
+    );
   }));
 
 test('a rejected big-net acquisition reports that row’s error and keeps the other engines running', () =>

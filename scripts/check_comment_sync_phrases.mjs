@@ -16,18 +16,7 @@ const SOURCE_FILE = /\.(ts|js|mjs|svelte|css|html)$/;
  * Sync-phrase comments that may stay for now: each entry permits one comment in `path` whose normalized text
  * contains `comment`. Remove an entry once its comment is gone.
  */
-export const ALLOWLIST = [
-  {
-    path: 'src/lc0/analysisBrowser.ts',
-    comment: 'keep in step with engineAnalysisCacheKey',
-    reason: 'wave 2 (fenced during comment cleanup 1): variant->big-net key mapping copied in several places; needs bigNetKeyForVariant() in engineCatalog.ts',
-  },
-  {
-    path: 'src/lc0/batchingStrengthMatch.ts',
-    comment: 'Copied from playBrowser.ts. tests/batching_strength.test.mjs checks the source still has these literals.',
-    reason: 'wave 2 (fenced during comment cleanup 1): constants copied from playBrowser.ts and kept equal by a source-scraping test; export them once',
-  },
-];
+export const ALLOWLIST = [];
 
 /** A JS/TS comment run: one block comment, or consecutive line comments. */
 function scriptComments(text, lineOffset) {

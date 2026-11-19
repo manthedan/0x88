@@ -282,6 +282,7 @@ function analysisOwner(native) {
       el: (id) => (id === 'message' ? message : node()),
       selectEl: node,
       analysisCanPrepare: () => true,
+      requestLargeNetRedownloadConsent: () => assert.fail('unexpected cache-only redownload prompt'),
       maybeEl: node,
       dispatchAnalysis: nop,
       clearAnalysisSearchProgress: nop,
