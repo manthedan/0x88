@@ -10,6 +10,7 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   truncateSync,
@@ -97,6 +98,46 @@ test('links dependencies and models, keeps generated files local, and reruns as 
   assert.match(second.stdout, /0 links created/);
   assert.equal(readFileSync(join(worktree, APP_TYPES), 'utf8'), '// worktree types\n');
   assert.equal(setup(worktree, '--check').status, 0);
+});
+
+test('svelte-check rejects a public env export that only exists in the main checkout', (t) => {
+  const { repo, worktree } = fixture(t);
+  const kit = join(repo, 'node_modules/@sveltejs/kit');
+  write(join(kit, 'package.json'), '{"types":"./index.d.ts"}');
+  write(join(kit, 'index.d.ts'), `import '$app/types';\n`);
+  write(join(repo, 'node_modules/vite/client.d.ts'), '');
+  assert.equal(setup(worktree).status, 0);
+
+  for (const [dir, name] of [[repo, 'MAIN_ONLY'], [worktree, 'WORKTREE_ONLY']]) {
+    write(join(dir, APP_TYPES), `import '@sveltejs/kit';\nimport './env.js';\n`);
+    write(join(dir, 'node_modules/$app/types/env.d.ts'), `declare module '$app/env/public' { export const ${name}: string; }`);
+  }
+  write(join(worktree, 'node_modules/$app/tsconfig.json'), '{}');
+  write(join(worktree, 'src/probe.svelte'), `<script lang="ts">\nimport { MAIN_ONLY, WORKTREE_ONLY } from '$app/env/public';\n</script>\n<p>{MAIN_ONLY} {WORKTREE_ONLY}</p>\n`);
+
+  const config = join(worktree, 'tsconfig.json');
+  cpSync(new URL('../tsconfig.json', import.meta.url), config);
+  const svelteCheck = fileURLToPath(new URL('../node_modules/svelte-check/bin/svelte-check', import.meta.url));
+  const result = spawnSync(process.execPath, [svelteCheck, '--tsconfig', config, '--output', 'machine'], { cwd: worktree, encoding: 'utf8' });
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /has no exported member 'MAIN_ONLY'/);
+  assert.match(result.stdout, /COMPLETED \d+ FILES 1 ERRORS 0 WARNINGS/);
+});
+
+test('setup can be retried after main installs dependencies into a generated-only node_modules', (t) => {
+  const { repo, worktree } = fixture(t);
+  const entries = ['.bin', '@scope', 'vite'];
+  for (const name of entries) renameSync(join(repo, 'node_modules', name), join(repo, name));
+  const first = setup(worktree);
+  assert.equal(first.status, 1);
+  assert.match(first.stderr, /node_modules\/\.bin\/vite missing/);
+  write(join(worktree, APP_TYPES), '// local types\n');
+
+  for (const name of entries) renameSync(join(repo, name), join(repo, 'node_modules', name));
+  const retry = setup(worktree);
+  assert.equal(retry.status, 0, retry.stderr);
+  assert.equal(realpathSync(join(worktree, 'node_modules/.bin/vite')), join(repo, 'node_modules/vite/bin/vite.js'));
+  assert.equal(readFileSync(join(worktree, APP_TYPES), 'utf8'), '// local types\n');
 });
 
 test('reconciles added and removed dependencies after matching lockfile updates', (t) => {

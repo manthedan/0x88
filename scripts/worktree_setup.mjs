@@ -20,7 +20,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
-import { hasSharedNodeModuleLinks, linkNodeModules } from './lib/link_node_modules.mjs';
+import { linkNodeModules, needsNodeModuleLinks } from './lib/link_node_modules.mjs';
 
 const realOrNull = (path) => {
   try {
@@ -114,7 +114,7 @@ const readOrNull = (path) => {
 function nodeModulesPlan(main, worktree) {
   const dir = join(worktree, 'node_modules');
   const stat = lstatIfExists(dir);
-  if (stat && !stat.isSymbolicLink() && !(stat.isDirectory() && hasSharedNodeModuleLinks(join(main, 'node_modules'), dir))) return 'own';
+  if (stat && !stat.isSymbolicLink() && !(stat.isDirectory() && needsNodeModuleLinks(join(main, 'node_modules'), dir))) return 'own';
   const sameLock = readOrNull(join(main, 'package-lock.json')) === readOrNull(join(worktree, 'package-lock.json'));
   return sameLock ? 'share' : 'lock-differs';
 }
