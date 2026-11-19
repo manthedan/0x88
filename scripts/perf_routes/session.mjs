@@ -1,11 +1,12 @@
 // One owned browser session / cold origin / real route journey. Shared matrix OS and proxy helpers.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { hostname, loadavg, platform, release } from 'node:os';
 import { median } from '../lib/perf_canary_stats.mjs';
 import { pgrep, readFootprint, sleep, WORKER_READY_SCRIPT } from '../perf_matrix/common.mjs';
 import { startCountingProxy } from '../perf_matrix/proxy.mjs';
 import {
+  browserIdentity,
   chromeFootprint,
   footprintSum,
   incompleteJsTransfers,
@@ -13,17 +14,23 @@ import {
   jsBytesByRoute,
   naturalVisibilityValid,
   peakFootprint,
+  platformProblem,
   requestFailures,
   safariWebContentPid,
 } from './gate.mjs';
 import { DOCS_READY, MIDGAME, routeFor, runJourney, waitFor } from './journeys.mjs';
 import { checkSessionCancellation, cleanupMarker, safariCreationRefused, shutdownDelay, waitForCleanup, watchShutdown } from './lifecycle.mjs';
+import { LINUX_CHROME_ARGS, LINUX_LIMITATION, linuxFootprintReader, warmWebGpu, webgpuBackendProblem } from './linux.mjs';
 
 const [specFile, outFile] = process.argv.slice(2);
 const spec = JSON.parse(readFileSync(specFile, 'utf8'));
 const probe = `(() => {${WORKER_READY_SCRIPT}})();\n${readFileSync(new URL('./probe.js', import.meta.url), 'utf8')}`;
+const linux = platform() === 'linux';
+// The Linux reader keeps per-PID sampled peaks, so it is created once per session.
+const readChromeFootprint = linux ? linuxFootprintReader() : readFootprint;
 const result = {
   ...spec,
+  platform: platform(),
   at: new Date().toISOString(),
   host: { hostname: hostname(), platform: platform(), release: release(), loadBefore: loadavg() },
   status: 'invalid',
@@ -43,6 +50,7 @@ const guarded =
     return value;
   };
 let proxy, browser, sid, cdp, page, evaluate, navigate, close, sampling, safariPid;
+const consoleWarnings = [];
 const routeMarks = [{ route: routeFor(spec.journey), at: Date.now() }];
 result.routeMarks = routeMarks;
 const mark = (value) => {
@@ -111,7 +119,7 @@ async function sample() {
   const sampledPhase = phase;
   try {
     const { render, gpu } = cdp
-      ? await chromeFootprint(chromePids, readFootprint)
+      ? await chromeFootprint(chromePids, readChromeFootprint)
       : { render: footprintSum([safariPid], readFootprint([safariPid], { reset: true }), 'Safari WebContent'), gpu: null };
     result.samples.push({
       ms: Date.now() - t0,
@@ -120,6 +128,7 @@ async function sample() {
       gpuMb: gpu?.cur ?? null,
       rendererIntervalMb: render.interval,
       gpuIntervalMb: gpu?.interval ?? null,
+      ...(gpu?.vram === undefined ? {} : { gpuVramMb: gpu.vram }),
     });
   } catch (e) {
     samplingError ??= e;
@@ -129,6 +138,17 @@ async function sample() {
 }
 function entryUrl() {
   return `${proxy.url}/app/${routeFor(spec.journey)}/${spec.journey.startsWith('analysis') ? `?fen=${encodeURIComponent(MIDGAME)}` : ''}`;
+}
+// A cohort keeps one browser build (compareRuns refuses a mix). Check right after launch, before
+// measuring, and keep a mismatched identity out of browserVersion so the row cannot poison the cohort;
+// the coordinator stops and a resume re-runs the cell once the cohort's browser is restored.
+function claimBrowser(browserVersion, browserExecutable) {
+  const launched = browserExecutable ? { browserVersion, browserExecutable } : { browserVersion };
+  if (spec.expectedBrowser && browserIdentity(launched) !== spec.expectedBrowser) {
+    result.browserMismatch = browserIdentity(launched);
+    throw Error(`Browser build changed mid-cohort: cohort ran ${spec.expectedBrowser}, this launch is ${result.browserMismatch}`);
+  }
+  Object.assign(result, launched);
 }
 async function uaMemory(label) {
   if (spec.browser !== 'chrome') return;
@@ -142,7 +162,9 @@ async function uaMemory(label) {
 }
 try {
   checkSessionCancellation(outFile, signal);
-  if (platform() !== 'darwin') throw Error('OS footprint gate currently requires macOS pidfp; no RSS substitution');
+  const unsupported = platformProblem(spec);
+  if (unsupported) throw Error(unsupported);
+  if (linux) result.limitations.push(LINUX_LIMITATION);
   proxy = await startCountingProxy(spec.base, { htmlScript: probe });
   signal.throwIfAborted();
   if (spec.browser === 'chrome') {
@@ -151,11 +173,13 @@ try {
     markBrowserStarting();
     browser = await chromium
       .launch({
-        channel: 'chrome',
+        // Linux: Playwright's Chromium in new-headless mode (not headless-shell); PERF_ROUTES_CHROMIUM
+        // points at a specific build when the installed Playwright expects a revision that is absent.
+        ...(linux ? { channel: 'chromium', executablePath: process.env.PERF_ROUTES_CHROMIUM || undefined } : { channel: 'chrome' }),
         headless: true,
         handleSIGINT: false,
         handleSIGTERM: false,
-        args: ['--enable-blink-features=ForceEagerMeasureMemory'],
+        args: ['--enable-blink-features=ForceEagerMeasureMemory', ...(linux ? LINUX_CHROME_ARGS : [])],
       })
       .catch((error) => {
         // Playwright closes a failed launch before rejecting.
@@ -163,7 +187,9 @@ try {
         throw error;
       });
     close = () => browser.close();
+    claimBrowser(browser.version(), linux ? realpathSync(process.env.PERF_ROUTES_CHROMIUM || chromium.executablePath()) : undefined);
     cdp = await browser.newBrowserCDPSession();
+    if (linux) result.webgpuWarmup = await warmWebGpu(browser, async () => !(await chromePids()).rendererPids.length, { signal });
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     context.on('request', (request) => {
       const url = new URL(request.url());
@@ -171,10 +197,17 @@ try {
     });
     page = await context.newPage();
     page.on('dialog', (dialog) => dialog.accept()); // only local journey leave confirmations
+    // Main-thread ORT sessions (Arena's Lc0) post no worker ready message; their console line names the provider.
+    result.ortSessions = [];
+    page.on('console', (message) => {
+      const text = message.text();
+      const ready = /^Centipawn ORT: session ready with (WebGPU|WASM) provider/.exec(text);
+      if (ready) result.ortSessions.push(ready[1].toLowerCase());
+      if (linux && message.type() === 'warning') consoleWarnings.push(text);
+    });
     page.setDefaultTimeout(120000);
     evaluate = guarded((expression) => bounded(page.evaluate(expression), 'Chrome page evaluation'));
     navigate = guarded((url) => page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 }));
-    result.browserVersion = browser.version();
     sampling = setInterval(sample, 100);
     await sample();
   } else {
@@ -205,7 +238,7 @@ try {
       });
     writeFileSync(pendingCleanup, `Owned Safari session ${sid} at ${spec.driver}\n`);
     signal.throwIfAborted();
-    result.browserVersion = session.capabilities?.browserVersion;
+    claimBrowser(session.capabilities?.browserVersion);
     await wd('POST', `/session/${sid}/timeouts`, { pageLoad: 90000, script: 120000 });
     await wd('POST', `/session/${sid}/window/rect`, { width: 1280, height: 900 });
     // Safari's automation window can be occluded by other mini apps: background rAF and
@@ -234,6 +267,10 @@ try {
   result.evidence = await runJourney(evaluate, spec.journey, mark, pause);
   result.probe = await evaluate(`JSON.parse(JSON.stringify(window.__routePerf))`);
   result.workerReady = await evaluate(`window.__perfWorkerReady`);
+  if (linux) {
+    const problem = webgpuBackendProblem(spec.journey, result.workerReady, result.ortSessions, consoleWarnings);
+    if (problem) throw Error(`${problem}: CPU numbers would stand in for the Linux WebGPU datapoint`);
+  }
   result.transitions = await evaluate(`window.__analysisTransitionLog?.() ?? []`);
   const p = result.probe;
   result.metrics.boardInteractiveMs = p.boardInteractiveMs;
@@ -257,6 +294,7 @@ try {
   const active = result.samples.filter((s) => s.phase !== 'residual');
   result.metrics['memory.rendererPeakMb'] = Math.max(result.navigationPeakMb ?? 0, ...active.map((s) => s.rendererIntervalMb));
   if (cdp) result.metrics['memory.gpuPeakMb'] = Math.max(...active.map((s) => s.gpuIntervalMb));
+  if (linux) result.metrics['memory.gpuVramPeakMb'] = Math.max(...active.map((s) => s.gpuVramMb));
   // Total is the simultaneous sampled sum, NOT the sum of independent high-water marks.
   result.metrics['memory.peakMb'] = peakFootprint(spec.browser, active, result.navigationPeakMb ?? 0);
   const settled = active.filter((s) => s.ms >= active.at(-1).ms - 2000);

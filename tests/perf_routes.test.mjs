@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer, get } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -20,6 +20,7 @@ import {
   parseArgs,
   peakFootprint,
   plan,
+  platformProblem,
   previewEnvironment,
   requestFailures,
   safariWebContentPid,
@@ -42,6 +43,7 @@ import {
   waitForCleanup,
 } from '../scripts/perf_routes/lifecycle.mjs';
 import {
+  buildFingerprint,
   manifestMismatches,
   measuringFiles,
   readJson,
@@ -50,6 +52,7 @@ import {
   runManifest,
   selectSessions,
   sessionId,
+  sharesBaselineBuild,
   writeJsonAtomic,
 } from '../scripts/perf_routes/resume.mjs';
 
@@ -403,7 +406,7 @@ test('the JS deadline ignores bodyless probes and optional prefetches, not late 
   assert.deepEqual(requestFailures([{ ...head, clientAborted: true, endedAt: 20 }], 'analysis-four', { cutoff: { at: 20, requestCount: 1 } }).unexpected, []);
 });
 
-test('route probes retain original worker payloads, count teardown once and parse both UCI transports', () => {
+function workerProbe() {
   class NativeWorker {
     constructor() {
       this.listeners = {};
@@ -432,6 +435,11 @@ test('route probes retain original worker payloads, count teardown once and pars
     setTimeout() {},
     setInterval() {},
   });
+  return window;
+}
+
+test('route probes retain original worker payloads, count teardown once and parse both UCI transports', () => {
+  const window = workerProbe();
   const sf = new window.Worker('stockfish.js'),
     cpu = new window.Worker('blob:cpu');
   const init = { type: 'init', id: 1, jsUrl: '/berserk/berserk.js', model: new ArrayBuffer(2) };
@@ -464,6 +472,30 @@ test('route probes retain original worker payloads, count teardown once and pars
   const source = readFileSync(new URL('../scripts/perf_routes/session.mjs', import.meta.url), 'utf8');
   assert.ok(source.indexOf('result.finalWorkerErrors =') > source.indexOf("result.metrics['workers.residual'] ="));
   assert.match(source, /if \(result\.finalWorkerErrors\.length\) throw/);
+});
+
+test('route probe ignores only an in-flight init abort on the worker being disposed', () => {
+  const window = workerProbe();
+  const retiring = new window.Worker('searchWorker.js');
+  const live = new window.Worker('searchWorker.js');
+  const abort = 'signal is aborted without reason';
+  const init = { type: 'init', id: 1 };
+  const initAbort = { type: 'error', id: init.id, error: abort };
+  retiring.postMessage(init);
+  retiring.postMessage({ type: 'init', id: 2 });
+  retiring.postMessage({ type: 'search', id: 3 });
+  live.postMessage(init);
+  retiring.postMessage({ type: 'cancel' });
+  retiring.postMessage({ type: 'dispose', id: -1 });
+  retiring.receive(initAbort);
+  assert.deepEqual([...window.__routePerf.errors], []);
+
+  live.receive(initAbort);
+  retiring.receive({ type: 'error', id: 2, error: 'invalid model' });
+  retiring.receive({ type: 'error', id: 3, error: abort });
+  retiring.receive({ type: 'error', id: -1, error: 'release failed' });
+  retiring.listeners.error({ message: abort });
+  assert.deepEqual([...window.__routePerf.errors], [abort, 'invalid model', abort, 'release failed', abort]);
 });
 
 test('probe disconnects and drops Play observer/host on navigation and detects external fetches', async () => {
@@ -944,6 +976,88 @@ test('resume reuses every recorded outcome and reruns only missing or operator-s
   assert.throws(() => selectSessions(cells, (id) => (id === ids[6] ? { result: null, owner: 4242 } : { result: null })), /006.*live process 4242/);
 });
 
+test('resume checks the browser identity of later saved sessions before replacing a truncated first result', {
+  skip: !!platformProblem({ browser: 'chrome' }),
+}, (t) => {
+  const root = scratch(t);
+  for (const file of [
+    'perf_routes/run.mjs',
+    'perf_routes/assets.mjs',
+    'perf_routes/gate.mjs',
+    'perf_routes/lifecycle.mjs',
+    'perf_routes/resume.mjs',
+    'perf_matrix/proxy.mjs',
+    'lib/perf_canary_stats.mjs',
+  ]) {
+    const dst = join(root, 'scripts', file);
+    mkdirSync(dirname(dst), { recursive: true });
+    copyFileSync(new URL(`../scripts/${file}`, import.meta.url), dst);
+  }
+  writeFileSync(
+    join(root, 'scripts/perf_routes/session.mjs'),
+    `
+    import { readFileSync, writeFileSync } from 'node:fs';
+    const [spec, out] = process.argv.slice(2);
+    const row = JSON.parse(readFileSync(spec, 'utf8'));
+    const version = process.env.TEST_BROWSER_VERSION;
+    Object.assign(row, row.expectedBrowser && row.expectedBrowser !== version
+      ? { status: 'invalid', browserMismatch: version }
+      : { status: 'ok', browserVersion: version, metrics: {} });
+    writeFileSync(out, JSON.stringify(row));
+  `,
+  );
+  const argv = [
+    '--baseline',
+    'a',
+    '--candidate',
+    'a',
+    '--baseline-url',
+    'http://127.0.0.1:1',
+    '--candidate-url',
+    'http://127.0.0.1:1',
+    '--browser',
+    'chrome',
+    '--repeats',
+    '1',
+    '--journey',
+    'navigation',
+    '--journey',
+    'play-maia3',
+    '--out',
+    'out',
+    '--lock-dir',
+    'mutex',
+  ];
+  const invoke = (version, flag) =>
+    spawnSync(process.execPath, ['scripts/perf_routes/run.mjs', ...argv, flag], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 10000,
+      env: { ...process.env, TEST_BROWSER_VERSION: version },
+    });
+  const prepare = invoke('149.0', '--build-only');
+  assert.equal(prepare.status, 0, prepare.stderr);
+  const cells = plan(parseArgs(argv));
+  const path = (i, ext = 'json') => join(root, 'out/sessions', `${sessionId(cells[i], i)}.${ext}`);
+  const save = (i, version) => writeJsonAtomic(path(i), { ...cells[i], status: 'ok', browserVersion: version, metrics: {} });
+  writeFileSync(path(0), '{"truncated":');
+  for (const i of [1, 2, 3]) save(i, '149.0');
+
+  const updated = invoke('150.0', '--resume');
+  assert.match(updated.stderr, /browser build changed mid-cohort \(150\.0\); restore 149\.0/);
+  assert.equal(readJson(path(0)).browserMismatch, '150.0');
+  assert.equal(existsSync(join(root, 'out/runs.jsonl')), false);
+  const restored = invoke('149.0', '--resume');
+  assert.equal(restored.status, 2, restored.stderr); // One repeat cannot pass the gate.
+  assert.equal(readJson(path(0)).browserVersion, '149.0');
+
+  rmSync(path(0));
+  rmSync(path(0, 'spec.json'));
+  save(3, '150.0');
+  assert.match(invoke('149.0', '--resume').stderr, /different browser builds: 149\.0; 150\.0/);
+  assert.equal(existsSync(path(0, 'spec.json')), false, 'a mixed saved cohort fails before creating a replacement session');
+});
+
 test('arm builds link ignored local assets instead of copying them, never replacing tracked bytes', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'perf-routes-assets-'));
   try {
@@ -1140,4 +1254,76 @@ test('a session wrapper records its PID before waiting and clears it on exit; on
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('a failed owner record stops the just-spawned session before the caller can release the mutex', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'perf-routes-owner-fail-'));
+  const pidFile = join(dir, 'child.pid');
+  try {
+    const child = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 30000)`;
+    // The sessions directory is missing, so the owner record cannot be written.
+    await assert.rejects(runOwnedSession(process.execPath, ['-e', child], new AbortController().signal, null, join(dir, 'missing/000.json')), /ENOENT/);
+    // A child left running would have written its PID by now.
+    await new Promise((r) => setTimeout(r, 500));
+    if (existsSync(pidFile)) {
+      const pid = Number(readFileSync(pidFile, 'utf8'));
+      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, 'the unrecorded child must be stopped');
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the candidate shares the baseline build by resolved commit, and a resume keeps the recorded mapping', () => {
+  const sha = (commit) => ({ kind: 'archived-source', commit });
+  assert.equal(sharesBaselineBuild({ baseline: sha('a'), candidate: sha('a') }), true, 'main HEAD resolving to one SHA');
+  assert.equal(sharesBaselineBuild({ baseline: sha('a'), candidate: sha('b') }), false);
+  const prebuilt = { kind: 'prebuilt', dist: '/x' };
+  assert.equal(sharesBaselineBuild({ baseline: prebuilt, candidate: prebuilt }), false, 'prebuilt arms are served as given');
+  assert.equal(sharesBaselineBuild({ baseline: { kind: 'externally-served' }, candidate: { kind: 'externally-served' } }, null), false);
+  // A run that built both arms separately keeps doing so when resumed by SHA, and vice versa.
+  const separate = { baseline: { dist: '/o/builds/baseline/dist-client' }, candidate: { dist: '/o/builds/candidate/dist-client' } };
+  assert.equal(sharesBaselineBuild({ baseline: sha('a'), candidate: sha('a') }, separate), false);
+  const shared = { baseline: { dist: '/o/builds/baseline/dist-client' }, candidate: { dist: '/o/builds/baseline/dist-client' } };
+  assert.equal(sharesBaselineBuild({ baseline: sha('a'), candidate: sha('a') }, shared), true);
+  // builds.json from a run interrupted before both arms were recorded: fall back to the commit rule.
+  assert.equal(sharesBaselineBuild({ baseline: sha('a'), candidate: sha('a') }, { baseline: separate.baseline }), true);
+});
+
+test('a prebuilt dist is identified by its paths, sizes, mtimes and link targets, not its path alone', () => {
+  const dist = mkdtempSync(join(tmpdir(), 'perf-routes-dist-'));
+  try {
+    mkdirSync(join(dist, '_app/immutable'), { recursive: true });
+    writeFileSync(join(dist, '_app/immutable/entry.abc.js'), 'x');
+    symlinkSync('/models/a.onnx', join(dist, 'model.onnx'));
+    const first = buildFingerprint(dist);
+    assert.equal(buildFingerprint(dist), first);
+    utimesSync(join(dist, '_app/immutable/entry.abc.js'), new Date(1000), new Date(1000));
+    const touched = buildFingerprint(dist);
+    assert.notEqual(touched, first, 'a rebuild in place rewrites files');
+    writeFileSync(join(dist, '_app/immutable/entry.abc.js'), 'xy');
+    utimesSync(join(dist, '_app/immutable/entry.abc.js'), new Date(1000), new Date(1000));
+    const resized = buildFingerprint(dist);
+    assert.notEqual(resized, touched, 'size');
+    rmSync(join(dist, 'model.onnx'));
+    symlinkSync('/models/b.onnx', join(dist, 'model.onnx'));
+    const relinked = buildFingerprint(dist);
+    assert.notEqual(relinked, resized, 'link target');
+    writeFileSync(join(dist, 'new.js'), '');
+    assert.notEqual(buildFingerprint(dist), relinked, 'added file');
+  } finally {
+    rmSync(dist, { recursive: true, force: true });
+  }
+});
+
+test('builds stage per attempt and rename into place; session attempts clear stale results before each try', () => {
+  const source = readFileSync(new URL('../scripts/perf_routes/run.mjs', import.meta.url), 'utf8');
+  const build = source.slice(source.indexOf('function build('), source.indexOf('async function serve('));
+  assert.match(build, /const stage = `\$\{dir\}\.staging-\$\{process\.pid\}-\$\{Date\.now\(\)\}`/);
+  assert.ok(!/command\([^)]*\bdir\)/.test(build) && !/'-C', dir\]/.test(build), 'tar/npm never write into the final arm directory');
+  assert.ok(build.indexOf('renameSync(stage, dir)') > build.indexOf("npm', 'run', 'build:client'"), 'renamed only after the build');
+  assert.ok(build.indexOf('writeJsonAtomic(record') > build.indexOf('renameSync(stage, dir)'), 'recorded only once in place');
+  const loop = source.slice(source.indexOf('      do {'), source.indexOf('} while (cleanupConfirmed && status === 75'));
+  assert.match(loop, /rmSync\(cancellationMarker\(resultFile\), \{ force: true \}\);\s*rmSync\(resultFile, \{ force: true \}\);[\s\S]*acquireLock/);
+  assert.match(source, /arm === 'candidate' && shared \? \{ \.\.\.builds\.baseline \}/);
 });

@@ -58,6 +58,7 @@
       p.workers++;
       p.peakWorkers = Math.max(p.workers, p.peakWorkers);
       let alive = true,
+        disposing = false,
         kind = 'unknown';
       const pending = new Map();
       const retire = () => {
@@ -79,10 +80,12 @@
           const path = String(m.modelUrl ?? m.jsUrl ?? m.model ?? args[0]);
           kind = /maia/i.test(path) ? 'maia3-evals' : /berserk/i.test(path) ? 'berserk-nps' : /plenty/i.test(path) ? 'plentychess-nps' : 'lc0-visits';
         }
-        if (m && typeof m === 'object' && m.id !== undefined) pending.set(m.id, performance.now());
+        if (m?.type === 'dispose') disposing = true;
+        if (m && typeof m === 'object' && m.id !== undefined) pending.set(m.id, { type: m.type, at: performance.now() });
         return post(...messages);
       };
       this.addEventListener('message', ({ data: m }) => {
+        const request = pending.get(m?.id);
         if (m?.type === 'disposed') retire();
         if (m?.type === 'ready') observeAsset(m.servedModelUrl);
         const output = typeof m === 'string' ? m : m?.type === 'line' ? m.line : null;
@@ -114,12 +117,14 @@
           kind === 'maia3-evals' &&
           (!location.pathname.includes('/play') || document.querySelector('#engineSelect')?.value === 'maia3')
         ) {
-          const start = pending.get(m.id);
-          if (start !== undefined) rate(kind, 1000 / (performance.now() - start));
+          if (request) rate(kind, 1000 / (performance.now() - request.at));
           line();
         }
         if (['result', 'searchResult', 'ready', 'disposed', 'error'].includes(m?.type)) pending.delete(m.id);
-        if (m?.type === 'error') p.errors.push(String(m.error ?? m.message));
+        if (m?.type === 'error') {
+          const teardownAbort = disposing && request?.type === 'init' && m.error === 'signal is aborted without reason';
+          if (!teardownAbort) p.errors.push(String(m.error ?? m.message));
+        }
       });
       this.addEventListener('error', (e) => p.errors.push(e.message));
     }
