@@ -1,12 +1,10 @@
-/** One controller's DOM ownership. Detached route nodes remain usable during
- * Svelte teardown; lookups must never fall through to the incoming document.
+/** Lookups confined to one mount's root. Svelte detaches the root before
+ * teardown runs, so the root is never released: late writes land on the
+ * detached nodes, never on the next route's, and never fall through to document.
  */
-export function createBrowserDom() {
-  type Scope = { root: HTMLElement | null; cache: Map<string, HTMLElement> };
-  let current: Scope | null = null;
+export function createRootDom(root: HTMLElement) {
+  const cache = new Map<string, HTMLElement>();
   const maybeEl = (id: string): HTMLElement | null => {
-    if (!current?.root) return null;
-    const { root, cache } = current;
     const cached = cache.get(id);
     // Retry mode and generated UI can replace an id with a new host. A node
     // detached from the document is valid; a node removed from our root is not.
@@ -22,6 +20,31 @@ export function createBrowserDom() {
     return node;
   };
   return {
+    root,
+    el,
+    maybeEl,
+    inputEl: (id: string) => el(id) as HTMLInputElement,
+    selectEl: (id: string) => el(id) as HTMLSelectElement,
+    buttonEl: (id: string) => el(id) as HTMLButtonElement,
+    query: <T extends Element = HTMLElement>(selector: string): T | null => root.querySelector<T>(selector),
+    queryAll: <T extends Element = HTMLElement>(selector: string): NodeListOf<T> => root.querySelectorAll<T>(selector),
+  };
+}
+
+export type RootDom = ReturnType<typeof createRootDom>;
+
+/** One module-level controller's DOM ownership, re-pointed at each mount's root.
+ * A released scope stops resolving, so a teardown must finish its lookups first.
+ */
+export function createBrowserDom() {
+  let current: RootDom | null = null;
+  const maybeEl = (id: string): HTMLElement | null => current?.maybeEl(id) ?? null;
+  const el = (id: string): HTMLElement => {
+    const node = maybeEl(id);
+    if (!node) throw new Error(`Missing #${id}`);
+    return node;
+  };
+  return {
     el,
     maybeEl,
     inputEl: (id: string) => el(id) as HTMLInputElement,
@@ -29,11 +52,9 @@ export function createBrowserDom() {
     buttonEl: (id: string) => el(id) as HTMLButtonElement,
     mount(root: HTMLElement | null): () => void {
       if (!root) throw new Error('Missing #main');
-      const scope: Scope = { root, cache: new Map<string, HTMLElement>() };
+      const scope = createRootDom(root);
       current = scope;
       return () => {
-        scope.root = null;
-        scope.cache.clear();
         if (current === scope) current = null;
       };
     },

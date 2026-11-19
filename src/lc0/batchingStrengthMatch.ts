@@ -8,8 +8,8 @@ export const SMALL_BATCH1_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.bat
 export const SMALL_BATCH8_URL = '/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.qdq8.onnx';
 
 /**
- * Copied from playBrowser.ts. tests/batching_strength.test.mjs checks the
- * source still has these literals. Do not retune them here.
+ * Copied from play/playSearchSettings.ts. tests/batching_strength.test.mjs
+ * locks both to the same values. Do not retune them here.
  * LQO black (queen-less): draw -0.6, contempt 32, cpuct 1.5, fpu 0.4, SwapColors.
  * LQO white (queen-less): draw -0.4, contempt 40, cpuct 1.5, fpu 0.4, no swap.
  * Regular Play Lc0: draw -0.25, contempt 16.

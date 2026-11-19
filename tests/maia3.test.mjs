@@ -7,16 +7,16 @@ import {
   boardToMaia3Tokens,
   chooseFromMaia3Policy,
   MAIA3_DEFAULT_MODEL_URL,
-  MAIA3_MODEL_FALLBACK_URLS,
   maia3InternalsForTests,
+  maia3ModelFallbackUrls,
   maia3MoveIndex,
 } from '../src/lc0/maia3.ts';
 
 test('Maia3 load order is the graph rewrite, then its QDQ8 source, then upstream fp16, all in the manifest', () => {
   const manifest = JSON.parse(readFileSync('public/models/maia3/manifest.json', 'utf8'));
   const byUrl = new Map(manifest.models.map((entry) => [entry.url, entry]));
-  assert.equal(MAIA3_MODEL_FALLBACK_URLS[0], MAIA3_DEFAULT_MODEL_URL);
-  const chain = MAIA3_MODEL_FALLBACK_URLS.map((url) => byUrl.get(url));
+  assert.equal(maia3ModelFallbackUrls()[0], MAIA3_DEFAULT_MODEL_URL);
+  const chain = maia3ModelFallbackUrls().map((url) => byUrl.get(url));
   assert.ok(chain.every(Boolean), 'every fallback URL has a manifest entry with its sha256');
   // Each fallback is the artifact the previous one was derived from.
   for (let i = 0; i + 1 < chain.length; i++) assert.equal(chain[i].derivedFrom, chain[i + 1].file);

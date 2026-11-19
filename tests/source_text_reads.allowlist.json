@@ -105,13 +105,7 @@
     },
     "tests/batching_strength.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
-      "reads": [
-        "src/lc0/batchingStrengthMatch.ts",
-        "src/lc0/engineCatalog.ts",
-        "src/lc0/onnxEvaluator.ts",
-        "src/lc0/playBrowser.ts",
-        "src/lc0/searchWorkerCore.ts"
-      ]
+      "reads": ["src/lc0/onnxEvaluator.ts", "src/lc0/searchWorkerCore.ts"]
     },
     "tests/bignet_progress_ownership.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
@@ -131,7 +125,7 @@
     },
     "tests/browser_dom_scope.test.mjs": {
       "reason": "checks each controller resolves ids through its scoped createBrowserDom() and never via document.getElementById",
-      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts", "src/lc0/playBrowser.ts"]
+      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts", "src/lc0/playBrowser.ts", "src/routes/app/play/+page.svelte"]
     },
     "tests/build_scope.test.mjs": {
       "reason": "lists src/routes page files (no text read) to require every route be classified as product or lab for the BUILD_SCOPE=product prerender gate",
@@ -249,11 +243,11 @@
     },
     "tests/maia3_owner_recovery.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
-      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/playBrowser.ts"]
+      "reads": ["src/lc0/analysisBrowser.ts"]
     },
     "tests/mobile_residency.test.mjs": {
       "reason": "slices controller functions out of the source to run them in isolation; importing the controller module mounts DOM state at load (phone residency: Small/Maia switch-away aborts)",
-      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts", "src/lc0/playBrowser.ts"]
+      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts"]
     },
     "tests/mobile_residency_boundaries.test.mjs": {
       "reason": "slices controller functions out of the source to run them in isolation; importing the controller module mounts DOM state at load (setup cancel and fallback release barriers)",
@@ -289,6 +283,10 @@
         "src/lc0/policyOnlyBrowser.ts",
         "src/lc0/searchWorkerCore.ts"
       ]
+    },
+    "tests/ort_fallback_policy.test.mjs": {
+      "reason": "runs the module-private EP resolution and artifact lock together; the lock state is per-thread module state with no export to drive it",
+      "reads": ["src/nn/ortRuntime.ts"]
     },
     "tests/ort_gpu_io.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
@@ -337,6 +335,20 @@
     "tests/play_lqo_progress.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/playBrowser.ts"]
+    },
+    "tests/play_mount_lifecycle.test.mjs": {
+      "reason": "ratchets location.reload sites across src/ and checks Play keeps per-mount state off the module and listeners on its scope",
+      "reads": [
+        "src/",
+        "src/lc0/analysisBrowser.ts",
+        "src/lc0/arenaBrowser.ts",
+        "src/lc0/play/playOverrides.ts",
+        "src/lc0/playBrowser.ts",
+        "src/lc0/policyOnlyBrowser.ts",
+        "src/routes/app/analysis/+page.svelte",
+        "src/routes/app/play/+page.svelte",
+        "src/routes/single-engine/+page.svelte"
+      ]
     },
     "tests/play_navigation.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",

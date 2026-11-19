@@ -16,6 +16,13 @@ function extract(text, first, last, tail = '') {
   assert.ok(start >= 0 && end > start, `production boundaries: ${first}`);
   return stripTypeScriptTypes(text.slice(start, end) + tail);
 }
+
+/** Play reaches its DOM and listeners through ctx.dom / ctx.scope; point them at this harness's fakes. */
+function playScope(ctx, deps) {
+  ctx.dom = { el: deps.el, selectEl: deps.selectEl, buttonEl: deps.buttonEl };
+  ctx.scope = { listen: (target, type, fn) => deps.trackListener(ctx, target, type, fn), clearTimeout: (id) => deps.clearTimeout(id) };
+  return ctx;
+}
 const playPickerAbort = extract(source.play, 'function ctxCancelPickerConsent(', 'function ctxCancelEngineTurn(');
 const tick = () => new Promise(setImmediate);
 async function until(predicate) {
@@ -749,14 +756,17 @@ for (const key of Object.keys(BIG_NETS)) {
           },
           ctxSetEngineNote() {},
           releaseUnusedBigNetSearchers() {},
-          retireUnusedPlayNeuralEngines: async () => {
-            assert.equal(ctx.restoredDownloadEngineId, null, 'retirement starts only after approval');
+          engines: {
+            retireUnusedEngines: async () => {
+              assert.equal(ctx.restoredDownloadEngineId, null, 'retirement starts only after approval');
+            },
           },
           buttonEl: () => retry,
           ctxRender() {},
           ctxSetEngineFailure: (_ctx, error) => assert.fail(String(error)),
           admit: () => admissions++,
         };
+        playScope(ctx, deps);
         const entry = mode === 'readiness' ? readinessEntry : moveEntry;
         const api = new Function(
           'deps',
@@ -868,12 +878,18 @@ for (const action of ['dismiss', 'confirm']) {
       ctxSetEngineNote() {},
       buttonEl: () => ({}),
       ctxSetEngineFailure: (_ctx, error) => assert.fail(String(error)),
+      engines: { opponentCommitted() {} },
     };
+    playScope(ctx, deps);
     const code =
       playPickerAbort +
       extract(source.play, 'function ctxSetOpponent(', 'function ctxRestoreOpponentControls(') +
       extract(source.play, 'function ctxMaybeQueueRestart(', 'function ctxTuneOpponent(') +
-      extract(source.play, "  trackListener(ctx, selectEl('engineSelect'), 'change', async () => {", "  trackListener(ctx, selectEl('levelSelect')") +
+      extract(
+        source.play,
+        "  ctx.scope.listen(ctx.dom.selectEl('engineSelect'), 'change', async () => {",
+        "  ctx.scope.listen(ctx.dom.selectEl('levelSelect')",
+      ) +
       restoreGuard;
     const api = new Function(
       'deps',
@@ -936,14 +952,19 @@ for (const [accepted, stale] of [
       },
       ctxEngineOptionState: () => ({ disabled: true }),
       ctxRefreshEngineOptions: () => refreshes++,
-      ctxSetEngineNote: (text) => {
+      ctxSetEngineNote: (_ctx, text) => {
         note = text;
       },
       ctxPrepareOrStartEngine: () => preparations++,
     };
+    playScope(ctx, deps);
     const code =
       playPickerAbort +
-      extract(source.play, "  trackListener(ctx, selectEl('engineSelect'), 'change', async () => {", "  trackListener(ctx, selectEl('levelSelect')");
+      extract(
+        source.play,
+        "  ctx.scope.listen(ctx.dom.selectEl('engineSelect'), 'change', async () => {",
+        "  ctx.scope.listen(ctx.dom.selectEl('levelSelect')",
+      );
     new Function('deps', `const { ${Object.keys(deps)} } = deps; ${code};`)(deps);
     await handler();
     assert.equal(node.value, 'maia3', 'Cancel keeps the prior selector value');
@@ -957,7 +978,7 @@ for (const [accepted, stale] of [
 
 test('committing an asset-probed saved opponent preserves that destination model download gate', () => {
   const code = extract(source.play, 'function ctxSetOpponent(', 'function ctxRestoreOpponentControls(');
-  const setOpponent = new Function(`${code}; return ctxSetOpponent;`)();
+  const setOpponent = new Function('engines', `${code}; return ctxSetOpponent;`)({ opponentCommitted() {} });
   const ctx = { opponent: committedPlayOpponent({ engineId: 'maia3' }), restoredDownloadEngineId: 'leela-queen-odds' };
   setOpponent(ctx, committedPlayOpponent({ engineId: 'leela-queen-odds' }));
   assert.equal(ctx.restoredDownloadEngineId, 'leela-queen-odds');
@@ -986,6 +1007,7 @@ test('cancelled Play restore cannot admit an engine or overwrite a replacement c
     ctxRender: () => writes++,
     ctxSetEngineFailure: () => writes++,
   };
+  playScope(ctx, deps);
   const guard = new Function('deps', `const { ${Object.keys(deps)} } = deps; ${restoreGuard}; return ctxCheckRestoredDownloadConsent;`)(deps);
   const pending = guard(ctx);
   ctx.abort.abort();

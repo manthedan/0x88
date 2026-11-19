@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
-import ts from 'typescript';
+import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
 import { committedPlayOpponent, transitionPlayOpponent } from '../src/lc0/playOpponentState.ts';
 import { DEFAULT_PLAY_PREFERENCES } from '../src/lc0/playPreferences.ts';
 
@@ -61,24 +62,34 @@ test('live strength changes keep their existing policy and cannot change opponen
   assert.equal(state.active.level, 1);
 });
 
-test('Stormphrax residency is retired at commit, never while restart consent is pending', () => {
+test('Stormphrax residency is retired at commit, never while restart consent is pending', async () => {
+  const disposed = [];
+  const engines = createPlayEngines({
+    loadCentipawn: () => assert.fail('unused'),
+    createCpuEngine: (option) => ({ setOptions() {}, bestMove: async () => null, dispose: () => disposed.push(option.id) }),
+  });
+  const ui = { current: () => () => false, mounted: () => true, note() {}, clearNote() {}, progress() {}, hideProgress() {} };
+  const stormphrax = { id: 'stormphrax', label: 'Stormphrax', family: 'stormphrax', variant: 'default' };
+  const settled = () => new Promise(setImmediate);
+  // Play's production setter, linked to the real engine host.
   const source = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
   const setter = source.slice(source.indexOf('function ctxSetOpponent('), source.indexOf('function ctxRestoreOpponentControls('));
-  const disposed = [];
-  const setOpponent = new Function('disposeCachedCpuEngine', ts.transpile(`${setter}; return ctxSetOpponent;`, { target: ts.ScriptTarget.ESNext }))((id) =>
-    disposed.push(id),
-  );
+  const setOpponent = new Function('engines', `${stripTypeScriptTypes(setter)}; return ctxSetOpponent;`)(engines);
+  await engines.cpuEngineFor(stormphrax, ui);
   const ctx = { opponent: committedPlayOpponent({ ...preferences, engineId: 'stormphrax' }) };
   setOpponent(ctx, edit(ctx.opponent, { engineId: 'maia3' }));
-  assert.deepEqual(disposed, []);
   setOpponent(ctx, transitionPlayOpponent(ctx.opponent, { type: 'dismiss' }));
-  assert.deepEqual(disposed, []);
   setOpponent(ctx, edit(ctx.opponent, { engineId: 'sf-lite' }));
+  await settled();
+  assert.deepEqual(disposed, []);
   setOpponent(ctx, transitionPlayOpponent(ctx.opponent, { type: 'confirm' }));
+  await settled();
   assert.deepEqual(disposed, ['stormphrax']);
   // Fresh setup changes also commit immediately and retire the previous worker.
+  await engines.cpuEngineFor(stormphrax, ui);
   ctx.opponent = committedPlayOpponent({ ...preferences, engineId: 'stormphrax' });
   setOpponent(ctx, edit(ctx.opponent, { engineId: 'maia3' }, false));
+  await settled();
   assert.deepEqual(disposed, ['stormphrax', 'stormphrax']);
 });
 

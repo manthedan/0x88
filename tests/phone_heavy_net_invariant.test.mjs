@@ -12,6 +12,7 @@ import * as retirement from '../src/lc0/engineRetirement.ts';
 import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
 import { untilAborted } from '../src/lc0/modelCache.ts';
 import { phoneBigNetBlocked, phoneLargeNetPreference } from '../src/lc0/phoneLargeNetPolicy.ts';
+import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
 import { EngineResourceBroker } from '../src/lc0/resourceBroker.ts';
 
 const { disposeAllBigNetSearchersNow } = pool;
@@ -20,9 +21,9 @@ const tick = () => new Promise(setImmediate);
 const row = (variant) => ({ id: variant, label: variant, family: variant === 'maia3' ? 'maia3' : 'lc0', variant });
 const nop = () => {};
 const node = () => ({ toggleAttribute() {} });
-const play = source('playBrowser');
 const analysis = source('analysisBrowser');
 const arena = source('arenaBrowser');
+const play = source('playBrowser');
 const keys = ['bt4', 't3'];
 
 function source(name) {
@@ -175,45 +176,40 @@ function nativeModels(t, { phone = true, gap = 0, retireCpu = true } = {}) {
   };
 }
 
+// Play's production readiness, cancel, "Analyze this game" and teardown paths,
+// linked to a real engine host. Only native model I/O and page rendering are replaced.
 function playOwner(native) {
   const pgn = '1. e4 *';
   const links = [],
     handoffs = [];
+  const engines = createPlayEngines({ loadCentipawn: () => assert.fail('unused'), createMaia3: native.createMaia });
   const owner = link(
     `
-    ${slice(play, '  const retireCpuOnUnmount =', '  const releaseDom =', play.indexOf('export function mountPlayBrowser('))}
+    ${slice(play, '  const retireCpuOnUnmount =', '  const ctx = createPlayContext(scope);', play.indexOf('export function mountPlayBrowser('))}
     const ctx={abort:new AbortController(),consentAbort:new AbortController(),enginePreparationGeneration:0,
-      board:{turn:'w'},humanColor:'w',positions:[],moves:[],listeners:[],opponent:{active:{maiaElo:1500}}};
+      board:{turn:'w'},humanColor:'w',positions:[],moves:[],opponent:{active:{maiaElo:1500}},engineUi,runtimeFallbackAudits:new Map(),
+      dom:{buttonEl:el,el,queryAll:()=>[{}]},scope:{listen}};
     let option=maia;
-    let maia3Promise=null,maia3Status=null,maia3Abort=null,lc0LoadPromise=null;
-    const playCentipawn={clear(){}},cpuEnginePromises=new Map();
     const ctxSelectedEngine=()=>option;
-    const hook=()=>{},releaseDom=()=>{};
-    ${slice(play, 'function retireUnusedPlayNeuralEngines(', 'function ctxEnsureLc0Small(')}
-    ${slice(play, 'async function ctxEnsureMaia3(', 'function ctxCpuEngineFor(')}
     ${slice(play, 'async function ctxVerifySelectedEngineReady(', 'function ctxPriorFens(')}
-    ${slice(play, "  for (const link of document.querySelectorAll<HTMLAnchorElement>('[data-analyze]'))", "  trackListener(ctx, el('downloadPgn')", play.indexOf('function ctxInit('))}
-    function teardown(){${slice(play, '  return () => {\n    try {\n      ctx.autosave?.flush();', '\n  };', play.indexOf('export function mountPlayBrowser('))}\n    };}
+    ${slice(play, "  for (const link of ctx.dom.queryAll<HTMLAnchorElement>('[data-analyze]'))", "  ctx.scope.listen(ctx.dom.el('downloadPgn')", play.indexOf('function ctxInit('))}
+    function teardown(){${slice(play, '    ctx.autosave?.flush();', '\n  });', play.indexOf('export function mountPlayBrowser('))}\n    }
     return {prepare:()=>ctxVerifySelectedEngineReady(ctx),ready:()=>ctx.engineReady,
       select:(next)=>{ctxCancelEngineTurn(ctx);option=next;return ctxVerifySelectedEngineReady(ctx);},
-      finishMove:()=>ctx.moves.push('e2e4'),unmount:teardown()};`,
+      finishMove:()=>ctx.moves.push('e2e4'),unmount:teardown};`,
     {
+      engines,
+      engineUi: { current: () => () => false, mounted: () => true, note: nop, clearNote: nop, progress: nop, hideProgress: nop },
       maia: row('maia3'),
-      buttonEl: node,
-      ctxAsyncUiIsCurrent: () => false,
       ctxSetEngineNote: nop,
       ctxRender: nop,
       ctxHideDownloadProgress: nop,
       ctxDisarmNewGame: nop,
       ctxSetEngineFailure: (_ctx, error) => assert.fail(error),
-      ctxLqoSearchOptions: () => ({}),
-      Maia3BrowserEvaluator: { create: native.createMaia },
-      playRuntimeFallbackAudits: new Map(),
-      disposeCachedCpuEngine: nop,
+      lqoSearchOptions: () => ({}),
       PLAY_DRAW_SCORE: 0,
       PLAY_SEARCH_CONTEMPT_LIMIT: 0,
-      document: { querySelectorAll: () => [{}] },
-      trackListener: (_ctx, _target, _type, listener) => links.push(listener),
+      listen: (_target, _type, listener) => links.push(listener),
       ctxExportPgn: () => pgn,
       writeAnalysisHandoff: (value) => handoffs.push(value),
     },
@@ -510,6 +506,44 @@ test('cancelling Analysis during reclaim does not start a model or restart a ret
   assert.equal(owner.message.textContent, 'Analysis stopped.');
   await run;
   await advance(20000);
+  assert.deepEqual(
+    native.trace.map(({ name, phase }) => `${name}:${phase}`),
+    ['sf-lite:init', 'sf-lite:terminated'],
+  );
+});
+
+test('cancelling Play during reclaim retracts its Freeing memory note and starts no model', async (t) => {
+  const native = nativeModels(t, { gap: 20000 });
+  fakeTime(t);
+  const engines = createPlayEngines({
+    loadCentipawn: () => assert.fail('unused'),
+    createCpuEngine: () => {
+      const cpu = new native.StockfishEngine({}, 'lite');
+      cpu.analyze(1);
+      return cpu;
+    },
+  });
+  let note = '';
+  const ui = {
+    current: () => () => true,
+    mounted: () => true,
+    note: (text) => {
+      note = text;
+    },
+    clearNote: (text) => {
+      if (note === text) note = '';
+    },
+    progress: nop,
+    hideProgress: nop,
+  };
+  await engines.cpuEngineFor({ id: 'sf-lite', label: 'Stockfish', family: 'sf', variant: 'lite' }, ui);
+  const turn = new AbortController();
+  const loading = assert.rejects(engines.acquireBigNet('bt4', turn.signal, ui), { name: 'AbortError' });
+  await tick();
+  assert.equal(note, 'Freeing memory…');
+  turn.abort();
+  await loading;
+  assert.equal(note, '');
   assert.deepEqual(
     native.trace.map(({ name, phase }) => `${name}:${phase}`),
     ['sf-lite:init', 'sf-lite:terminated'],

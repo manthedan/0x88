@@ -21,12 +21,20 @@ const MAIA3_MODEL_CACHE_NAME = 'maia3-browser-models-v1';
  * The loader falls back to the plain QDQ8 file, then to the upstream fp16
  * file, when a derived artifact is not staged.
  */
-export const MAIA3_DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/maia3/maia3_simplified.qdq8.graph.onnx');
-/** Pre-rewrite QDQ8 file (28.1MB vs 45.7MB fp16): the default before the graph rewrite, now the first fallback. */
-export const MAIA3_QDQ8_MODEL_URL = resolvePublicAssetUrl('/models/maia3/maia3_simplified.qdq8.onnx');
-export const MAIA3_FP16_MODEL_URL = resolvePublicAssetUrl('/models/maia3/maia3_simplified.onnx');
-/** Load order when no model is requested explicitly. */
-export const MAIA3_MODEL_FALLBACK_URLS = [MAIA3_DEFAULT_MODEL_URL, MAIA3_QDQ8_MODEL_URL, MAIA3_FP16_MODEL_URL] as const;
+const MAIA3_MODEL_PATHS = [
+  '/models/maia3/maia3_simplified.qdq8.graph.onnx',
+  // Pre-rewrite QDQ8 file (28.1MB vs 45.7MB fp16): the default before the graph rewrite, now the first fallback.
+  '/models/maia3/maia3_simplified.qdq8.onnx',
+  '/models/maia3/maia3_simplified.onnx',
+] as const;
+export const MAIA3_DEFAULT_MODEL_URL = resolvePublicAssetUrl(MAIA3_MODEL_PATHS[0]);
+/**
+ * Load order when no model is requested explicitly, against the page's asset base
+ * now: a client-side navigation can change ?assetBase= without reloading this module.
+ */
+export function maia3ModelFallbackUrls(): string[] {
+  return MAIA3_MODEL_PATHS.map(resolvePublicAssetUrl);
+}
 export const MAIA3_MODEL_MANIFEST_URL = '/models/maia3/manifest.json';
 export const MAIA3_MIN_ELO = 600;
 export const MAIA3_MAX_ELO = 2600;
@@ -273,6 +281,8 @@ export interface Maia3BrowserEvaluatorOptions {
   /** Fatal transport failure, including when no inference is in flight. */
   onFailure?: (error: Error) => void;
   modelUrl?: string;
+  /** Load order when `modelUrl` is not given; defaults to maia3ModelFallbackUrls() at create time. */
+  fallbackUrls?: readonly string[];
   selfElo?: number;
   oppoElo?: number;
   onProgress?: (loadedBytes: number, totalBytes?: number) => void;
@@ -348,7 +358,7 @@ export class Maia3BrowserEvaluator {
     if (options.modelUrl) {
       modelLoad = await load(options.modelUrl);
     } else {
-      modelLoad = await Maia3BrowserEvaluator.loadWithFallback(load, options.signal);
+      modelLoad = await Maia3BrowserEvaluator.loadWithFallback(load, options.fallbackUrls ?? maia3ModelFallbackUrls(), options.signal);
     }
     const create = async (loaded: Lc0ModelLoadResult) => {
       options.signal?.throwIfAborted();
@@ -400,13 +410,17 @@ export class Maia3BrowserEvaluator {
     }
   }
 
-  private static async loadWithFallback(load: (url: string) => Promise<Lc0ModelLoadResult>, signal?: AbortSignal): Promise<Lc0ModelLoadResult> {
+  private static async loadWithFallback(
+    load: (url: string) => Promise<Lc0ModelLoadResult>,
+    urls: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<Lc0ModelLoadResult> {
     for (let i = 0; ; i++) {
-      const url = MAIA3_MODEL_FALLBACK_URLS[i];
+      const url = urls[i];
       try {
         return await load(url);
       } catch (error) {
-        const next = MAIA3_MODEL_FALLBACK_URLS[i + 1];
+        const next = urls[i + 1];
         if (signal?.aborted || !next) throw error;
         console.warn(`Maia3 model ${url} unavailable (${error instanceof Error ? error.message : String(error)}); falling back to ${next}`);
       }
