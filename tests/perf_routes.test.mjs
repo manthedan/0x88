@@ -406,7 +406,7 @@ test('the JS deadline ignores bodyless probes and optional prefetches, not late 
   assert.deepEqual(requestFailures([{ ...head, clientAborted: true, endedAt: 20 }], 'analysis-four', { cutoff: { at: 20, requestCount: 1 } }).unexpected, []);
 });
 
-test('route probes retain original worker payloads, count teardown once and parse both UCI transports', () => {
+function workerProbe() {
   class NativeWorker {
     constructor() {
       this.listeners = {};
@@ -435,6 +435,11 @@ test('route probes retain original worker payloads, count teardown once and pars
     setTimeout() {},
     setInterval() {},
   });
+  return window;
+}
+
+test('route probes retain original worker payloads, count teardown once and parse both UCI transports', () => {
+  const window = workerProbe();
   const sf = new window.Worker('stockfish.js'),
     cpu = new window.Worker('blob:cpu');
   const init = { type: 'init', id: 1, jsUrl: '/berserk/berserk.js', model: new ArrayBuffer(2) };
@@ -467,6 +472,30 @@ test('route probes retain original worker payloads, count teardown once and pars
   const source = readFileSync(new URL('../scripts/perf_routes/session.mjs', import.meta.url), 'utf8');
   assert.ok(source.indexOf('result.finalWorkerErrors =') > source.indexOf("result.metrics['workers.residual'] ="));
   assert.match(source, /if \(result\.finalWorkerErrors\.length\) throw/);
+});
+
+test('route probe ignores only an in-flight init abort on the worker being disposed', () => {
+  const window = workerProbe();
+  const retiring = new window.Worker('searchWorker.js');
+  const live = new window.Worker('searchWorker.js');
+  const abort = 'signal is aborted without reason';
+  const init = { type: 'init', id: 1 };
+  const initAbort = { type: 'error', id: init.id, error: abort };
+  retiring.postMessage(init);
+  retiring.postMessage({ type: 'init', id: 2 });
+  retiring.postMessage({ type: 'search', id: 3 });
+  live.postMessage(init);
+  retiring.postMessage({ type: 'cancel' });
+  retiring.postMessage({ type: 'dispose', id: -1 });
+  retiring.receive(initAbort);
+  assert.deepEqual([...window.__routePerf.errors], []);
+
+  live.receive(initAbort);
+  retiring.receive({ type: 'error', id: 2, error: 'invalid model' });
+  retiring.receive({ type: 'error', id: 3, error: abort });
+  retiring.receive({ type: 'error', id: -1, error: 'release failed' });
+  retiring.listeners.error({ message: abort });
+  assert.deepEqual([...window.__routePerf.errors], [abort, 'invalid model', abort, 'release failed', abort]);
 });
 
 test('probe disconnects and drops Play observer/host on navigation and detects external fetches', async () => {
