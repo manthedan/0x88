@@ -276,7 +276,7 @@ function analysisOwner(native) {
       }
     }
     // Stop's own big-net call, then the cancel it leads to.
-    const stop=()=>{${slice(analysis, 'engines.stopBigNetInit(', ';')};cancelAnalysisOperation(1);};
+    const stop=()=>{${slice(analysis, 'if (engines.stopBigNetInit(', ';')};cancelAnalysisOperation(1);};
     return {prepare,cancel:()=>cancelAnalysisOperation(1),stop,changeRows:()=>invalidateAnalysisSettings({disposeUnused:true},true),enableMaia3Panel,unloadMaia3Panel,...criticalCallbacks,getStockfish:engines.getStockfish,message,disposeAnalysisCpuEngines:engines.disposeAnalysisCpuEngines};`,
     {
       engines,

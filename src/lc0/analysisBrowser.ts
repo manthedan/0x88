@@ -4165,9 +4165,14 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       const prompt = {
         signal: AbortSignal.any([controller.signal, mountAbort.signal]),
         current: () => analysisCanPrepare(analysisRunState, owner),
-        ask: requestLargeNetRedownloadConsent,
+        ask: (config: BigNetConfig, signal: AbortSignal) => requestLargeNetRedownloadConsent(config, signal),
       };
-      const initErrors = await engines.initBigNetsForRun(uninitializedBigNets, controller, () => controller.signal.aborted || mountAbort.signal.aborted, prompt);
+      const initErrors = await engines.initBigNetsForRun(
+        uninitializedBigNets,
+        controller,
+        () => controller.signal.aborted || mountAbort.signal.aborted,
+        prompt,
+      );
       for (const [key, error] of initErrors) bigNetInitErrors.set(key, error);
       if (controller.signal.aborted || mountAbort.signal.aborted) return;
     }

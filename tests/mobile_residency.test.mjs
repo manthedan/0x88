@@ -282,7 +282,8 @@ test('Analysis unloading Maia clears the panel and awaits even an in-flight init
   assert.equal(elements.get('maia3Grid').hidden, true);
   const perform = extract(source('analysisBrowser'), 'async function performAnalysis(owner:', 'let analysisGameTree = tree;');
   assert.match(perform, /isMemoryConstrainedDevice\(\).*rows.some/s);
-  assert.ok(perform.indexOf('unloadMaia3Panel(') < perform.indexOf('initBigNetsForRun(uninitializedBigNets'));
+  const bigNetInit = perform.indexOf('engines.initBigNetsForRun(');
+  assert.ok(bigNetInit > 0 && perform.indexOf('unloadMaia3Panel(') < bigNetInit);
 });
 
 test('Analysis cancels a pending Maia panel load, awaits terminal cleanup, and re-enable reloads it', async () => {
