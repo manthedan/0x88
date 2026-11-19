@@ -152,8 +152,7 @@ test('t3 prefetch: the worker picks the file with the session worker rule and it
   assert.equal(request.modelUrl, t3Url, 'the page sends the shipped URL, unresolved');
   assert.equal(request.selectFor, 'auto', 'with the EP the session worker is sent');
   assert.deepEqual(env.counts.urls, [t3SplitKUrl]);
-  // What the session worker's createLc0OnnxEvaluatorFromUrl selects under the same pin.
-  assert.equal(selectLc0OrtModelUrl(t3Url, await resolveOrtSessionPlacement('auto')), t3SplitKUrl);
+  assert.deepEqual(env.workers[1].messages[0].prefetchedModel, { url: t3SplitKUrl, load: undefined });
   await searcher.dispose();
   // Warm: the worker finds the selected file by key and downloads nothing.
   env.trace.length = 0;
@@ -161,6 +160,7 @@ test('t3 prefetch: the worker picks the file with the session worker rule and it
   assert.equal(await warm.init(), 'mock-webgpu');
   assert.deepEqual(env.trace, ['prefetch:spawn', 'prefetch:terminate', 'search:spawn', 'search:init']);
   assert.equal(env.counts.downloads, 1);
+  assert.deepEqual(env.workers.at(-1).messages[0].prefetchedModel, { url: t3SplitKUrl, load: undefined });
   await warm.dispose();
 });
 
@@ -173,7 +173,7 @@ test('t3 prefetch uses the EP the session worker will get, not the page preferen
   assert.equal(await searcher.init(), 'mock-webgpu');
   assert.equal(env.workers[0].messages[0].selectFor, 'auto');
   assert.deepEqual(env.counts.urls, [t3Url]);
-  assert.deepEqual((await resolveOrtSessionPlacement()).providers, ['webgpu'], 'the page preference alone would have picked split-K');
+  assert.equal(selectLc0OrtModelUrl(t3Url, await resolveOrtSessionPlacement()), t3SplitKUrl, 'the page preference alone would have picked split-K');
   await searcher.dispose();
 });
 
@@ -201,14 +201,16 @@ test('dispose (Stop, seat swap) during the prefetch terminates its worker and ne
 });
 
 test('a failed cache.put hands the verified bytes to the session worker: one download', async (t) => {
-  const env = environment(t, { putFails: true });
-  const searcher = new Bt4WorkerSearcher(config);
+  const env = environment(t, { putFails: true, files: [t3Url, t3SplitKUrl] });
+  adapter(t);
+  const searcher = new Bt4WorkerSearcher(t3Config);
   assert.equal(await searcher.init(), 'mock-webgpu');
   assert.deepEqual(env.trace, ['prefetch:spawn', 'download', 'prefetch:terminate', 'search:spawn', 'search:init']);
   assert.equal(env.responses.size, 0);
   const search = env.workers[1];
   const { prefetchedModel } = search.messages[0];
-  assert.equal(prefetchedModel.url, modelUrl);
+  assert.equal(search.messages[0].modelUrl, t3Url);
+  assert.equal(prefetchedModel.url, t3SplitKUrl);
   assert.equal(prefetchedModel.load.mode, 'memory');
   assert.equal(prefetchedModel.load.sha256Valid, true);
   assert.equal(new TextDecoder().decode(prefetchedModel.load.model), 'abc');
@@ -263,7 +265,7 @@ test('the session load waits out the phone reclaim gap counted from the prefetch
   environment(t);
   let terminatedAt = Number.NaN;
   const worker = new EventTarget();
-  worker.postMessage = () => queueMicrotask(() => worker.dispatchEvent(new MessageEvent('message', { data: { type: 'done', cached: true } })));
+  worker.postMessage = () => queueMicrotask(() => worker.dispatchEvent(new MessageEvent('message', { data: { type: 'done', cached: true, modelUrl } })));
   worker.terminate = () => {
     terminatedAt = performance.now();
   };
@@ -272,7 +274,7 @@ test('the session load waits out the phone reclaim gap counted from the prefetch
     { signal: new AbortController().signal, ep: 'auto', load: {} },
     { cached: async () => false, spawn: () => worker, reclaimGapMs: () => 40 },
   );
-  assert.deepEqual(result, { status: 'prefetched' });
+  assert.deepEqual(result, { status: 'prefetched', modelUrl });
   assert.ok(performance.now() - terminatedAt >= 35, 'resolved only after the gap');
 });
 
