@@ -1,4 +1,4 @@
-import type { Reroute } from '@sveltejs/kit';
+import type { Reroute } from '@sveltejs/kit/hooks';
 
 // Same pattern as LAB_ROUTE_ID in kit.config.js (tests/build_scope.test.mjs keeps them equal).
 export const LAB_PATH = /^\/(?:lab|single-engine)(?:\/|$)/;
