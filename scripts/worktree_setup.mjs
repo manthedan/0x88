@@ -20,7 +20,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
-import { linkNodeModules } from './lib/link_node_modules.mjs';
+import { hasSharedNodeModuleLinks, linkNodeModules } from './lib/link_node_modules.mjs';
 
 const realOrNull = (path) => {
   try {
@@ -114,7 +114,7 @@ const readOrNull = (path) => {
 function nodeModulesPlan(main, worktree) {
   const dir = join(worktree, 'node_modules');
   const stat = lstatIfExists(dir);
-  if (stat && !stat.isSymbolicLink() && !lstatIfExists(join(dir, '.bin'))?.isSymbolicLink()) return 'own';
+  if (stat && !stat.isSymbolicLink() && !(stat.isDirectory() && hasSharedNodeModuleLinks(join(main, 'node_modules'), dir))) return 'own';
   const sameLock = readOrNull(join(main, 'package-lock.json')) === readOrNull(join(worktree, 'package-lock.json'));
   return sameLock ? 'share' : 'lock-differs';
 }
@@ -124,21 +124,24 @@ function setupNodeModules(main, worktree, log) {
   const source = join(main, 'node_modules');
   const dest = join(worktree, 'node_modules');
   const stat = lstatIfExists(dest);
-  if (stat) {
-    if (!stat.isSymbolicLink()) return;
+  if (stat?.isSymbolicLink()) {
     const actual = realOrNull(dest);
     if (!actual || actual !== realOrNull(source)) return;
     unlinkSync(dest);
   }
-  log.created.push(...linkNodeModules(source, dest));
+  const action = stat?.isDirectory() ? 'reconcile' : 'create';
+  log.created.push(...linkNodeModules(source, dest, action).created);
 }
 
 function verify(main, worktree, log) {
   const dir = join(worktree, 'node_modules');
-  if (nodeModulesPlan(main, worktree) === 'lock-differs') {
+  const plan = nodeModulesPlan(main, worktree);
+  const stat = lstatIfExists(dir);
+  if (plan === 'lock-differs') {
     log.problems.push(`package-lock.json differs from the main checkout, so its install cannot be shared: remove node_modules and run npm ci (in ${worktree})`);
   } else if (!existsSync(join(dir, '.bin/vite'))) log.problems.push('node_modules/.bin/vite missing');
-  if (lstatIfExists(dir)?.isSymbolicLink()) log.problems.push(`node_modules is a whole-directory symlink to ${readlinkSync(dir)}; migrate it or install locally`);
+  if (plan === 'share' && stat?.isDirectory()) log.problems.push(...linkNodeModules(join(main, 'node_modules'), dir, 'check').problems);
+  if (stat?.isSymbolicLink()) log.problems.push(`node_modules is a whole-directory symlink to ${readlinkSync(dir)}; migrate it or install locally`);
   const app = realOrNull(join(dir, '$app'));
   if (app && !within(app, worktree)) log.problems.push(`node_modules/$app resolves outside the worktree to ${app}`);
   if (!realOrNull(join(worktree, '..', 'models'))) log.problems.push(`${resolve(worktree, '..', 'models')} does not resolve`);

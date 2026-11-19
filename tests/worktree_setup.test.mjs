@@ -99,6 +99,48 @@ test('links dependencies and models, keeps generated files local, and reruns as 
   assert.equal(setup(worktree, '--check').status, 0);
 });
 
+test('reconciles added and removed dependencies after matching lockfile updates', (t) => {
+  const { repo, worktree } = fixture(t);
+  const source = join(repo, 'node_modules');
+  const dest = join(worktree, 'node_modules');
+  write(join(source, 'old-pkg/package.json'), '{}');
+  assert.equal(setup(worktree).status, 0);
+  write(join(worktree, APP_TYPES), '// worktree types\n');
+  for (const cache of ['.vite', '.vite-cache', '.vite-temp']) write(join(dest, cache, 'local'), cache);
+  write(join(dest, 'local-pkg/package.json'), '{}');
+
+  for (const dir of [repo, worktree]) write(join(dir, 'package-lock.json'), '{"lockfileVersion":3,"updated":true}\n');
+  rmSync(join(source, 'old-pkg'), { recursive: true });
+  write(join(source, '@added/new-pkg/package.json'), '{}');
+
+  const check = setup(worktree, '--check');
+  assert.equal(check.status, 1);
+  assert.match(check.stderr, /node_modules\/@added missing/);
+  assert.match(check.stderr, /node_modules\/old-pkg is dangling/);
+  assert.equal(existsSync(join(dest, '@added')), false);
+  assert.ok(lstatSync(join(dest, 'old-pkg')).isSymbolicLink());
+
+  const result = setup(worktree);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /1 links created/);
+  assert.equal(realpathSync(join(dest, '@added/new-pkg')), join(source, '@added/new-pkg'));
+  assert.equal(lstatSync(join(dest, 'old-pkg'), { throwIfNoEntry: false }), undefined);
+  assert.equal(readFileSync(join(worktree, APP_TYPES), 'utf8'), '// worktree types\n');
+  for (const cache of ['.vite', '.vite-cache', '.vite-temp']) assert.equal(readFileSync(join(dest, cache, 'local'), 'utf8'), cache);
+  assert.ok(lstatSync(join(dest, 'local-pkg')).isDirectory());
+  assert.equal(setup(worktree, '--check').status, 0);
+});
+
+test('repairs a missing .bin link in an otherwise shared install', (t) => {
+  const { repo, worktree } = fixture(t);
+  assert.equal(setup(worktree).status, 0);
+  const bin = join(worktree, 'node_modules/.bin');
+  rmSync(bin);
+  const result = setup(worktree);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(realpathSync(join(bin, 'vite')), join(repo, 'node_modules/vite/bin/vite.js'));
+});
+
 test('--check rejects the old whole-directory symlink and setup migrates it', (t) => {
   const { repo, worktree } = fixture(t);
   assert.equal(setup(worktree).status, 0);
