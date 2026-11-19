@@ -775,9 +775,9 @@ onMount(() => {
   .stop-action::before{content:''; position:absolute; inset:0 auto 0 0; width:var(--progress); background:#0000002e; z-index:-1; transition:width .2s}
   /* Keep the slot the same width for an empty label, “searching”, and 0–100%. */
   .stop-progress{flex:0 0 auto; min-width:5em; font:600 12px var(--sans); font-variant-numeric:tabular-nums; text-align:end; opacity:.85}
-  /* An empty slot must not reserve width: WebKit sizes the button from content, so a fixed basis overflowed and clipped the icon and label.
-     A shown label uses a min-width (which WebKit does count) that fits both "searching" and "100%", so Stop keeps one width while running. */
-  .stop-progress:empty{display:none}
+  /* The slot is a min-width, not a flex-basis: WebKit counts min-width when sizing the button, while a fixed basis
+     overflowed it on iPhone and clipped the icon and label. Desktop keeps the empty slot so the first progress update
+     cannot widen Stop and wrap the engine controls. */
   .analysis-overview #stop:disabled, .analysis-overview:has(#stop:not(:disabled)) #analyze{display:none}
 
   /* Engine strip */
@@ -1049,6 +1049,8 @@ onMount(() => {
     .board-panel{width:min(100%, max(320px, calc(100svh - 360px))); justify-self:center}
   }
   @media (max-width:767px){
+    /* Phone: Stop sits on its own row, so an empty slot would only push the icon and label off-center. */
+    .stop-progress:empty{display:none}
     .analysis-workspace{grid-template-columns:1fr; max-width:680px; padding:12px; gap:10px}
     .board-column{display:contents}
     .board-panel, .analysis-workspace .app-sidebar{grid-column:1; grid-row:auto}
