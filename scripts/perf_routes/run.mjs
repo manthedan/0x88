@@ -46,8 +46,10 @@ if (args.help) {
 if (args.report) {
   report(resolve(args.report));
   process.exitCode = exitFor(resolve(args.report));
-} else if (args['dry-run']) console.log(JSON.stringify(plan(args), null, 2));
-else {
+} else if (args['dry-run']) {
+  if (args.repeats === 1) resolveSources();
+  console.log(JSON.stringify(plan(args), null, 2));
+} else {
   const { signal, dispose } = watchShutdown();
   try {
     await run(signal);
@@ -66,7 +68,8 @@ function command(bin, argv, cwd = root) {
   if (r.status !== 0) throw Error(`${bin} exited ${r.status}: ${r.error ?? ''}`);
 }
 function git(...argv) {
-  console.log(`pwd: ${process.cwd()}; git ${argv.join(' ')}`);
+  const log = args['dry-run'] ? console.error : console.log;
+  log(`pwd: ${process.cwd()}; git ${argv.join(' ')}`);
   return spawnSync('git', argv, { cwd: root, encoding: 'utf8', maxBuffer: 1024 * 1024 });
 }
 // Identify an arm before building so a resumed run can refuse a different cohort up front.
@@ -83,6 +86,21 @@ function armSource(input) {
   if (rev.status !== 0) throw Error(`Not a directory or commit: ${input}`);
   return { input, kind: 'archived-source', commit: rev.stdout.trim() };
 }
+function resolveSources() {
+  const source = (arm) => {
+    const url = args[`${arm}-url`];
+    return url ? { input: args[arm], url, kind: 'externally-served' } : armSource(args[arm]);
+  };
+  const baseline = source('baseline'),
+    candidate = source('candidate');
+  const sources = { baseline, candidate };
+  if (args.repeats === 1) {
+    const samePrebuilt = baseline.kind === 'prebuilt' && baseline.dist === candidate.dist;
+    const sameServed = baseline.kind === 'externally-served' && baseline.input === candidate.input && baseline.url === candidate.url;
+    if (!(samePrebuilt || sameServed || sharesBaselineBuild(sources))) throw Error('--repeats must be an integer >=5 (or 1 for a same-build smoke)');
+  }
+  return sources;
+}
 function build(source, out, arm) {
   if (source.kind === 'prebuilt') return source;
   const dir = join(out, 'builds', arm),
@@ -97,34 +115,39 @@ function build(source, out, arm) {
   // writing into an earlier one. Only a finished build is renamed into place (links are absolute).
   const stage = `${dir}.staging-${process.pid}-${Date.now()}`;
   const archive = `${stage}.tar`;
-  mkdirSync(stage, { recursive: true });
-  command('git', ['archive', '--format=tar', '-o', archive, source.commit]);
-  command('tar', ['-xf', archive, '-C', stage]);
-  rmSync(archive);
-  // Same lockfile: use the worktree's installed dependencies read-only. A dependency refactor gets
-  // its own install; never run npm install/ci in the shared checkout/node_modules.
-  const sameLock = readFileSync(join(stage, 'package-lock.json')).equals(readFileSync(join(root, 'package-lock.json')));
-  if (sameLock) linkNodeModules(join(root, 'node_modules'), join(stage, 'node_modules'));
-  else command('npm', ['ci', '--ignore-scripts'], stage);
-  const links = localAssets(root, stage);
-  command('env', ['BUILD_SCOPE=product', 'npm', 'run', 'build:client'], stage);
-  linkAssets(links, join(stage, 'dist-client'));
-  // Intermediate copy of the client output; only dist-client is served.
-  rmSync(join(stage, '.svelte-kit/output'), { recursive: true, force: true });
-  // A tree left here by an unrecorded earlier attempt was only ever renamed in, never written to.
-  rmSync(dir, { recursive: true, force: true });
-  renameSync(stage, dir);
-  const dist = join(dir, 'dist-client');
-  const built = {
-    dist,
-    commit: source.commit,
-    input: source.input,
-    kind: source.kind,
-    dependencies: sameLock ? 'shared-installed/same-lockfile' : 'isolated-npm-ci',
-    linkedLocalAssets: links.size,
-  };
-  writeJsonAtomic(record, built);
-  return built;
+  try {
+    mkdirSync(stage, { recursive: true });
+    command('git', ['archive', '--format=tar', '-o', archive, source.commit]);
+    command('tar', ['-xf', archive, '-C', stage]);
+    rmSync(archive);
+    // Same lockfile: use the worktree's installed dependencies read-only. A dependency refactor gets
+    // its own install; never run npm install/ci in the shared checkout/node_modules.
+    const sameLock = readFileSync(join(stage, 'package-lock.json')).equals(readFileSync(join(root, 'package-lock.json')));
+    if (sameLock) linkNodeModules(join(root, 'node_modules'), join(stage, 'node_modules'));
+    else command('npm', ['ci', '--ignore-scripts'], stage);
+    const links = localAssets(root, stage);
+    command('env', ['BUILD_SCOPE=product', 'npm', 'run', 'build:client'], stage);
+    linkAssets(links, join(stage, 'dist-client'));
+    // Intermediate copy of the client output; only dist-client is served.
+    rmSync(join(stage, '.svelte-kit/output'), { recursive: true, force: true });
+    // A tree left here by an unrecorded earlier attempt was only ever renamed in, never written to.
+    rmSync(dir, { recursive: true, force: true });
+    renameSync(stage, dir);
+    const dist = join(dir, 'dist-client');
+    const built = {
+      dist,
+      commit: source.commit,
+      input: source.input,
+      kind: source.kind,
+      dependencies: sameLock ? 'shared-installed/same-lockfile' : 'isolated-npm-ci',
+      linkedLocalAssets: links.size,
+    };
+    writeJsonAtomic(record, built);
+    return built;
+  } finally {
+    rmSync(archive, { force: true });
+    rmSync(stage, { recursive: true, force: true });
+  }
 }
 async function serve(dist, out, arm, signal) {
   const socket = createServer();
@@ -181,9 +204,7 @@ async function run(signal) {
   if (unsupported && !args['build-only']) throw Error(unsupported);
   const out = resolve(args.out ?? `.local-dev-artifacts/perf-routes/${new Date().toISOString().replace(/[:.]/g, '-')}`);
   if (args.benchlock && !existsSync(args.benchlock)) throw Error('benchlock does not exist');
-  const sources = {};
-  for (const arm of ['baseline', 'candidate'])
-    sources[arm] = args[`${arm}-url`] ? { input: args[arm], url: args[`${arm}-url`], kind: 'externally-served' } : armSource(args[arm]);
+  const sources = resolveSources();
   const manifest = runManifest(args, sources, { host: hostname(), harness: harnessHash() });
   const resuming = args.resume && existsSync(out);
   if (!resuming) claimOutput(out);
@@ -289,8 +310,11 @@ async function measure(signal, out, sources, resuming) {
       });
       if (!cleanupConfirmed) console.error(row.error);
       // Not an outcome (resume re-runs it), and never appended: the cohort stays combinable.
-      if (row.browserMismatch && cleanupConfirmed)
-        throw Error(`${id}: browser build changed mid-cohort (${row.browserMismatch}); restore ${row.expectedBrowser} and --resume, or start a new cohort`);
+      if (row.browserMismatch && cleanupConfirmed) {
+        console.error(`${id}: browser build changed mid-cohort (${row.browserMismatch}); restore ${row.expectedBrowser} and --resume, or start a new cohort`);
+        process.exitCode = 2;
+        return;
+      }
       cohortBrowser[row.browser] ??= browserIdentity(row);
       appendFileSync(join(out, 'runs.jsonl'), `${JSON.stringify(row)}\n`);
       signal.throwIfAborted();

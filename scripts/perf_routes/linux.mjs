@@ -153,7 +153,7 @@ export async function warmWebGpu(browser, isRendererGone, { signal, timeoutMs = 
         if (!adapter) await wait(delayMs);
       }
     } finally {
-      if (context) await context.close();
+      if (context) await bounded(context.close());
       else creating.then((late) => late.close()).catch(() => {});
     }
     if (!adapter || adapter.fallback || /swiftshader|llvmpipe/i.test(JSON.stringify(adapter)))

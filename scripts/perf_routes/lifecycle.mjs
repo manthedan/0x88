@@ -138,18 +138,28 @@ export async function shutdownDelay(ms, signal) {
 export async function runOwnedSession(bin, argv, signal, wrappedResultFile, ownedResultFile) {
   signal.throwIfAborted();
   // Separate from terminal Ctrl-C; don't interrupt a benchlock wrapper that holds a live session's mutex.
-  const child = spawn(bin, argv, { stdio: 'inherit', detached: true });
+  const gatedExec = 'shopt -s execfail; read -r start <&3 || exit 2; { exec "$@"; } 3>&-; printf "%s" "$?" >&3; exit 2';
+  const child = ownedResultFile
+    ? spawn('/bin/bash', ['-p', '-c', gatedExec, 'perf:routes', bin, ...argv], {
+        stdio: ['inherit', 'inherit', 'inherit', 'pipe'],
+        detached: true,
+      })
+    : spawn(bin, argv, { stdio: 'inherit', detached: true });
   const closed = once(child, 'close');
-  if (ownedResultFile && child.pid)
+  let execErrorStatus = '';
+  if (ownedResultFile && child.pid) {
+    const startPipe = child.stdio[3];
+    startPipe.setEncoding('utf8').on('data', (chunk) => (execErrorStatus += chunk));
+    startPipe.on('error', () => {});
     try {
       writeFileSync(ownerRecord(ownedResultFile), `${child.pid}\n`);
     } catch (error) {
-      // An unrecorded child could outlive a SIGKILLed coordinator unseen by resume. Stop it before the
-      // caller releases the mutex; it has not reached the browser yet (or cleans up on SIGTERM).
-      child.kill('SIGTERM');
+      startPipe.end();
       await closed;
       throw error;
     }
+    startPipe.end('start\n');
+  }
   const stop = () => {
     if (!wrappedResultFile) child.kill('SIGTERM');
     else {
@@ -164,6 +174,7 @@ export async function runOwnedSession(bin, argv, signal, wrappedResultFile, owne
   try {
     const [status] = await closed;
     if (ownedResultFile) rmSync(ownerRecord(ownedResultFile), { force: true });
+    if (execErrorStatus) throw Error(`Unable to launch ${bin} (exec exited ${execErrorStatus})`);
     return status;
   } finally {
     signal.removeEventListener('abort', stop);

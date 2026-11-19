@@ -137,7 +137,7 @@ test('Chrome sampling accepts the async Linux reader and keeps VRAM separately v
     async () => rows,
   );
   assert.deepEqual(sample.render, { cur: 15, life: 18, interval: 16, vram: 0 });
-  assert.deepEqual(sample.gpu, { cur: 400, life: 500, interval: 450, vram: 300 });
+  assert.deepEqual(sample.gpu, { cur: 400, life: 500, interval: 450, vram: 300, vramPeak: 300 });
   // A GPU process nvidia-smi does not list is an unavailable reading, never zero VRAM.
   rows.set(3, { cur: 100, life: 100, interval: 100, vram: null });
   await assert.rejects(
@@ -157,6 +157,27 @@ test('Chrome sampling accepts the async Linux reader and keeps VRAM separately v
   assert.deepEqual(unlisted.render, { cur: 15, life: 18, interval: 16, vram: null });
   // macOS rows stay exactly as before: no vram key appears.
   assert.deepEqual(footprintSum([1], new Map([[1, { cur: 1, life: 2, interval: 3 }]]), 'renderer'), { cur: 1, life: 2, interval: 3 });
+});
+
+test('a renderer exit preserves the initial VRAM peak without replacing the refreshed reading', async () => {
+  const discoveries = [
+    { rendererPids: [1], gpuPids: [3] },
+    { rendererPids: [2], gpuPids: [3] },
+  ];
+  const reads = [
+    new Map([[3, { cur: 400, life: 400, interval: 400, vram: 300 }]]),
+    new Map([
+      [2, { cur: 20, life: 20, interval: 20, vram: null }],
+      [3, { cur: 200, life: 400, interval: 200, vram: 100 }],
+    ]),
+  ];
+  const { gpu } = await chromeFootprint(
+    async () => discoveries.shift(),
+    async () => reads.shift(),
+  );
+  assert.equal(gpu.cur, 200);
+  assert.equal(gpu.vram, 100);
+  assert.equal(gpu.vramPeak, 300);
 });
 
 test('Linux runs only Chrome; macOS keeps every browser', () => {
@@ -290,6 +311,26 @@ test('WebGPU warm-up gives up at its wall-clock deadline or on shutdown and clos
   arrive(late);
   await new Promise((r) => setImmediate(r));
   assert.equal(late.closed, 1);
+});
+
+test('WebGPU warm-up rejects when context disposal stalls past its deadline or shutdown', { timeout: 1000 }, async () => {
+  for (const interrupted of [false, true]) {
+    const shutdown = new AbortController();
+    const browser = {
+      newContext: async () => ({
+        route: async () => {},
+        newPage: async () => ({ goto: async () => {}, evaluate: async () => ({ vendor: 'nvidia', shaderF16: true }) }),
+        close: () => {
+          if (interrupted) shutdown.abort(Error('Interrupted by SIGTERM'));
+          return new Promise(() => {});
+        },
+      }),
+    };
+    await assert.rejects(
+      warmWebGpu(browser, async () => assert.fail('must not proceed with the warm-up context still open'), { signal: shutdown.signal, timeoutMs: 20 }),
+      interrupted ? /Interrupted by SIGTERM/ : /WebGPU warm-up exceeded 20 ms/,
+    );
+  }
 });
 
 test('Linux sessions refuse journeys whose ORT sessions ran on WASM or reported no backend', () => {
