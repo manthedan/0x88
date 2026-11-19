@@ -42,7 +42,7 @@ type EvaluateMessage = {
   eloOppo: number;
 };
 
-/** One position evaluated under many (eloSelf, eloOppo) conditions in one run (rating-inference grids). */
+/** One position evaluated under several (eloSelf, eloOppo) conditions in one run. */
 type EvaluateConditionsMessage = {
   type: 'evaluateConditions';
   id: number;

@@ -373,7 +373,7 @@ for (const reason of ['navigation', 'seat cancellation', 'diagnostics failure'])
 for (const outcome of ['failure', 'cancelled', 'ready']) {
   test(`Arena Small preparation preserves old exportable games until ready (${outcome})`, async () => {
     const text = source('arenaBrowser');
-    const setup = extract(text, '  // Lazy Small loading is still part of setup.', '  const runCheckpoint =');
+    const setup = extract(text, '  if (selectedSeatsNeedLc0Evaluator() && !lc0Cache) {', '  const runCheckpoint =');
     assert.match(text, /const runCheckpoint = [^;]+;[\s\S]*await saveArenaCheckpoint\(runCheckpoint,[\s\S]*games\.length = 0;/);
     const load = Promise.withResolvers();
     const matchAbort = new AbortController();

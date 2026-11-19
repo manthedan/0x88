@@ -1,4 +1,4 @@
-import { type GameNode, GameTree } from '../lc0/gameTree.ts';
+import { type GameNode, GameTree, MAX_GAME_TREE_NODES } from '../lc0/gameTree.ts';
 import { type BoardState, type PieceRole, parseFen, START_FEN, squareName } from './board.ts';
 import { type Move } from './moveCodec.ts';
 import { legalMoves } from './movegen.ts';
@@ -13,9 +13,8 @@ export type PgnWarningReason =
   | 'unmatched-comment'
   | 'variation-depth';
 
-// Parsing is iterative. Bound hostile external nesting while allowing every shape
-// within the workspace's 5000-move budget, including branches merged during import.
-const MAX_VARIATION_DEPTH = 5000;
+// Parsing is iterative; this bounds hostile nesting. A storable tree never nests deeper than its node count.
+const MAX_VARIATION_DEPTH = MAX_GAME_TREE_NODES;
 
 /** Where tolerant parsing stopped a line. Strict parsing throws instead. */
 export interface PgnWarning {
@@ -452,7 +451,6 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
       }
       continue;
     }
-    // move
     if (!options.strict && ended && !stack.length) {
       stop(token.value, 'after-result');
       continue;

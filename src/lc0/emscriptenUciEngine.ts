@@ -23,7 +23,6 @@ const utf8Bytes = (text: string): number => new TextEncoder().encode(text).lengt
  * prints its replies; the per-engine files only supply names and URLs.
  */
 export interface EmscriptenUciOptions {
-  /** Fixed search depth. */
   depth?: number;
   /** Alternative to depth: fixed think time in ms. */
   movetimeMs?: number;
@@ -36,7 +35,6 @@ export interface EmscriptenUciOptions {
 export interface EmscriptenUciEngineConfig {
   /** `BrowserUciEngine.name`, e.g. `stormphrax-emscripten`. */
   name: string;
-  /** Engine name used in error messages. */
   label: string;
   /** Global defined by the MODULARIZE'd glue (its EXPORT_NAME). */
   factoryGlobal: string;
@@ -85,9 +83,6 @@ export function emscriptenUciWorkerScript(config: Pick<EmscriptenUciEngineConfig
   if (!/^[A-Za-z_$][\w$]*$/.test(config.factoryGlobal)) throw new Error(`Invalid Emscripten factory global: ${config.factoryGlobal}`);
   const factory = config.factoryGlobal;
   const label = JSON.stringify(config.label);
-  // A missing artifact indicates an incomplete checkout or deploy. When the
-  // engine has a rebuild hint, carry it into the worker so the failure
-  // identifies the affected URLs instead of a bare "NetworkError importing script".
   return String.raw`
 ${engineArtifactWorkerScript()}
 const resolveEmscriptenAssetUrl = ${resolveEmscriptenAssetUrl.toString()};
@@ -240,15 +235,6 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
     return this.abortError(`${this.config.label} engine disposed`);
   }
 
-  /**
-   * Run `fn` after every earlier request. A request cancelled while it waits
-   * for its turn rejects with AbortError at once instead of waiting for another
-   * caller's work (which may be a cold init with no timeout). Releasing its
-   * gate early is safe: the queue tail still chains through `previous`, so
-   * later requests keep their order. Every `fn` starts with
-   * prewarmUnlocked(signal), whose first request rejects an aborted signal the
-   * same way, so the early rejection only changes when it settles.
-   */
   private runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     return this.queue.run(async () => {
       try {
@@ -495,10 +481,6 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
     await this.sendCommand('isready', signal);
     await this.waitForLine((line) => line === 'readyok', 'readyok', readyStart, signal);
     this.initialized = true;
-  }
-
-  async search(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null> {
-    return this.bestMove(fen, signal, opts);
   }
 
   async bestMove(fen: string, signal?: AbortSignal, opts: BrowserUciSearchOptions = {}): Promise<string | null> {

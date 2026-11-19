@@ -178,7 +178,7 @@ export function normalizePgnDatabaseBackup(input: unknown): SavePgnCollectionInp
     const entry = raw as Record<string, unknown>;
     const pgn = normalizeString(entry.pgn);
     if (!pgn.trim()) throw new Error(`Collection ${i + 1} has no PGN`);
-    storedPgnChunks(pgn); // Derived indexes are deliberately ignored and rebuilt.
+    storedPgnChunks(pgn);
     return {
       name: sanitizePgnCollectionName(normalizeString(entry.name), `Imported backup ${i + 1}`),
       pgn,
@@ -331,8 +331,7 @@ export async function exportPgnDatabaseBackup(now = new Date(), collectionId?: s
     // Omit derived indexes: smaller portable backups, rebuilt using current semantics on restore.
     const rawCollections = collections.map(({ positionIndex: _index, ...record }) => record);
     const backup: PgnDatabaseBackup = { kind: 'lc0-analysis-pgn-database-backup', version: 1, exportedAt: now.toISOString(), collections: rawCollections };
-    serializePgnDatabaseBackup(backup); // Check size and shape before replaying any games.
-    // Validate legal replay once, yielding between games just as restore does.
+    serializePgnDatabaseBackup(backup);
     for (const collection of rawCollections) await importStoredPgn(collection.pgn);
     return backup;
   } finally {

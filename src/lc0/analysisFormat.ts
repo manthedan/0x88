@@ -42,7 +42,6 @@ export function formatCentipawns(cp: number): string {
   return `${sign}${pawns.toFixed(2)}`;
 }
 
-/** Format a score for display: mate takes priority over centipawns. */
 export function formatScore(scoreCp: number | undefined, mateIn: number | undefined): string {
   if (mateIn !== undefined) return mateIn === 0 ? '#' : `#${mateIn > 0 ? '' : '-'}${Math.abs(mateIn)}`;
   if (scoreCp === undefined) return '—';
@@ -155,7 +154,6 @@ function stockfishDetail(info: StockfishInfoLineLike): string {
   return parts.join(' · ');
 }
 
-/** Build analysis lines from Stockfish MultiPV info for the given FEN. */
 export function stockfishAnalysisLines(infos: StockfishInfoLineLike[], fen: string, engine = 'Stockfish'): AnalysisLine[] {
   const board = parseFen(fen);
   // UCI reports from the side-to-move POV; display from White's perspective.
@@ -232,7 +230,6 @@ export interface CentipawnPuctSearchLike {
   multiPvLines?: CentipawnPuctLineEntryLike[][];
 }
 
-/** Build analysis lines from Centipawn's browser PUCT result. */
 export function centipawnPuctAnalysisLines(result: CentipawnPuctSearchLike, fen: string, engine = 'Centipawn'): AnalysisLine[] {
   const board = parseFen(fen);
   const w = board.turn === 'w' ? 1 : -1;

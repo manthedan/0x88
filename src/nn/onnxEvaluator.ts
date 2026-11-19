@@ -299,7 +299,6 @@ export function onnxInputPlanes(board: BoardState, meta: Pick<OnnxStudentMeta, '
     }
     fillPlane(state0 + 6, 1);
     fillPlane(state0 + 7, side === 'w' ? 1 : 0);
-    // Check planes are intentionally zero for now; add runtime parity once history plumbing lands.
   } else fillPlane(state0 + 1, 1);
   return data;
 }

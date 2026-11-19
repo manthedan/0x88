@@ -116,8 +116,6 @@ function fieldString(buf: Uint8Array, f: Field): string {
   return textDecoder.decode(buf.subarray(f.valueStart, f.valueEnd));
 }
 
-// ---------------------------------------------------------------- writer
-
 export class ProtoWriter {
   private chunks: Uint8Array[] = [];
   private scratch = new Uint8Array(10);
@@ -181,11 +179,7 @@ export function encodeTensorProto(name: string, dataType: number, dims: number[]
   return w.finish();
 }
 
-// ---------------------------------------------------------------- f16
-
 export { f16BitsToF32, f32ToF16Bits };
-
-// ---------------------------------------------------------------- tensors
 
 type TensorInfo = {
   name: string;
@@ -440,8 +434,6 @@ function writeFoldedTensor(writer: ModelWriter, tensor: FoldedTensor): void {
   writer.position += tensor.rawBytes;
 }
 
-// ---------------------------------------------------------------- nodes
-
 type NodeInfo = {
   field: Field;
   opType: string;
@@ -572,7 +564,6 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
       nodes.push(parseNode(model, f));
       countNodeConsumers(model, f, consumers);
     } else if (f.field === 5) {
-      // Only the name is needed up front; the payload is parsed for the tensors we fold.
       let name = '';
       for (const t of parseProtoFields(model, f.valueStart, f.valueEnd))
         if (t.field === 8) {
@@ -596,7 +587,7 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
   };
 
   const removedNodes = new Set<Field>();
-  const folds = new Map<Field, FoldedTensor>(); // metadata/readers only, no replacement tensor buffers
+  const folds = new Map<Field, FoldedTensor>();
   const droppedInitializers = new Set<Field>();
   let skipped = 0;
   for (const node of dql) {
@@ -636,7 +627,7 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
     if (folds.has(xEntry.field)) {
       skipped += 1;
       continue;
-    } // shared quantized input: fold only once
+    }
     removedNodes.add(node.field);
     folds.set(xEntry.field, planFoldedTensor(node.outputs[0], outType, x.dims, plan));
     for (const name of [node.inputs[0], node.inputs[1], zpName]) {
@@ -648,8 +639,6 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
   }
   if (removedNodes.size === 0) return unchanged(skipped);
 
-  // Pass 1 counts exactly the same fields/order that pass 2 writes. No numeric
-  // tensor data is produced until the sole, final model buffer is allocated.
   const graph = (writer?: ModelWriter): number => {
     let length = 0;
     for (const f of graphFields) {

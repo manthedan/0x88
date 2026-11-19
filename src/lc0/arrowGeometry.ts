@@ -1,12 +1,11 @@
-// Board-arrow geometry, in board squares (1 = one square). The owner chose (2026-11-08) a
-// chess.com-style tail that starts near the edge of the origin square, so the moving piece stays
-// visible, and a fixed head (0.40 long, 0.55 wide) whose tip sits on the target square's centre.
-// The head is sized in squares, not in line widths, so its base stays 0.10 inside the target square
-// whatever the arrow width. Chessground's own head scales with the width (3 x 4 line widths), which
-// put its base almost exactly on the square boundary at width 11.
+// Board-arrow geometry, in board squares (1 = one square). The tail starts near the edge of the
+// origin square so the moving piece stays visible. The head is sized in squares, not in line widths,
+// so its base stays 0.10 inside the target square whatever the arrow width; chessground's own head
+// scales with the width (3 x 4 line widths), which put its base almost exactly on the square boundary
+// at width 11.
 //
-// vite.chessground-arrows.ts injects arrowLayout() into chessground, and the Home preview draws
-// its arrows with it, so every board arrow in the app (and arrows users draw) shares this shape.
+// chessgroundArrowPatch.ts injects arrowLayout() into chessground, and the Home preview draws its
+// arrows with it, so every board arrow in the app (and arrows users draw) shares this shape.
 
 export interface ArrowGeometry {
   /** Distance from the origin square's centre to where the shaft starts. */
@@ -36,7 +35,6 @@ export interface ArrowLayout {
   x2: number;
   y2: number;
   tip: [number, number];
-  /** Unit direction from origin to target. */
   ux: number;
   uy: number;
 }

@@ -33,8 +33,6 @@ const ROOK = [
   [0, 1],
   [0, -1],
 ];
-// Hoisted: `[...BISHOP, ...ROOK]` inline rebuilt an 8-entry array of arrays for
-// every queen, on every generation.
 const QUEEN = [...BISHOP, ...ROOK];
 
 const fileOf = (sq: number) => sq & 7;
@@ -43,14 +41,6 @@ const on = (f: number, r: number) => f >= 0 && f < 8 && r >= 0 && r < 8;
 const idx = (f: number, r: number) => f + (r << 3);
 const colorOf = (piece: Piece | null): Color | null => (piece?.[0] as Color | undefined) ?? null;
 
-/**
- * Piece literals per colour, hoisted out of the scan loops.
- *
- * `isSquareAttacked` used to build its comparison strings inline (`` `${by}n` ``),
- * which allocates once per square probed — and it probes on every legality test,
- * which runs once per pseudo-legal move. Same for `kingSquare`'s target. These
- * are the same eight strings forever, so build them once.
- */
 const PIECES = {
   w: { p: 'wp', n: 'wn', b: 'wb', r: 'wr', q: 'wq', k: 'wk' },
   b: { p: 'bp', n: 'bn', b: 'bb', r: 'br', q: 'bq', k: 'bk' },
@@ -298,4 +288,8 @@ export function makeMove(board: BoardState, move: Move): BoardState {
   next.halfmove = isPawn || captured || isEp ? 0 : board.halfmove + 1;
   next.fullmove += board.turn === 'b' ? 1 : 0;
   return next;
+}
+
+export function givesCheck(board: BoardState, move: Move): boolean {
+  return inCheck(makeMove(board, move));
 }

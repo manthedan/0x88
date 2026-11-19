@@ -1,9 +1,8 @@
 // GPU-resident IO for an ORT WebGPU session (docs/ort_invoke_overhead_2026-11.md).
 //
-// The shipped path hands ORT a CPU input tensor and asks for CPU outputs. ORT
-// then uploads the input through a fresh staging buffer and runs one
-// MemcpyToHost per output, each its own submit + mapAsync + wait, one after
-// the other. This binding instead:
+// With CPU tensors (ioMode 'cpu'), ORT uploads the input through a fresh staging
+// buffer and runs one MemcpyToHost per output, each its own submit + mapAsync +
+// wait, one after the other. This binding instead:
 //
 //   - writes the input with queue.writeBuffer into one persistent GPU buffer;
 //   - binds persistent, preallocated GPU output buffers (ORT IO binding);
@@ -23,6 +22,7 @@
 // first one's readback.
 import type * as ort from 'onnxruntime-web/webgpu';
 import { ExclusiveQueue } from '../lc0/exclusiveQueue.ts';
+import { GPU_BUFFER_USAGE, GPU_MAP_MODE_READ } from './webgpuFlags.ts';
 
 export type OrtGpuIoTensorType = 'float16' | 'float32';
 
@@ -69,14 +69,6 @@ const BYTES_PER_ELEMENT: Record<OrtGpuIoTensorType, number> = { float16: 2, floa
 // ORT's own gpu-buffer downloader rounds sizes up to 16 bytes; copyBufferToBuffer
 // needs multiples of 4. Every buffer and staging slot uses 16.
 const ALIGN = 16;
-
-// WebGPU usage/map flags (spec constants), so this module imports cleanly where
-// GPUBufferUsage is not a global (Node tests).
-const USAGE_MAP_READ = 0x1;
-const USAGE_COPY_SRC = 0x4;
-const USAGE_COPY_DST = 0x8;
-const USAGE_STORAGE = 0x80;
-const MAP_MODE_READ = 0x1;
 
 function elementCount(dims: readonly number[]): number {
   return dims.reduce((a, b) => a * b, 1);
@@ -201,21 +193,23 @@ export class OrtGpuIoBinding {
       return tensor;
     };
     try {
-      this.inputBuffer = device.createBuffer({ size: alignUp(this.inputBytes), usage: USAGE_STORAGE | USAGE_COPY_DST | USAGE_COPY_SRC });
+      this.inputBuffer = device.createBuffer({
+        size: alignUp(this.inputBytes),
+        usage: GPU_BUFFER_USAGE.STORAGE | GPU_BUFFER_USAGE.COPY_DST | GPU_BUFFER_USAGE.COPY_SRC,
+      });
       created.push(this.inputBuffer);
       this.outputBuffers = (outputMode === 'session' ? [] : this.layout.slots).map((slot) => {
-        const buffer = device.createBuffer({ size: slot.paddedBytes, usage: USAGE_STORAGE | USAGE_COPY_SRC | USAGE_COPY_DST });
+        const buffer = device.createBuffer({ size: slot.paddedBytes, usage: GPU_BUFFER_USAGE.STORAGE | GPU_BUFFER_USAGE.COPY_SRC | GPU_BUFFER_USAGE.COPY_DST });
         created.push(buffer);
         return buffer;
       });
-      this.staging = device.createBuffer({ size: this.layout.stagingBytes, usage: USAGE_MAP_READ | USAGE_COPY_DST });
+      this.staging = device.createBuffer({ size: this.layout.stagingBytes, usage: GPU_BUFFER_USAGE.MAP_READ | GPU_BUFFER_USAGE.COPY_DST });
       created.push(this.staging);
       this.pins = pin ? [this.inputBuffer, ...this.outputBuffers].map((buffer) => pinOrtGpuBufferImport(buffer)) : [];
       if (!pin) this.pinsChecked = true;
       this.feeds = { [input.name]: wrap(this.inputBuffer, input) };
       this.fetches = outputMode === 'session' ? null : Object.fromEntries(this.layout.slots.map((slot, i) => [slot.name, wrap(this.outputBuffers[i], slot)]));
     } catch (error) {
-      // Keep the construction error while rolling back every caller-owned resource.
       for (const tensor of wrapped) {
         try {
           tensor.dispose();
@@ -250,7 +244,6 @@ export class OrtGpuIoBinding {
   private async runNow(data: ArrayBufferView & { BYTES_PER_ELEMENT: number; byteLength: number }): Promise<OrtGpuIoOutputs> {
     if (this.disposed) throw new Error('OrtGpuIoBinding has been disposed');
     if (data.byteLength !== this.inputBytes) throw new Error(`OrtGpuIoBinding: input is ${data.byteLength} bytes, expected ${this.inputBytes}`);
-    // float16: the raw f16 bits (Uint16Array, or a Float16Array view of them).
     const bytesPerElement = BYTES_PER_ELEMENT[this.input.type];
     if (data.BYTES_PER_ELEMENT !== bytesPerElement || (this.input.type === 'float32' && !(data instanceof Float32Array)))
       throw new Error(
@@ -281,7 +274,7 @@ export class OrtGpuIoBinding {
       // session, and the copy above is already queued.
       if (!this.fetches) for (const tensor of Object.values(results)) tensor.dispose();
     }
-    await this.staging.mapAsync(MAP_MODE_READ);
+    await this.staging.mapAsync(GPU_MAP_MODE_READ);
     let bytes: ArrayBuffer;
     try {
       bytes = this.staging.getMappedRange().slice(0);

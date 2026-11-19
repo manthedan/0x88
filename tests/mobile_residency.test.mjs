@@ -406,7 +406,7 @@ test('Arena mount never eagerly loads Small; Start and fixed-suite autoruns stil
 
 test('Arena lazy mount enables Start and bench autoruns observe ready controls without loading a model', () => {
   const text = source('arenaBrowser');
-  const tail = extract(text, '  // startMatch / the fixed-suite autorun', '\nlet lastArenaMountHref');
+  const tail = extract(text, '  if (!checkpoint && !checkpointUnreadable) {\n    setArenaStartDisabled(false);', '\nlet lastArenaMountHref');
   const elements = new Map([
     [
       'start',

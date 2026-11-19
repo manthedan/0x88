@@ -68,7 +68,6 @@ export interface EngineFamilyDefinition extends EngineFamilyCatalogEntry {
     default: string;
     /** Static options live here; families with runtime-probed variants supply their options in their typed variant module. */
     options?: readonly EngineVariantOption[];
-    /** Production variants are an explicit allowlist. */
     v0Allowed: readonly string[];
     v0Fallback: string;
     label?: (variant: string, surface: EngineSurface) => string;
@@ -355,7 +354,6 @@ export function engineResourceProfile(family: EngineFamily): EngineFamilyResourc
   return engineFamilyDefinition(family).resource;
 }
 
-/** Lc0 variants backed by the lazy WebGPU big-net worker (bt4Engine.ts). */
 export function isLc0BigNetVariant(variant: string): variant is 'bt4' | 't3' {
   return variant === 'bt4' || variant === 't3';
 }

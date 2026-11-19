@@ -1,6 +1,6 @@
 import { parseFen } from '../chess/board.ts';
 import { htmlEscape } from './browserDom.ts';
-import { lineChartSvg } from './charts.ts';
+import { LINE_CHART_PAD, LINE_CHART_WIDTH, lineChartFractionAt, lineChartPlotX, lineChartPlotY, lineChartSvg } from './charts.ts';
 import { type GameReview, type ReviewedMove } from './gameReview.ts';
 
 export const REVIEW_CLASS_LABEL: Record<ReviewedMove['class'], string> = {
@@ -27,22 +27,24 @@ export function reviewMoveLabel(startFen: string, move: ReviewedMove): string {
   return `${Math.floor(absolutePly / 2) + 1}${move.side === 'w' ? '.' : '…'} ${move.san}`;
 }
 
-/** Same 36/8 padding and 360-unit viewBox as lineChartSvg. */
+const REVIEW_CHART_HEIGHT = 118;
+
+/** Ply under a click `ratio` of the way across the rendered review chart. */
 export function reviewPlyAtRatio(ratio: number, moveCount: number): number {
-  return Math.max(0, Math.min(moveCount, Math.round(((ratio * 360 - 36) / 316) * moveCount)));
+  return Math.max(0, Math.min(moveCount, Math.round(lineChartFractionAt(ratio * LINE_CHART_WIDTH) * moveCount)));
 }
 
 export function reviewChartSvg(review: GameReview, currentPly: number): string {
   if (!review.moves.length) return '';
   const values = [review.moves[0].winBefore, ...review.moves.map((move) => move.winAfter)];
-  const x = (ply: number) => 36 + (ply / review.moves.length) * 316;
-  const y = (value: number) => 6 + (1 - value) * 98;
+  const x = (ply: number) => lineChartPlotX(ply / review.moves.length);
+  const y = (value: number) => lineChartPlotY(value, REVIEW_CHART_HEIGHT);
   const svg = lineChartSvg([{ label: 'White advantage', color: 'var(--ink)', points: values.map((value, ply) => ({ x: ply, y: value })) }], {
     yMin: 0,
     yMax: 1,
     midline: 0.5,
     formatY: (v) => `${Math.round(v * 100)}%`,
-    height: 118,
+    height: REVIEW_CHART_HEIGHT,
   });
   const errors = review.moves
     .filter((move) => ['inaccuracy', 'mistake', 'blunder'].includes(move.class))
@@ -53,7 +55,7 @@ export function reviewChartSvg(review: GameReview, currentPly: number): string {
     .join('');
   const cursor =
     currentPly >= 0 && currentPly < values.length
-      ? `<g class="review-cursor"><line x1="${x(currentPly)}" x2="${x(currentPly)}" y1="6" y2="104" stroke="var(--accent)" stroke-width="1.5"/><circle cx="${x(currentPly)}" cy="${y(values[currentPly])}" r="4" fill="var(--accent)" stroke="var(--panel)" stroke-width="1.5"/></g>`
+      ? `<g class="review-cursor"><line x1="${x(currentPly)}" x2="${x(currentPly)}" y1="${LINE_CHART_PAD.top}" y2="${REVIEW_CHART_HEIGHT - LINE_CHART_PAD.bottom}" stroke="var(--accent)" stroke-width="1.5"/><circle cx="${x(currentPly)}" cy="${y(values[currentPly])}" r="4" fill="var(--accent)" stroke="var(--panel)" stroke-width="1.5"/></g>`
       : '';
   // The focusable parent owns slider semantics. The SVG is decorative to assistive tech.
   return svg.replace('role="img"', 'aria-hidden="true"').replace('</svg>', `${errors}${cursor}</svg>`);

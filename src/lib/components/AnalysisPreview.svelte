@@ -5,8 +5,8 @@ import { ARROW_GEOMETRY, arrowHeadPath, arrowLayout } from '../../lc0/arrowGeome
 type PieceRole = 'rook' | 'knight' | 'bishop' | 'queen' | 'king' | 'pawn';
 type Piece = { color: 'white' | 'black'; role: PieceRole; square: string };
 
-// Sicilian Najdorf, English Attack, after 12...b4. These results were copied
-// from the built Analysis page with Lc0 Small (400 visits) and Stockfish Lite
+// Sicilian Najdorf, English Attack, after 12...b4. These results were recorded
+// on the built Analysis page with Lc0 Small (400 visits) and Stockfish Lite
 // (depth 12). Re-run before editing the scores, search metadata or variations.
 const FEN = 'r2q1rk1/3nbppp/p2pbn2/4p1P1/1p2P3/1NN1BP2/PPPQ3P/2KR1B1R w - - 0 13';
 const ROLE: Record<string, PieceRole> = { r: 'rook', n: 'knight', b: 'bishop', q: 'queen', k: 'king', p: 'pawn' };

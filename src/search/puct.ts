@@ -1,7 +1,7 @@
 import { type BoardState, boardToFen } from '../chess/board.ts';
 import { automaticDrawReason } from '../chess/drawRules.ts';
 import { type Move, moveToActionId, moveToUci } from '../chess/moveCodec.ts';
-import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
+import { givesCheck, inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import type { Evaluation, EvaluationBatchRequest, Evaluator } from '../nn/evaluator.ts';
 
 export interface SearchPolicyEntry {
@@ -291,8 +291,6 @@ export interface Edge {
   visits: number;
   valueSum: number; // from the child side-to-move perspective
   virtualVisits: number;
-  // Future edge-local model/search signals. These are intentionally optional so
-  // classic PUCT stays unchanged while AV/risk/uncertainty policies can plug in.
   actionValuePrior?: number;
   rankScore?: number;
   regret?: number;
@@ -483,9 +481,7 @@ function edgeQVariance(edges: Edge[], unvisitedQ: number, context: SearchPolicyC
   return qs.reduce((sum, q, i) => sum + weights[i] * (q - mean) * (q - mean), 0) / total;
 }
 
-/** Node-wide terms shared by every edge score at one node. Selection scores
- * all edges of a node at once; deriving these per edge made it O(edges²),
- * and O(edges³) with the cpuct variance term. */
+/** Node-wide terms shared by every edge score at one node. */
 export interface NodeScoreStats {
   parentVisits: number;
   /** Q given to unvisited edges (constant or lc0-reduction FPU). */
@@ -647,11 +643,7 @@ function isForcingMove(board: BoardState, move: Move): boolean {
   const target = board.squares[move.to];
   if (target && target[0] !== board.turn) return true;
   if (moving?.[1] === 'p' && move.to === board.epSquare) return true;
-  // Search edges must contain legal moves. If that invariant breaks, surface
-  // the error instead of silently changing progressive-widening behavior.
-  // makeMove flips side-to-move, so the default inCheck(child) asks whether
-  // the opponent is in check after this move.
-  return inCheck(makeMove(board, move));
+  return givesCheck(board, move);
 }
 
 export class ProgressiveWideningPUCTPolicy extends ClassicPUCTPolicy {
@@ -1007,9 +999,15 @@ function kld(current: number[], previous: number[]): number {
   return out;
 }
 
+/**
+ * Visits to run before the neural-miss counter is read again: at least one physical batch,
+ * even past the miss budget, but never more than one pipelined round.
+ */
+export function neuralBudgetChunk(batchSize: number, pipelineDepth: number, room: number, remainingMisses: number): number {
+  return Math.max(1, Math.min(batchSize * pipelineDepth, room, Math.max(batchSize, remainingMisses)));
+}
+
 function crossedEarlyStopInterval(visits: number, minVisits: number, interval: number, state: EarlyStopIntervalState): boolean {
-  // Use absolute interval boundaries so serial searches keep their old schedule,
-  // while batches can cross a boundary without landing exactly on its multiple.
   const lastBoundary = Math.max(Math.floor(state.lastCheckVisits / interval), Math.floor((minVisits - 1) / interval));
   if (visits < minVisits || Math.floor(visits / interval) <= lastBoundary) return false;
   state.lastCheckVisits = visits;
@@ -1071,8 +1069,6 @@ function rootEarlyStopReason(
   kldState: KldEarlyStopState,
   bestState: BestStableEarlyStopState,
 ): SearchStats['stopReason'] | undefined {
-  // Early-stop telemetry should only report a real early exit, not completion
-  // exactly at the scheduled visit cap.
   if (rootVisitCount(root) >= visitTarget) return undefined;
   if (options.earlyStop === 'root-dominance' && rootVisitDominanceStop(root, visitTarget)) return 'root-dominance';
   if (rootBestStableEarlyStop(root, context, options, bestState)) return 'best-stable';
@@ -1156,14 +1152,15 @@ function makeSearchRoot(
   return { board, historyFens, historyBoards, explicitHistory, expanded: false, terminalValue: null, edges: [], visits: 0, isRoot: true };
 }
 
+const NEUTRAL_SEARCH_VALUE_KEY = 'drawScore=0;scLimit=0';
+
 function searchValueKey(context: SearchPolicyContext): string {
-  if (context.drawScore === 0 && context.searchContemptLimit === 0 && context.contemptElo === 0) return 'drawScore=0;scLimit=0';
+  if (context.drawScore === 0 && context.searchContemptLimit === 0 && context.contemptElo === 0) return NEUTRAL_SEARCH_VALUE_KEY;
   return `drawScore=${context.drawScore};scLimit=${context.searchContemptLimit};contemptElo=${context.contemptElo};rootSide=${context.rootSideToMove ?? ''}`;
 }
 
 function nodeSearchValueCompatible(node: Node, key: string): boolean {
-  // Pre-key/default trees are compatible only with the historical neutral default.
-  return node.searchValueKey === key || (node.searchValueKey === undefined && key === 'drawScore=0;scLimit=0');
+  return node.searchValueKey === key || (node.searchValueKey === undefined && key === NEUTRAL_SEARCH_VALUE_KEY);
 }
 
 // History links contain positions only, never ancestor search nodes. Advancing
@@ -1335,8 +1332,6 @@ function extractPrincipalVariation(
   return pv;
 }
 
-// MultiPV: one principal variation per top visited root move, each line starting
-// with its root move and then following the usual best-visited continuation.
 function extractMultiPv(
   root: Node,
   context: SearchPolicyContext,
@@ -1405,7 +1400,6 @@ async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyCon
   const moves = legalMoves(node.board);
   if (!moves.length) {
     node.expanded = true;
-    // No legal moves: checkmate is loss for the side to move, stalemate is draw.
     node.terminalValue = inCheck(node.board) ? -1 : contemptDrawValue(context, node.board.turn);
     node.edges = [];
     if (stats) {
@@ -1949,7 +1943,6 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
     butterflyDecay: Math.max(0, Math.min(1, options.butterflyDecay ?? 0.995)),
     butterflyMaxBonus: Math.max(0, options.butterflyMaxBonus ?? 0.25),
     butterflyTable: (options.butterflyWeight ?? 0) === 0 ? undefined : new Map<string, number>(),
-    // lc0 search defaults: MovesLeftMaxEffect/Slope/Threshold/ScaledFactor/QuadraticFactor.
     movesLeftMaxEffect: Math.max(0, options.movesLeftMaxEffect ?? 0),
     movesLeftSlope: options.movesLeftSlope ?? 0.0027,
     movesLeftThreshold: Math.max(0, options.movesLeftThreshold ?? 0.8),
@@ -2102,10 +2095,7 @@ export async function searchRoot(board: BoardState, evaluator: Evaluator, option
         throwIfAborted(signal);
         const room = Math.max(0, maxRootVisits - rootVisitCount(root));
         const remainingMissBudget = Math.max(1, visits - ((stats.neuralEvalMisses ?? 0) - startMisses));
-        // Preserve the older neural-budget behavior that can finish one
-        // physical batch, but do not let a deeper pipeline spend multiple
-        // extra batches before the miss counter is checked again.
-        const chunk = Math.max(1, Math.min(batchSize * batchPipelineDepth, room, Math.max(batchSize, remainingMissBudget)));
+        const chunk = neuralBudgetChunk(batchSize, batchPipelineDepth, room, remainingMissBudget);
         const beforeCompleted = stats.completedVisits;
         await runVisits(chunk);
         if (deadlineExpired(deadlineMs)) {

@@ -65,8 +65,6 @@ export interface BrowserUciEngine {
    * With `opts.moves`, `fen` is the start position and the moves lead to the
    * position searched.
    */
-  search(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null>;
-  /** Backward-compatible alias used by existing arena/analysis wiring. */
   bestMove(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null>;
   /** MultiPV analysis; returns sorted UCI info/PV lines where supported. */
   analyze(fen: string, opts?: BrowserUciAnalysisOptions): Promise<BrowserUciInfoLine[]>;

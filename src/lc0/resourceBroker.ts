@@ -1,10 +1,7 @@
 /**
  * EngineResourceBroker: per-page CPU/GPU budget arbitration for browser
  * engines. Engines acquire a lease per search, apply the granted thread
- * count via UCI `Threads`, and release when the search settles. Policies:
- * `exclusive` (arena turn-taking: one CPU lease at a time, full budget) and
- * `shared` (analysis: deterministic weighted split over registered CPU
- * participants, never blocking). GPU leases never queue and never draw down
+ * count via UCI `Threads`, and release when the search settles. GPU leases never queue and never draw down
  * the CPU ledger; GPU contention is arbitrated by the shared evaluator
  * service instead. See docs/engine_resource_broker_design.md.
  */

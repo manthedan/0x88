@@ -191,7 +191,6 @@ $: readiness = capsFailed
   /* Wide layout: the full device card sits directly below, so the one-line summary would repeat it. */
   @media(min-width:900px){ .device-readiness{display:none} }
 
-  /* Device check: live WebGPU / SIMD / threads result, under the hero actions. */
   .device{
     grid-area:device; align-self:start; max-width:460px; padding:14px 16px; scroll-margin-top:84px;
     border:1px solid var(--rule-strong); border-radius:8px;

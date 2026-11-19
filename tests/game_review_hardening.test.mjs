@@ -147,6 +147,14 @@ test('review graph includes starting position and moves with current marker, no 
   assert.match(reviewChartSvg(review(), 3), /x1="352" x2="352"/);
 });
 
+test('graph hit testing lands on the ply whose cursor was drawn there', () => {
+  const moves = review().moves.length;
+  for (let ply = 0; ply <= moves; ply++) {
+    const x1 = Number(reviewChartSvg(review(), ply).match(/class="review-cursor"><line x1="([\d.]+)"/)[1]);
+    assert.equal(reviewPlyAtRatio(x1 / 360, moves), ply);
+  }
+});
+
 test('graph hit testing scales with width and clamps to both endpoints', () => {
   assert.equal(reviewPlyAtRatio(36 / 360, 100), 0);
   assert.equal(reviewPlyAtRatio(352 / 360, 100), 100);

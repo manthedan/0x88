@@ -11,7 +11,6 @@ export type PlentyChessAssetStatus = 'unknown' | 'checking' | 'present' | 'missi
 export interface PlentyChessVariant {
   key: PlentyChessVariantKey;
   label: string;
-  /** Emscripten sidecar WASM URL. */
   wasmUrl: string;
   /** Emscripten JS glue URL for the currently-smoked browser worker path. */
   jsUrl: string;
@@ -46,7 +45,6 @@ export const PLENTYCHESS_SOURCE_NETWORK_URL = `https://github.com/Yoshie2000/Ple
 const assetStatuses = new Map<string, PlentyChessAssetStatus>();
 const assetChecks = new Map<string, Promise<PlentyChessAssetStatus>>();
 
-// One shared `.data`; the .js glue and .wasm stay per-variant.
 const DEPLOYED_PLENTYCHESS_PATHS = new Set([
   '/plentychess/plentychess-emscripten.js',
   '/plentychess/plentychess-emscripten.wasm',

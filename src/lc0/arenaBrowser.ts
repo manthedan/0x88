@@ -60,6 +60,7 @@ import {
   playCpuArenaGame,
   settleCpuArenaSearch,
 } from './arenaCpuGame.ts';
+import { diagBlockHtml } from './arenaDiagnostics.ts';
 import { ARENA_BIG_NET_MEMORY_REASON, arenaBigNetPairingBlocked, arenaBigNetSeatBlocked } from './arenaMemoryGuard.ts';
 import { arenaMoveDelay, guardArenaUnload } from './arenaNavigation.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
@@ -117,7 +118,7 @@ import {
   probeBt4Support,
 } from './bt4Engine.ts';
 import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
-import { type ChartSeries, hBarChartSvg, lineChartSvg } from './charts.ts';
+import { barChartRowAt, barChartViewHeight, type ChartSeries, hBarChartSvg, lineChartFractionAt, lineChartSvg } from './charts.ts';
 import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryClass.ts';
 import { DisposableVariantPool } from './disposableVariantPool.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
@@ -233,7 +234,6 @@ import {
 import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 
 type Ground = ReturnType<typeof Chessground>;
-// Seats are array indices into seatRows; tournament pids are String(index).
 interface ArenaWarmupStatus {
   phase: string;
   detail: string;
@@ -352,14 +352,12 @@ const pageDom = createBrowserDom();
 const { el, inputEl, maybeEl, selectEl } = routeDom<'arena'>(pageDom);
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
-// v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
 const blockedModelOverride = phoneBlockedBigNetModelUrl(params.get('model'));
 const { modelUrl: MODEL_URL, deviceSelection: LC0_DEVICE_MODEL_SELECTION } = lc0SmallModelRequest(
   DEFAULT_MODEL_URL,
   isV0DeployProfile() || blockedModelOverride ? null : params.get('model'),
   resolvePublicAssetUrl,
 );
-/** Model the ONNX evaluator runs: MODEL_URL or, on Apple WebGPU, its split-K rewrite. */
 let arenaLc0ServedModelUrl = '';
 const DEFAULT_PACK_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch8.f16.lc0web/model.lc0web.json');
 const PACK_URL = isV0DeployProfile() ? DEFAULT_PACK_URL : resolvePublicAssetUrl(params.get('pack') ?? params.get('modelPack') ?? DEFAULT_PACK_URL);
@@ -458,9 +456,6 @@ let board: BoardState = parseFen(START_FEN);
 let historyBoards: BoardState[] = [board];
 let lastUci: string | null = null;
 
-// Game-history review: clicking a chart, the move strip, or a finished game in
-// the log flips the board into a read-only replay; "Live" returns to the
-// running game (which keeps playing in the background meanwhile).
 interface TrailEntry {
   fen: string;
   uci: string | null;
@@ -479,9 +474,7 @@ const finishedTrails: GameTrail[] = [];
 let reviewTrail: GameTrail | null = null;
 let reviewIndex = 0;
 let reviewing = false;
-/** Candidate-move arrows shown instead of the last-move arrow while reviewing a search. */
 let reviewShapes: DrawShape[] | null = null;
-/** What the root-visits chart currently shows, for click-to-board. */
 let rootChartContext: { fen: string; top: { uci: string; visits: number }[] } | null = null;
 let boardWhiteId: string | null = null;
 let boardBlackId: string | null = null;
@@ -512,9 +505,7 @@ const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant
 const centipawnCache = createCentipawnEvaluatorCache(createBrowserSquareformerRuntimeEvaluator);
 let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
-// A picker acceptance approves its next startup, not every future uncached run.
 const arenaDownloadApprovals = new Set<BigNetKey>();
-/** Big nets the current run may download. A Start check that found one cached approved no download. */
 const arenaRunDownloads = new Set<BigNetKey>();
 let arenaPickerConsentAbort: AbortController | null = null;
 function abortArenaPickerConsent(): void {
@@ -550,7 +541,6 @@ async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config
     );
   if (reclaim) await reclaim;
   const searcher = await acquireBigNetSearcherAsync(key, true, signal);
-  // A Stop in the await's continuations would miss the listener below.
   signal.throwIfAborted();
   if (!searcher.isInitializedFor({ evalCacheEntries })) {
     // init() does not watch the match signal, and a cold prefetch can stall:
@@ -564,13 +554,11 @@ async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config
     );
   }
   if (cacheOnly) {
-    // 'cached' approved no download, and the entry can be evicted or unreadable by now.
     try {
       await searcher.init({ evalCacheEntries, noDownload: true });
     } catch (error) {
       signal.throwIfAborted();
       if (!(error instanceof Error && error.message.includes(LC0_MODEL_DOWNLOAD_NOT_APPROVED))) throw error;
-      // The cache key may still be there (unreadable body), so ask as for a download.
       const uncached = (config: BigNetConfig, inspectSignal?: AbortSignal) =>
         inspectLargeNetDownload(config, inspectSignal).then((state) => ({ ...state, cached: false }));
       const consent = await requestLargeNetDownloadConsent(BIG_NETS[key], signal, true, undefined, uncached);
@@ -617,7 +605,6 @@ const engineOutputHistory: EngineOutputSnapshot[] = [];
 let engineOutputTotalCount = 0;
 const MAX_ENGINE_OUTPUT_HISTORY = 1000;
 const thinkingEngineIds = new Set<string>();
-/** When the engine on move started thinking (performance.now()), for the live strip clock. */
 const thinkingSince = new Map<string, number>();
 let arenaClockTimer: ReturnType<typeof setInterval> | null = null;
 let arenaChartResizeObserver: ResizeObserver | null = null;
@@ -627,7 +614,6 @@ interface ArenaGameResultChip {
   result: GameResultCode;
   whiteName: string;
   blackName: string;
-  /** Engine 1's points in a two-engine match (null in pooled tournaments). */
   aPoints: number | null;
 }
 const gameResultChips: ArenaGameResultChip[] = [];
@@ -684,17 +670,13 @@ function restoreArenaSeatRows(): void {
       return [row];
     });
     if (restored.length >= 2) seatRows.splice(0, seatRows.length, ...restored);
-  } catch {
-    // Preferences are optional when storage is blocked or corrupt.
-  }
+  } catch {}
 }
 
 function persistArenaSeatRows(): void {
   try {
     localStorage.setItem(ARENA_SEAT_STORAGE_KEY, JSON.stringify(seatRows));
-  } catch {
-    /* optional preference */
-  }
+  } catch {}
 }
 
 function formatNps(nps: number): string {
@@ -736,7 +718,6 @@ function hasBoundedArenaSearch(progress: ArenaSearchProgress): boolean {
   );
 }
 
-/** Live activity never borrows evaluation/PV/metrics from the previous search. */
 function arenaSearchProgressHtml(progress: ArenaSearchProgress): string {
   return hasBoundedArenaSearch(progress)
     ? `<progress class="eng-search-meter" aria-label="Current search progress" value="${Math.max(0, Math.floor(progress.completed!))}" max="${Math.max(1, Math.floor(progress.requested!))}"></progress>`
@@ -862,7 +843,7 @@ function centipawnEvaluator(variant: string, signal?: AbortSignal): Promise<Eval
     },
     () => activeCentipawnEvaluatorKeys().has(key),
   );
-  return untilAborted(loading, signal); // Stop cancels this consumer, not the selected seat's shared owner.
+  return untilAborted(loading, signal);
 }
 
 function disposeUnusedCentipawnEvaluators(): void {
@@ -995,7 +976,7 @@ function installRuntimeAuditPanel(): void {
     if (detail.family !== 'lc0') return;
     const target = maybeEl('runtimeAuditInfo');
     if (!target) return;
-    target.innerHTML = diagBlockHtml('LC0 audit', [htmlEscape(formatBrowserRuntimeAudit(detail))]);
+    target.innerHTML = diagBlockHtml('LC0 audit', [formatBrowserRuntimeAudit(detail)]);
   };
   window.addEventListener(BROWSER_RUNTIME_AUDIT_EVENT, arenaAuditHandler);
 }
@@ -1170,10 +1151,8 @@ function stmScoreToWhiteScore(fen: string, stmScore: number): number {
   return fenTurn(fen) === 'w' ? score : 1 - score;
 }
 
-// All engine scores are displayed from White's perspective (positive = good for
-// White), matching the eval bar and standard chess GUIs, so the sign no longer
-// flips with the side to move. Engines report from the side-to-move POV, so flip
-// when Black is to move (WDL swaps win/loss; Q and cp negate).
+// Scores are displayed from White's perspective (positive = good for White), matching the
+// eval bar. Engines report from the side to move, so Black-to-move scores are flipped.
 function toWhiteWdl(wdl: [number, number, number], fen: string): [number, number, number] {
   return fenTurn(fen) === 'w' ? wdl : [wdl[2], wdl[1], wdl[0]];
 }
@@ -1239,7 +1218,6 @@ function searchWdlText(wdl: [number, number, number], q: number, fen: string): s
   return `WDL ${percent(w[0])}/${percent(w[1])}/${percent(w[2])} · search Q ${signed(toWhiteQ(q, fen), 3)}`;
 }
 
-/** White-view pawn eval for an Lc0-family Q, on lc0's standard Q->centipawn curve (as Analysis shows it). */
 function lc0EvalFields(fen: string, q: number, wdl?: [number, number, number]): Pick<EngineOutputSnapshot, 'evalText' | 'qWhite' | 'wdlWhite'> {
   const qWhite = toWhiteQ(q, fen);
   return { evalText: formatScore(qToCentipawns(qWhite), undefined), qWhite, wdlWhite: wdl ? toWhiteWdl(wdl, fen) : undefined };
@@ -1262,7 +1240,6 @@ function displayEngineName(name: string): string {
   return analysisEngineName(name);
 }
 
-/** Engine identity colour + monogram, shared with Analysis (Lc0 violet, Stockfish blue, …). */
 function engineAvatarHtml(name: string, size: 'sm' | 'md' = 'md'): string {
   return `<span class="arena-avatar ${size}" style="--eng:${engineBrushes(name).swatch}" aria-hidden="true">${htmlEscape(engineMonogram(name))}</span>`;
 }
@@ -1273,10 +1250,8 @@ function formatSeconds(ms: number): string {
 
 const evalLaneOutputs: (EngineOutputSnapshot | undefined)[] = [];
 
-/** Fixed lanes: White-playing engine then Black-playing engine, independent of board orientation. */
 function renderEvalBars(): void {
   const node = el('arenaEvalBar');
-  // Track live seats even while a chart review temporarily hides their evals.
   [boardWhiteId, boardBlackId].forEach((id, index) => {
     evalLaneOutputs[index] = arenaLaneOutput(evalLaneOutputs[index], id ? engineOutputs.get(id) : undefined, id, index === 0 ? 'w' : 'b');
   });
@@ -1287,9 +1262,6 @@ function renderEvalBars(): void {
   ].map((seat, index) => {
     const output = seat.id ? evalLaneOutputs[index] : undefined;
     const name = displayEngineName(output?.engineName ?? seat.name ?? 'No engine');
-    // Use the same displayed pawn->bar scale as Analysis for BOTH engines.
-    // Lc0's WDL remains in its card/charts; mixing WDL and logistic cp here would
-    // manufacture a spread even when the printed evals are identical.
     const score = {
       fen: output?.fen,
       scoreCp: output?.whiteCp ?? (output?.qWhite !== undefined ? qToCentipawns(output.qWhite) : undefined),
@@ -1346,7 +1318,6 @@ function renderEvalBars(): void {
   if (caption.innerHTML !== markup) caption.innerHTML = markup;
 }
 
-/** Numbered SAN for a PV searched from `fen` ("16… Bb3 17. a5 Rfd1"), first move emphasised. */
 function pvSanHtml(fen: string, pv: string[], maxMoves = 10): string {
   const start = parseFen(fen);
   const sans = uciLineToSan(start, pv, maxMoves).split(/\s+/).filter(Boolean);
@@ -1407,7 +1378,6 @@ function engineCardHtml(id: string): string {
   return `<article class="eng-card${thinking ? ' thinking' : ''}" data-engine-id="${htmlEscape(id)}" style="--eng:${engineBrushes(rawName).swatch}">${head}${live}${wdl}${statsHtml}${lineHtml}</article>`;
 }
 
-/** Raw engine output (UCI PV, policy, cache counters) for the "Search details" disclosure. */
 function engineRawHtml(id: string): string {
   const snapshot = engineOutputs.get(id);
   if (!snapshot) return '';
@@ -1419,7 +1389,6 @@ function renderEngineOutputs(): void {
   const ids = [...new Set(activeEngineIds)];
   const cards = ids.filter((id) => running || engineOutputs.has(id)).map(engineCardHtml);
   const grid = el('engineEvalInfo');
-  // Progress refreshes must not interrupt a spectator reading a long retained PV.
   const pvState = new Map(
     [...grid.querySelectorAll<HTMLElement>('.eng-line')].map((line) => [
       line.closest<HTMLElement>('.eng-card')!.dataset.engineId,
@@ -1430,7 +1399,6 @@ function renderEngineOutputs(): void {
   for (const line of grid.querySelectorAll<HTMLElement>('.eng-line')) {
     const previous = pvState.get(line.closest<HTMLElement>('.eng-card')!.dataset.engineId);
     if (previous?.focused) line.focus({ preventScroll: true });
-    // A newly completed result starts at its first move; ongoing searches retain the reader's place.
     if (previous && previous.fen === line.dataset.fen) line.scrollLeft = previous.scrollLeft;
   }
   const raw = maybeEl('engineRaw');
@@ -1445,7 +1413,6 @@ interface StripSide {
   seat: string | null;
 }
 
-/** Before any game, the strips preview the selected seats (Engine 1 plays White in game 1). */
 function stripSides(): { w: StripSide; b: StripSide } {
   if (reviewing && reviewTrail?.sides)
     return {
@@ -1544,7 +1511,6 @@ function renderBoard() {
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 140 },
     lastMove: shownUci ? [shownUci.slice(0, 2) as Key, shownUci.slice(2, 4) as Key] : undefined,
-    // Last moves use square highlights only. Arrows are reserved for root candidates.
     drawable: {
       enabled: false,
       brushes: {
@@ -1566,9 +1532,6 @@ function renderBoard() {
   renderMoveStrip();
 }
 
-// ---------------------------------------------------------------------------
-// Game-history review
-// ---------------------------------------------------------------------------
 function trailFromTree(tree: GameTree, label: string, openingPlies: number): GameTrail {
   const entries: TrailEntry[] = [{ fen: tree.root.fen, uci: null, san: null }];
   for (const node of tree.mainlineFrom(tree.root)) {
@@ -1589,7 +1552,6 @@ function enterReview(trail: GameTrail, index: number, shapes: DrawShape[] | null
   renderBoard();
 }
 
-/** Step through the shown game; from the live game this enters review, and stepping back onto the live end returns to live. */
 function stepReview(delta: number | 'start' | 'end'): void {
   const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
   if (!trail) return;
@@ -1642,14 +1604,12 @@ function renderReviewBar(): void {
   liveButton.textContent = running ? 'Back to live' : 'Exit review';
 }
 
-/** Following the live game, the list stays scrolled to its newest row (even as panels above resize it). */
 function keepMovesAtLiveEnd(): void {
   if (reviewing) return;
   const strip = maybeEl('gameMoves');
   if (strip) strip.scrollTop = strip.scrollHeight;
 }
 
-/** Scoresheet rows (number | White | Black), as on Play; opening-book plies are muted. */
 function renderMoveStrip(): void {
   const strip = el('gameMoves');
   const restoreFocus = rememberMoveFocus(strip, 'data-idx');
@@ -1698,17 +1658,11 @@ function renderMoveStrip(): void {
   }
 }
 
-/**
- * Click on the root-visits bar chart: jump to the position that search was
- * made from and draw the candidate moves — the clicked bar bold, the rest dim.
- */
 function reviewRootChartClick(event: MouseEvent): void {
   const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
   if (!rootChartContext || !trail) return;
   const svg = el('rootChart').querySelector('svg');
   if (!svg) return;
-  // Find the searched position in the current game's trail (latest match wins;
-  // exact FEN strings, both produced by boardToFen of the same board).
   let index = -1;
   for (let i = trail.entries.length - 1; i >= 0; i--) {
     if (trail.entries[i].fen === rootChartContext.fen) {
@@ -1717,14 +1671,12 @@ function reviewRootChartClick(event: MouseEvent): void {
     }
   }
   if (index < 0) return;
-  // Mirror hBarChartSvg's layout: each bar row is 14 viewBox units high.
   const rect = svg.getBoundingClientRect();
-  const viewH = rootChartContext.top.length * 14 + 2;
-  const row = Math.floor((((event.clientY - rect.top) / rect.height) * viewH - 1) / 14);
+  const viewH = barChartViewHeight(rootChartContext.top.length);
+  const row = barChartRowAt(((event.clientY - rect.top) / rect.height) * viewH);
   previewRootCandidate(Math.max(0, Math.min(row, rootChartContext.top.length - 1)), index);
 }
 
-/** Keyboard and pointer previews share the same candidate/position mapping. */
 function previewRootCandidate(row: number, knownIndex?: number): void {
   const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
   if (!rootChartContext || !trail) return;
@@ -1744,24 +1696,20 @@ function chartDrawnPlies(chartId: 'evalChart' | 'timeChart' | 'npsChart'): numbe
   });
 }
 
-/** Map a click on a per-ply line chart back to the chart's ply index. */
 function chartPlyFromClick(chartId: 'evalChart' | 'timeChart' | 'npsChart', target: HTMLElement, event: MouseEvent): number | null {
   const svg = target.closest('.chart-card')?.querySelector('svg');
   const plies = chartDrawnPlies(chartId);
   if (!svg || !plies.length) return null;
   const rect = svg.getBoundingClientRect();
   if (!rect.width) return null;
-  // Mirror lineChartSvg's plot padding at the responsive SVG viewBox width.
   const width = svg.viewBox.baseVal.width;
   const viewX = ((event.clientX - rect.left) / rect.width) * width;
   const xMin = Math.min(...plies);
   const xMax = Math.max(...plies);
-  const frac = Math.max(0, Math.min(1, (viewX - 36) / (width - 8 - 36)));
+  const frac = Math.max(0, Math.min(1, lineChartFractionAt(viewX, width)));
   return Math.round(xMin + frac * (xMax - xMin));
 }
 
-// The arena is a two-seat head-to-head. Each seat uses the same staged selector
-// pattern as the analysis page: family → variant → strength.
 function strengthMeta(family: EngineFamily) {
   return engineStrengthMeta(family, 'arena');
 }
@@ -1911,7 +1859,6 @@ function arenaTournamentMode(): TournamentMode {
   return value === 'round-robin' || value === 'gauntlet' ? value : 'match';
 }
 
-/** Seats participating under the current mode (match uses only the first two). */
 function activeSeatRows(): EngineRow[] {
   return arenaTournamentMode() === 'match' ? seatRows.slice(0, 2) : [...seatRows];
 }
@@ -2010,9 +1957,7 @@ function renderSeatSelectors(): void {
         let avatarName: string = row.family;
         try {
           avatarName = rowLabel(row);
-        } catch {
-          // Unknown variant: the family id still picks a stable colour.
-        }
+        } catch {}
         return `<div class="engine-row seat-row${inactive}" data-seat="${index}"><span class="seat-name">${engineAvatarHtml(avatarName, 'sm')}<span>${label}</span></span><select class="seat-fam" data-seat="${index}" aria-label="${label} engine">${famSel}</select><select class="seat-var" data-seat="${index}" aria-label="${label} version">${varSel}</select><span class="seat-strength-wrap"><input class="seat-strength row-strength" data-seat="${index}" aria-label="${label} strength (${meta.unit})" type="number" min="${meta.min}" max="${meta.max}" step="1" value="${row.strength}" title="${meta.unit}"><span class="row-unit">${meta.unit}</span></span>${remove}</div>`;
       })
       .join('');
@@ -2062,7 +2007,6 @@ function arenaGamesPerOpening(): number {
   return Math.max(1, Math.min(20, Math.floor(Number(inputEl('gamesInput').value) || 2)));
 }
 
-/** One-line description of the locked setup, shown in place of the forms while a match runs. */
 function renderSetupSummary(): void {
   const node = maybeEl('setupSummaryText');
   if (!node) return;
@@ -2096,7 +2040,6 @@ function renderSetupSummary(): void {
   el('startSummary').innerHTML = `<strong>${htmlEscape(who)}</strong>${htmlEscape(scheduleText)}`;
 }
 
-/** Setup vs running sidebar states (CSS keys off these data attributes on <main>). */
 function syncArenaPhase(): void {
   const main = maybeEl('main');
   if (!main) return;
@@ -2140,7 +2083,6 @@ function refreshSeatControls(): void {
   el('addSeat').toggleAttribute('disabled', running || seatRows.length >= 8);
   selectEl('tournamentModeSelect').disabled = running;
   selectEl('arenaConcurrencySelect').disabled = running;
-  // Everything that shapes the schedule is locked for the whole match, so no edit silently applies mid-game.
   selectEl('budgetModeSelect').disabled = running;
   inputEl('movetimeInput').disabled = running;
   inputEl('gamesInput').disabled = running;
@@ -2180,7 +2122,6 @@ function arenaCacheEntries(): number {
   return Math.max(0, Math.min(100000, Math.floor(Number(inputEl('cacheEntriesInput').value) || 0)));
 }
 
-/** Manual SF threads cap from the UI; 0 means auto (resource broker decides). */
 function stockfishThreadsCap(): number {
   const requested = Math.max(0, Math.min(32, Math.floor(Number(inputEl('stockfishThreadsInput').value) || 0)));
   return threadedStockfishAvailable() ? requested : 1;
@@ -2213,27 +2154,15 @@ function timingMeansText(means: Record<string, number> | undefined): string {
     .join(' · ');
 }
 
-/** Thread count to plan worker flavor/warmup around before any lease exists. */
 function stockfishThreadsPlanned(): number {
   const cap = stockfishThreadsCap();
   if (cap > 0) return cap;
   return Math.max(1, Math.min(32, resourceBroker.cpuBudget()));
 }
 
-/** Per-search threads: the broker grant, narrowed by the manual cap when set. */
 function stockfishThreadsGranted(leaseThreads: number): number {
   const cap = stockfishThreadsCap();
   return Math.max(1, cap > 0 ? Math.min(cap, leaseThreads) : leaseThreads);
-}
-
-/**
- * One labeled diagnostics block: a muted label column plus mono/tabular-nums
- * value lines, so live figures update in place instead of reflowing a long
- * prose line. Lines are pre-escaped by callers via htmlEscape.
- */
-function diagBlockHtml(label: string, valueLines: string[]): string {
-  const lines = valueLines.length ? valueLines : ['—'];
-  return lines.map((line, i) => `<span class="diag-label">${i === 0 ? htmlEscape(label) : ''}</span><span class="diag-value">${line}</span>`).join('');
 }
 
 function cacheMetricsText(metrics: Lc0EvaluationCacheMetrics | undefined): string {
@@ -2407,7 +2336,7 @@ function engineSearchDiagnosticsText(ids = diagnosticEngineIds()): string {
 
 function diagnosticsHtml(label: string, text: string): string {
   const value = text.replace(/^[^:]+:\s*/, '');
-  return diagBlockHtml(label, value.split(' | ').map(htmlEscape));
+  return diagBlockHtml(label, value.split(' | '));
 }
 
 function renderEngineDiagnosticsInfo(): void {
@@ -2688,8 +2617,6 @@ function stockfishFlavorFor(kind: 'lite' | 'full'): StockfishFlavor {
   return threaded ? 'threaded' : 'single';
 }
 
-// Stockfish Lite and full are independent engines (they may face each other), so
-// each has its own lazily-created instance.
 function stockfishEngineFor(kind: 'lite' | 'full'): StockfishEngine {
   if (kind === 'lite') {
     if (!stockfishLite)
@@ -2726,12 +2653,6 @@ function getRecklessFor(variantKey: string): RecklessEngine {
   return recklessEngines.getOrCreate(recklessVariantForKey(variantKey));
 }
 
-/**
- * The shared CPU engines a game's seats use, so each game starts with an empty
- * hash. Only this game's participants are reset; mirror seats share a worker.
- * Reckless is skipped when its assets are missing (its seat then forfeits
- * without a worker).
- */
 function cpuEnginesToResetForGame(rows: readonly (EngineRow | undefined)[]): Set<BrowserUciEngine> {
   const engines = new Set<BrowserUciEngine>();
   for (const row of rows) {
@@ -2770,7 +2691,7 @@ function renderRecklessRuntimeInfo(): void {
     const loadText = formatRecklessBrowserApiLoadStatus(status?.browserApiLoad);
     return `${variant.label} · ${mode} · ${assetText}${loadText ? ` · ${loadText}` : ''}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
   });
-  el('recklessRuntimeInfo').innerHTML = diagBlockHtml('Reckless', [...new Set(parts)].map(htmlEscape));
+  el('recklessRuntimeInfo').innerHTML = diagBlockHtml('Reckless', [...new Set(parts)]);
 }
 
 function refreshRecklessVariantUi(): void {
@@ -2813,7 +2734,7 @@ function renderViridithasRuntimeInfo(): void {
     const assetText = asset === 'ok' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${mode} · ${assetText}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
   });
-  el('viridithasRuntimeInfo').innerHTML = diagBlockHtml('Viridithas', [...new Set(parts)].map(htmlEscape));
+  el('viridithasRuntimeInfo').innerHTML = diagBlockHtml('Viridithas', [...new Set(parts)]);
 }
 
 function refreshViridithasVariantUi(): void {
@@ -2854,7 +2775,7 @@ function renderBerserkRuntimeInfo(): void {
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
   });
-  el('berserkRuntimeInfo').innerHTML = diagBlockHtml('Berserk', [...new Set(parts)].map(htmlEscape));
+  el('berserkRuntimeInfo').innerHTML = diagBlockHtml('Berserk', [...new Set(parts)]);
 }
 
 function refreshBerserkVariantUi(): void {
@@ -2896,7 +2817,7 @@ function renderPlentyChessRuntimeInfo(): void {
     const assetText = unsupportedReason ? unsupportedReason : asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
   });
-  el('plentychessRuntimeInfo').innerHTML = diagBlockHtml('PlentyChess', [...new Set(parts)].map(htmlEscape));
+  el('plentychessRuntimeInfo').innerHTML = diagBlockHtml('PlentyChess', [...new Set(parts)]);
 }
 
 function refreshPlentyChessVariantUi(): void {
@@ -2946,7 +2867,7 @@ function renderStormphraxRuntimeInfo(): void {
     const assetText = unsupportedReason ?? (asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset');
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
   });
-  el('stormphraxRuntimeInfo').innerHTML = diagBlockHtml('Stormphrax', [...new Set(parts)].map(htmlEscape));
+  el('stormphraxRuntimeInfo').innerHTML = diagBlockHtml('Stormphrax', [...new Set(parts)]);
 }
 
 function refreshStormphraxVariantUi(): void {
@@ -3280,8 +3201,6 @@ function buildEngines() {
     };
   const lc0SearchWarmup = (engineId: string) => async (signal: AbortSignal) => {
     const search = lc0SearcherFor(engineId);
-    // The hybrid runtime downloads its pack inside this first evaluation, which
-    // the search signal cannot reach: Stop cancels that init; the next match retries.
     const inner = lc0Cache?.inner as { abortPendingInit?: () => void } | undefined;
     const stopInit = () => inner?.abortPendingInit?.();
     signal.addEventListener('abort', stopInit, { once: true });
@@ -3381,7 +3300,6 @@ function buildEngines() {
     warmup: (engine: T) => NonNullable<ArenaEngine['warmup']>,
   ): void {
     if (isMemoryConstrainedDevice()) {
-      // A gauntlet may retire these workers between games; do not capture one.
       engines.set(id, {
         id,
         name,
@@ -3617,7 +3535,6 @@ function renderOpeningPairs(): void {
       .join('')}</tbody></table>`;
 }
 
-/** Finished games as small chips (Engine 1's result in a match); click one to replay it. */
 function renderGameResultChips(): void {
   const host = el('gameChips');
   host.hidden = !gameResultChips.length;
@@ -3694,7 +3611,6 @@ async function warmUpSelectedEngines(ids: string[], signal: AbortSignal, minimum
     pending.push(engine);
   }
   if (!pending.length) return;
-  // Warm the large net before (re)creating its CPU opponent.
   if (pending.some((engine) => engine.bigNet) && isMemoryConstrainedDevice() && phoneReclaimSettings().retireCpu) {
     pending.sort((a, b) => Number(!!b.bigNet) - Number(!!a.bigNet));
   }
@@ -3744,7 +3660,6 @@ function selectChart(id: string): void {
   }
 }
 
-/** Label generated SVGs locally; the shared chart builders also serve other pages. */
 function describeChart(id: string, summary: string): void {
   const svg = el(id).querySelector('svg');
   if (!svg) return;
@@ -3807,7 +3722,6 @@ function renderGameCharts(): void {
     .join('');
 }
 
-/** Live PUCT-root distribution from the real search tree (Lc0SearchResult.children). */
 function renderRootChart(engineId: string, display = true): void {
   const result = lastLc0SearchResults.get(engineId);
   if (!result?.children?.length) return;
@@ -4041,7 +3955,6 @@ async function runIsolatedCpuTournament(
     renderBoard();
   };
   try {
-    // Do not retain the old surface pools alongside the per-game workers.
     disposeStockfish();
     recklessEngines.disposeAll();
     viridithasEngines.disposeAll();
@@ -4125,7 +4038,6 @@ async function runIsolatedCpuTournament(
 function renderCheckpointStatus(): void {
   const host = maybeEl('checkpointSection');
   if (!host) return;
-  // Routine storage status belongs with exports, not above the live scoresheet.
   host.hidden = running ? !checkpointProblem : !checkpoint && !checkpointProblem;
   const storage = el('checkpointStorageText');
   storage.hidden = !checkpoint || !!checkpointProblem;
@@ -4154,8 +4066,6 @@ function renderCheckpointStatus(): void {
 }
 
 async function checkpointCompatibility(): Promise<string> {
-  // Metadata only; never fetch engine binaries here. The hashed controller URL also
-  // prevents combining results from different app/search builds after an update.
   const channelUrl = resolvePublicAssetUrl('/models/arena-channel-probe').replace('/models/arena-channel-probe', '/channels/stable.json');
   const channel = await fetch(channelUrl, { cache: 'no-cache', signal: AbortSignal.timeout(5000) })
     .then((response) => (response.ok ? response.json() : artifactChannel))
@@ -4208,14 +4118,12 @@ function applyCheckpointConfig(saved: ArenaCheckpoint): void {
   refreshSeatControls();
 }
 
-/** Results, match status and PGN export of a saved run that is not playing. */
 function presentSavedCheckpoint(saved: ArenaCheckpoint): void {
   showCheckpointResults(saved);
   arenaMatchState = arenaRemainingIndices(saved).length ? 'stopped' : 'final';
   el('message').textContent = arenaMatchState === 'final' ? 'Saved tournament results.' : 'A saved tournament is ready to resume.';
   inputEl('pgnOut').value = '';
   inputEl('pgnOut').hidden = true;
-  // Inspect results without loading engines or changing the saved configuration.
   const last = saved.completed.at(-1);
   if (last) {
     const trail = finishedTrails[last.scheduleIndex];
@@ -4227,8 +4135,6 @@ function presentSavedCheckpoint(saved: ArenaCheckpoint): void {
     setBoardSideEngines(null, resultsNames.get(scheduled.whiteId)!, null, resultsNames.get(scheduled.blackId)!);
     enterReview(trail, trail.entries.length - 1);
   } else {
-    // Nothing played yet: show this run's first opening, not the replaced run's last game
-    // or its charts (as Discard does).
     liveTrail = null;
     exitReview();
     resetGameCharts();
@@ -4312,8 +4218,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   if (running || startPending) return;
   abortArenaPickerConsent();
   const mountSignal = mountAbort.signal;
-  // The same controller owns startup AND play, so revocation/teardown can cancel
-  // the first asset/checkpoint await, not only a match that is already live.
   abort = matchAbort;
   const startupCancelled = () => matchAbort.signal.aborted || abort !== matchAbort || isStaleMount(mountSignal);
   startPending = true;
@@ -4330,7 +4234,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
         'The app build, engine assets or runtime overrides changed. Completed results are still viewable and exportable, but cannot be mixed with a new build.',
       );
     applyCheckpointConfig(resume);
-    // UI runtime changes while paused may have created a different evaluator.
     disposeLc0Resources();
   }
   const effectiveControls = normalizeArenaControls(
@@ -4338,7 +4241,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   );
   for (const id of ARENA_CONTROL_IDS) (el(id) as HTMLInputElement).value = effectiveControls[id];
   syncSeatRowsFromDom();
-  // Also guard URL, saved and programmatic setups before asset checks or warmup.
   if (arenaBigNetPairingBlocked(arenaTournamentMode(), seatRows)) {
     el('message').textContent = ARENA_BIG_NET_MEMORY_REASON;
     clearStartPending();
@@ -4382,8 +4284,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   const participants = participantIdx.map((index) => {
     const engineId = seatEngineId(index);
     const engine = engines.get(engineId);
-    // Duplicate engine configs are legal (mirror/self-play pools); standings
-    // key on seat pids and names get a seat suffix to stay distinguishable.
     const name = engine && (idCounts.get(engineId) ?? 0) > 1 && mode !== 'match' ? `${engine.name} (seat ${index + 1})` : (engine?.name ?? engineId);
     return { pid: String(index), index, engineId, engine, name };
   });
@@ -4424,7 +4324,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   const standings = new TournamentStandings(participants.map((participant) => ({ id: participant.pid, name: participant.name })));
   let schedule: ScheduledGame<ArenaOpening>[];
   try {
-    // Colors alternate per game index within each pairing (see tournament.ts).
     schedule = resume
       ? hydrateArenaSchedule(resume)
       : buildSchedule(
@@ -4446,8 +4345,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     return;
   }
 
-  // Lazy Small loading is still part of setup. Keep the old checkpoint and
-  // exportable games until the replacement evaluator is ready.
   if (selectedSeatsNeedLc0Evaluator() && !lc0Cache) {
     el('cancelSetupLoad').hidden = false;
     try {
@@ -4459,15 +4356,12 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       if (abort === matchAbort && !isStaleMount(mountSignal)) el('message').textContent = 'Tournament preparation stopped.';
       return;
     }
-    if (!lc0Cache) return; // The loader reported the failure; leave prior results intact.
+    if (!lc0Cache) return;
   }
 
-  // Ask after Small loads, which can evict a cached large net, and before the
-  // checkpoint is replaced, so declining keeps the previous tournament.
   arenaRunDownloads.clear();
   if (isMemoryConstrainedDevice()) {
     for (const variant of checkedBigNetVariants) {
-      // URL/restored rosters and resumed checkpoints never imply download approval.
       const consent = arenaDownloadApprovals.delete(variant) ? 'download' : await requestLargeNetDownloadConsent(BIG_NETS[variant], matchAbort.signal);
       if (startupCancelled()) return;
       if (!consent) {
@@ -4476,14 +4370,10 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       }
       if (consent === 'download') arenaRunDownloads.add(variant);
     }
-    // A 'cached' approval loads cache-only, and that load can still find the net evicted or
-    // unreadable and ask again. Load the first game's nets now (it would next anyway), so a
-    // decline there also keeps the previous tournament. Resumes keep their own checkpoint.
     if (!resume && [...checkedBigNetVariants].some((variant) => !arenaRunDownloads.has(variant))) {
       for (const pid of [schedule[0].whiteId, schedule[0].blackId]) {
         const row = rowForEngineId(byPid.get(pid)!.engine!.id);
         if (row?.family !== 'lc0' || !isLc0BigNetVariant(row.variant) || arenaRunDownloads.has(row.variant)) continue;
-        // Stop is hidden during setup; this button cancels a slow or stalled load.
         el('cancelSetupLoad').hidden = false;
         try {
           await bigNetFor(row.variant, matchAbort.signal);
@@ -4507,12 +4397,9 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   }
 
   const runCheckpoint = resume ? claimArenaCheckpoint(resume) : createArenaCheckpoint(captureCheckpointConfig(participants, compatibility), schedule);
-  // Establish the slot before any games run. A stale tab must not overwrite it.
   try {
     await saveArenaCheckpoint(runCheckpoint, checkpointToken);
     if (abort !== matchAbort || isStaleMount(mountSignal)) return;
-    // The slot now holds this run even if startup is cancelled below, so the
-    // token and the checkpoint it names commit together and Resume/Discard match it.
     checkpointToken = { runId: runCheckpoint.runId, revision: runCheckpoint.revision };
     checkpoint = runCheckpoint;
     checkpointProblem = '';
@@ -4522,7 +4409,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     checkpointProblem = `Not saved: ${error instanceof Error ? error.message : String(error)} Keep this tab open and export PGN before leaving.`;
   }
   if (startupCancelled()) {
-    // The save replaced the stored run, so show that run's results, not the replaced one's.
     if (checkpoint === runCheckpoint && abort === matchAbort && !isStaleMount(mountSignal)) presentSavedCheckpoint(runCheckpoint);
     return;
   }
@@ -4626,7 +4512,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     };
     checkpoint = commitArenaGame(checkpoint!, completed);
     queueCheckpointSave(checkpoint, mountSignal);
-    // Do not show a committed score or advance this lane until its save settles.
     await checkpointWrites;
     if (isStaleMount(mountSignal)) return;
     games.push({ pgn, scheduleIndex: i, result });
@@ -4665,8 +4550,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       await runIsolatedCpuTournament(schedule, pendingIndices, byPid, matchAbort.signal, completeGame);
     } else {
       resetLc0SearchTrees(seatIds);
-      // A safe gauntlet can have several large nets in the field. On phones,
-      // prepare only this game's seats, never the entire retained roster.
       const constrained = isMemoryConstrainedDevice();
       if (!constrained) {
         await warmUpSelectedEngines(seatIds, matchAbort.signal, minimumWarmupVisibleMs);
@@ -4685,8 +4568,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
           await warmUpSelectedEngines([whiteEngine.id, blackEngine.id], matchAbort.signal, enginesReady ? 0 : minimumWarmupVisibleMs);
           enginesReady = true;
         }
-        // Reset trees per game (fresh game tree); within a game the shared tree is
-        // reused across both sides' plies — i.e. self-play when both seats match.
         resetLc0SearchTrees(seatIds);
         for (const key of ARENA_BIG_NET_KEYS) {
           const searcher = peekBigNetSearcher(key);
@@ -5243,8 +5124,6 @@ function revokeArenaPhoneLargeNets(): void {
   arenaDownloadApprovals.clear();
   const affected = activeSeatRows().some((row) => phoneSafeEngineVariant(row.family, row.variant) !== row.variant);
   for (const key of ARENA_BIG_NET_KEYS) disposeBigNetSearcherNow(key);
-  // The setup is locked during a run. Cross-tab revocation must retire leftovers
-  // without discarding an unrelated CPU/Small tournament or its current game.
   if ((running || startPending) && !affected) return;
   if (affected) abort?.abort();
   renderSeatSelectors();
@@ -5299,8 +5178,6 @@ function wireEvents() {
   el('stop').addEventListener('click', stopMatch);
   el('cancelSetupLoad').addEventListener('click', stopMatch);
   el('exportPgn').addEventListener('click', exportPgn);
-  // History review: charts, move strip, and finished-game log rows jump the
-  // board to a past position; Live (or Escape) returns to the running game.
   el('revStart').addEventListener('click', () => stepReview('start'));
   el('revPrev').addEventListener('click', () => stepReview(-1));
   el('revNext').addEventListener('click', () => stepReview(1));
@@ -5421,7 +5298,6 @@ function wireEvents() {
           return;
         }
         target.value = selectedVariant;
-        // A cache hit is rechecked at Start: storage may evict the model before then.
         if (isMemoryConstrainedDevice() && consent === 'download') arenaDownloadApprovals.add(config.key);
       }
       row.variant = target.value;
@@ -5435,7 +5311,6 @@ function wireEvents() {
     buildEngines();
     populateSeats();
     if (target.classList.contains('seat-var')) el('arenaSeatList').querySelector<HTMLElement>(`.seat-var[data-seat="${seat}"]`)?.focus();
-    // Seat selection does not allocate a neural session. Start owns the lazy load.
     if (!loadingLc0) setArenaStartDisabled(false);
   });
   el('arenaSeatList').addEventListener('input', (event) => {
@@ -5533,7 +5408,6 @@ function wireEvents() {
   el('stockfishThreadsInput').addEventListener('input', () => {
     if (running) return;
     inputEl('stockfishThreadsInput').value = String(stockfishThreadsCap());
-    // Threads flips single<->threaded flavor (different wasm); rebuild on next use.
     disposeStockfish();
     refreshArenaConcurrencyNote();
   });
@@ -5644,7 +5518,6 @@ async function init(mountSignal: AbortSignal) {
       : `Local saving is unavailable: ${error instanceof Error ? error.message : String(error)}. Export PGN before leaving.`;
     renderCheckpointStatus();
   }
-  // startMatch / the fixed-suite autorun load Small only when actually needed.
   if (!checkpoint && !checkpointUnreadable) {
     setArenaStartDisabled(false);
     el('message').textContent = readyMessage();

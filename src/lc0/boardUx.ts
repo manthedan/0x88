@@ -56,12 +56,26 @@ export interface PromotionOverlayOptions {
   /** The element the Chessground board was mounted into. */
   boardContainer: HTMLElement;
   orientation: 'white' | 'black';
-  /** Side that is promoting. */
   color: Color;
   /** All matching promotion moves for the drag (same from/to, 4 pieces). */
   choices: Move[];
   onPick: (move: Move) => void;
   onCancel: () => void;
+}
+
+/** Screen cell of the first promotion tile; the rest stack `rowStep` rows away, toward the board's middle. */
+export function promotionTilePlacement(target: string, orientation: 'white' | 'black'): { col: number; startRow: number; rowStep: 1 | -1 } {
+  const fileIdx = target.charCodeAt(0) - 97;
+  const rankIdx = Number(target[1]) - 1;
+  const col = orientation === 'white' ? fileIdx : 7 - fileIdx;
+  const startRow = orientation === 'white' ? 7 - rankIdx : rankIdx;
+  return { col, startRow, rowStep: startRow === 0 ? 1 : -1 };
+}
+
+/** Tile focused after ArrowUp/ArrowDown: arrows follow the screen, wrapping at either end. */
+export function promotionTileAfterKey(current: number, count: number, key: 'ArrowUp' | 'ArrowDown', rowStep: 1 | -1): number {
+  const screenStep = key === 'ArrowDown' ? 1 : -1;
+  return (current + screenStep * rowStep + count) % count;
 }
 
 /**
@@ -78,14 +92,8 @@ export function showPromotionOverlay(options: PromotionOverlayOptions): void {
 
   const overlay = document.createElement('div');
   overlay.className = 'promotion-overlay';
-  const target = squareName(options.choices[0].to);
-  const fileIdx = target.charCodeAt(0) - 97;
-  const rankIdx = Number(target[1]) - 1;
-  const col = options.orientation === 'white' ? fileIdx : 7 - fileIdx;
-  const startRow = options.orientation === 'white' ? 7 - rankIdx : rankIdx;
-  const dir = startRow === 0 ? 1 : -1;
+  const { col, startRow, rowStep } = promotionTilePlacement(squareName(options.choices[0].to), options.orientation);
 
-  // Stable piece order: queen first, then rook/bishop/knight.
   const order = ['q', 'r', 'b', 'n'];
   const sorted = [...options.choices].sort((a, b) => order.indexOf(a.promotion ?? 'q') - order.indexOf(b.promotion ?? 'q'));
   const tiles: HTMLButtonElement[] = [];
@@ -93,7 +101,7 @@ export function showPromotionOverlay(options: PromotionOverlayOptions): void {
     const tile = document.createElement('button');
     tile.className = 'promo-tile';
     tile.style.left = `${col * 12.5}%`;
-    tile.style.top = `${(startRow + i * dir) * 12.5}%`;
+    tile.style.top = `${(startRow + i * rowStep) * 12.5}%`;
     tile.dataset.promo = move.promotion ?? 'q';
     tile.type = 'button';
     tile.setAttribute('aria-label', `Promote to ${PROMO_PIECE_CLASS[move.promotion ?? 'q']}`);
@@ -110,9 +118,6 @@ export function showPromotionOverlay(options: PromotionOverlayOptions): void {
     tiles.push(tile);
   });
 
-  // Keyboard: Escape cancels, Up/Down cycle through tiles in display order.
-  // Tiles are placed along the promotion file; display order matches the
-  // sorted array (index 0 = topmost tile shown).
   const onKeydown = (event: KeyboardEvent) => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -121,9 +126,7 @@ export function showPromotionOverlay(options: PromotionOverlayOptions): void {
     } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
       event.preventDefault();
       const current = tiles.indexOf(document.activeElement as HTMLButtonElement);
-      const dirKey = event.key === 'ArrowDown' ? 1 : -1;
-      const next = (current + dirKey + tiles.length) % tiles.length;
-      tiles[next].focus();
+      tiles[promotionTileAfterKey(current, tiles.length, event.key, rowStep)].focus();
     }
   };
   const close = (): void => {
@@ -138,7 +141,6 @@ export function showPromotionOverlay(options: PromotionOverlayOptions): void {
     options.onCancel();
   });
   host.appendChild(overlay);
-  // Autofocus the queen tile so keyboard users can pick immediately.
   requestAnimationFrame(() => tiles[0]?.focus());
 }
 

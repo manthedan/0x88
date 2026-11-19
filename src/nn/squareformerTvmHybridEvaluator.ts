@@ -314,7 +314,6 @@ export class SquareformerTvmHybridEvaluator implements Evaluator {
           { ...summary.shape, heads: 8 },
           { n1: summary.n1LayerNormEpsilon ?? 1e-5, n2: summary.layerNormEpsilon ?? 1e-5 },
         );
-        // The static attention bias is a read-only per-layer buffer: upload it once here, not per evaluation.
         block.uploadAttentionBias(await loadF32(`${base}/${summary.arrays.staticAttentionBias.file}`, source));
         return { summary, base, block };
       }),

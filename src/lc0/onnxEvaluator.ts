@@ -834,7 +834,6 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     let ortRunMs: number;
     let allGetDataMs: number;
     if (this.gpuIo) {
-      // run + the single staging readback; the outputs are already on the CPU.
       const gpuOutputs = await this.gpuIo.run(f16Input ?? encodedPlanes);
       ortRunMs = ort.tinyLeelaNowMs() - ortRunStarted;
       const allGetDataStarted = ort.tinyLeelaNowMs();

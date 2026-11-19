@@ -12,15 +12,6 @@ import { terminateEngineWorker } from './engineRetirement.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import { supportsWasmRelaxedSimd } from './wasmFeatures.ts';
 
-/**
- * Stockfish "lite" opponent for the engine battle. Drives the single-threaded
- * stockfish-19-lite WASM build (served from /stockfish/) over its UCI worker
- * protocol and exposes a move provider compatible with engineBattle.
- *
- * Strength is deliberately tunable (depth / Skill Level) so the small LC0 net
- * has a competitive opponent rather than full-strength Stockfish.
- */
-
 export interface StockfishOptions {
   /** Fixed search depth (default). Lower = weaker / faster. */
   depth?: number;
@@ -233,7 +224,6 @@ function abortError(): Error {
   return error;
 }
 
-/** Wait for `previous` to settle, or reject with AbortError when `signal` aborts first. */
 export class StockfishEngine implements BrowserUciEngine {
   readonly name = 'stockfish-lite';
   private worker: Worker | null = null;
@@ -286,14 +276,6 @@ export class StockfishEngine implements BrowserUciEngine {
     this.sendOption('Hash', hashCommand(this.options.hashMb ?? DEFAULT_STOCKFISH_HASH_MB));
   }
 
-  /**
-   * Run `fn` after every earlier request. A request cancelled while it waits
-   * for its turn rejects at once instead of waiting for another caller's work
-   * (which may be a cold startup). Releasing its gate early is safe: the queue
-   * tail still chains through `previous`, so later requests keep their order.
-   * Every `fn` starts with awaitInit(signal), which rejects an aborted signal
-   * the same way, so the early rejection only changes when it settles.
-   */
   private runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     return this.queue.run(fn, signal);
   }
@@ -512,10 +494,6 @@ export class StockfishEngine implements BrowserUciEngine {
   }
 
   /** Best move for a FEN. Aborting sends `stop`, so Stockfish returns its current best. */
-  async search(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null> {
-    return this.bestMove(fen, signal, opts);
-  }
-
   async bestMove(fen: string, signal?: AbortSignal, opts: BrowserUciSearchOptions = {}): Promise<string | null> {
     return this.runExclusive(async () => {
       const position = uciPositionCommand(fen, opts.moves);
@@ -535,8 +513,6 @@ export class StockfishEngine implements BrowserUciEngine {
           this.worker?.postMessage('stop');
           abortTimer = setTimeout(() => this.failActive(abortError()), STOCKFISH_ABORT_DRAIN_TIMEOUT_MS);
         };
-        // Clean up the abort listener whether the move completes or is aborted, so
-        // listeners don't accumulate on the battle-lifetime signal (one per ply).
         this.resolveMove = (uci) => {
           cleanup();
           this.rejectMove = null;

@@ -303,8 +303,8 @@ for (const phase of [
 
 test('Arena Start carries its consent to the load: a cache hit approves no download', async () => {
   // Startup from the Small load through the checkpoint save.
-  const from = source.arena.indexOf('  // Lazy Small loading is still part of setup.');
-  const to = source.arena.indexOf('  if (startupCancelled()) {\n    // The save replaced', from);
+  const from = source.arena.indexOf('  if (selectedSeatsNeedLc0Evaluator() && !lc0Cache) {');
+  const to = source.arena.indexOf('  if (startupCancelled()) {\n    if (checkpoint === runCheckpoint', from);
   assert.ok(from >= 0 && to > from, 'production boundaries: Start setup');
   const start = stripTypeScriptTypes(`async function start() {\n${source.arena.slice(from, to)}}`);
   const bigNetFor = extract(source.arena, 'async function bigNetFor(', 'let runtimeIsolation');
@@ -464,8 +464,8 @@ for (const answer of [false, 'download']) {
 
 for (const outcome of ['declined', 'accepted', 'download-approved', 'resume']) {
   test(`Arena resolves the first game's cache-only big-net load before replacing the checkpoint (${outcome})`, async () => {
-    const from = source.arena.indexOf('  // Lazy Small loading is still part of setup.');
-    const to = source.arena.indexOf('  if (startupCancelled()) {\n    // The save replaced', from);
+    const from = source.arena.indexOf('  if (selectedSeatsNeedLc0Evaluator() && !lc0Cache) {');
+    const to = source.arena.indexOf('  if (startupCancelled()) {\n    if (checkpoint === runCheckpoint', from);
     assert.ok(from >= 0 && to > from, 'production boundaries: Start setup');
     const start = stripTypeScriptTypes(`async function start() {\n${source.arena.slice(from, to)}}`);
     const order = [];

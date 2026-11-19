@@ -44,11 +44,6 @@ export function requestHiddenTabWork(state: HiddenTabPause, kind: HiddenTabWork)
   return { state: { hidden: true, suspended: listed([...state.suspended, kind]) }, start: false };
 }
 
-/**
- * A paused search, or maintenance snapshotted from it, starts again only when
- * the tab is visible. Restoring those flags during the hide itself lets the
- * aborted run's finally see them and start a reload while still hidden.
- */
 /** A backend reload counts as analysis when it was going to start a search, or a search was queued behind it. */
 export function classifyHiddenReload(
   searchRunning: boolean,

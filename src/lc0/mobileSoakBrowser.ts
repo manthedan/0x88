@@ -353,7 +353,6 @@ export function mountMobileSoak(
         result.error = `${result.error ?? ''} WebGPU device lost: ${JSON.stringify(result.deviceLost)}`.trim();
       }
       const disposeStarted = performance.now();
-      // Await every teardown even if another fails. Never leave a rejected seat running.
       const disposed = await Promise.allSettled(
         engines.map(async (engine) => {
           try {

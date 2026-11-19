@@ -23,13 +23,40 @@ export interface LineChartOptions {
   height?: number;
   yMin?: number;
   yMax?: number;
-  /** Tick label formatter for the y axis. */
   formatY?: (value: number) => string;
   /** Optional horizontal reference line (e.g. 0.5 for the eval midline). */
   midline?: number;
 }
 
 const FONT = 'font-family="ui-monospace,monospace" font-size="9"';
+
+export const LINE_CHART_WIDTH = 360;
+export const LINE_CHART_PAD = { left: 36, right: 8, top: 6, bottom: 14 } as const;
+export const BAR_CHART_ROW_HEIGHT = 14;
+
+/** viewBox x of a point `fraction` of the way across a line chart's plot area. */
+export function lineChartPlotX(fraction: number, width: number = LINE_CHART_WIDTH): number {
+  return LINE_CHART_PAD.left + fraction * (width - LINE_CHART_PAD.left - LINE_CHART_PAD.right);
+}
+
+/** viewBox y of a value `fraction` of the way up a line chart's plot area. */
+export function lineChartPlotY(fraction: number, height: number): number {
+  return LINE_CHART_PAD.top + (1 - fraction) * (height - LINE_CHART_PAD.top - LINE_CHART_PAD.bottom);
+}
+
+/** Inverse of lineChartPlotX, unclamped. */
+export function lineChartFractionAt(viewX: number, width: number = LINE_CHART_WIDTH): number {
+  return (viewX - LINE_CHART_PAD.left) / (width - LINE_CHART_PAD.left - LINE_CHART_PAD.right);
+}
+
+export function barChartViewHeight(rows: number, rowHeight: number = BAR_CHART_ROW_HEIGHT): number {
+  return rows * rowHeight + 2;
+}
+
+/** Row of an hBarChartSvg under viewBox y; may fall outside [0, rows). */
+export function barChartRowAt(viewY: number, rowHeight: number = BAR_CHART_ROW_HEIGHT): number {
+  return Math.floor((viewY - 1) / rowHeight);
+}
 
 function escapeXml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -47,9 +74,9 @@ function round2(value: number): number {
 export function lineChartSvg(series: readonly ChartSeries[], options: LineChartOptions = {}): string {
   const drawn = series.filter((entry) => entry.points.length > 0);
   if (!drawn.length) return '';
-  const width = options.width ?? 360;
+  const width = options.width ?? LINE_CHART_WIDTH;
   const height = options.height ?? 90;
-  const pad = { left: 36, right: 8, top: 6, bottom: 14 };
+  const pad = LINE_CHART_PAD;
   const xs = drawn.flatMap((entry) => entry.points.map((point) => point.x));
   const ys = drawn.flatMap((entry) => entry.points.map((point) => point.y));
   const xMin = Math.min(...xs);
@@ -73,7 +100,6 @@ export function lineChartSvg(series: readonly ChartSeries[], options: LineChartO
 
   const parts: string[] = [];
   parts.push(`<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" role="img">`);
-  // y ticks: min / mid / max
   for (const tick of [yMin, (yMin + yMax) / 2, yMax]) {
     const y = py(tick);
     parts.push(`<line x1="${pad.left}" y1="${round2(y)}" x2="${width - pad.right}" y2="${round2(y)}" stroke="var(--rule,#00000018)" stroke-width="1"/>`);
@@ -85,7 +111,6 @@ export function lineChartSvg(series: readonly ChartSeries[], options: LineChartO
       `<line x1="${pad.left}" y1="${round2(y)}" x2="${width - pad.right}" y2="${round2(y)}" stroke="var(--rule,#00000033)" stroke-dasharray="3 3" stroke-width="1"/>`,
     );
   }
-  // x extents
   parts.push(`<text x="${pad.left}" y="${height - 3}" fill="var(--muted,#777)" ${FONT}>${round2(xMin)}</text>`);
   parts.push(`<text x="${width - pad.right}" y="${height - 3}" text-anchor="end" fill="var(--muted,#777)" ${FONT}>${round2(xMax)}</text>`);
   for (const entry of drawn) {
@@ -122,13 +147,13 @@ export interface BarChartOptions {
 /** Horizontal bar chart; bar lengths scale to the max value. '' when empty. */
 export function hBarChartSvg(items: readonly BarItem[], options: BarChartOptions = {}): string {
   if (!items.length) return '';
-  const width = options.width ?? 360;
-  const rowHeight = options.rowHeight ?? 14;
+  const width = options.width ?? LINE_CHART_WIDTH;
+  const rowHeight = options.rowHeight ?? BAR_CHART_ROW_HEIGHT;
   const labelW = 44;
   const valueW = 120;
   const barW = width - labelW - valueW;
   const maxValue = options.maxValue ?? Math.max(...items.map((item) => item.value), 1);
-  const height = items.length * rowHeight + 2;
+  const height = barChartViewHeight(items.length, rowHeight);
   const parts: string[] = [];
   parts.push(`<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" role="img">`);
   items.forEach((item, index) => {

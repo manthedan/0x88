@@ -15,7 +15,7 @@ import {
 } from './onnxEvaluator.ts';
 
 export interface Lc0SearchOptions extends Omit<SearchOptions, 'onProgress'> {
-  /** Fixed PUCT visits. Kept explicit here because Phase 2 starts with fixed-visit search parity. */
+  /** Fixed PUCT visit budget. */
   visits?: number;
   /** Reuse the previous compatible search subtree, mirroring native LC0's practical tree reuse between moves. */
   reuseTree?: boolean;

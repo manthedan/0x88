@@ -3821,7 +3821,6 @@ export async function runLc0WebSmolgenBenchmark(options: Lc0WebSmolgenBenchmarkO
     const { maxAbsError, rmsError } = computeErrorStats(outputValues, reference, reference.length);
     assertErrorInTolerance(maxAbsError);
 
-    // Re-initialize the pipeline once, then time each smolgen stage in isolation.
     device.queue.submit([encodeSmolgenBenchmarkDispatches(device, pipelines, 1)]);
     await device.queue.onSubmittedWorkDone?.();
     const stageDispatchAvgMs = {

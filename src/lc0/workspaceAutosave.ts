@@ -1,13 +1,12 @@
 import { boardToFen, type Color } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
-import { type GameNode, GameTree } from './gameTree.ts';
+import { type GameNode, GameTree, MAX_GAME_TREE_NODES } from './gameTree.ts';
 import { type PlayPosition, replayPlayPosition } from './playPosition.ts';
 import { normalizePlayPreferences, type PlayPreferences } from './playPreferences.ts';
 
 export const WORKSPACE_VERSION = 1;
 export const WORKSPACE_MAX_CHARS = 1_000_000;
-const MAX_NODES = 5000;
 export type WorkspaceKind = 'analysis' | 'play';
 export const workspaceStorageKey = (kind: WorkspaceKind): string => `0x88-${kind}-workspace`;
 export interface WorkspaceStorage {
@@ -66,7 +65,7 @@ export function serializeTree(tree: GameTree): TreeSnapshot {
   const pending = [...tree.root.children].reverse();
   while (pending.length) {
     const node = pending.pop()!;
-    if (nodes.length >= MAX_NODES || !node.move || !node.parent) throw new Error('Tree too large or invalid');
+    if (nodes.length >= MAX_GAME_TREE_NODES || !node.move || !node.parent) throw new Error('Tree too large or invalid');
     const parent = indices.get(node.parent);
     if (parent === undefined) throw new Error('Missing parent');
     indices.set(node, nodes.length + 1);
@@ -87,7 +86,7 @@ export function serializeTree(tree: GameTree): TreeSnapshot {
 export function restoreTree(value: unknown): GameTree {
   const raw = object(value);
   const tree = new GameTree(text(raw.startFen, 200));
-  if (!Array.isArray(raw.nodes) || raw.nodes.length > MAX_NODES) throw new Error('Invalid nodes');
+  if (!Array.isArray(raw.nodes) || raw.nodes.length > MAX_GAME_TREE_NODES) throw new Error('Invalid nodes');
   if (raw.rootComment !== undefined) tree.root.comment = text(raw.rootComment);
   const nodes = [tree.root];
   for (const entry of raw.nodes) {
@@ -154,7 +153,7 @@ export function decodePlaySnapshot(raw: string, validEngineIds: ReadonlySet<stri
     const data = decodeEnvelope(raw, 'play');
     if (data.humanColor !== 'w' && data.humanColor !== 'b') throw new Error('Invalid side');
     if (data.orientation !== 'white' && data.orientation !== 'black') throw new Error('Invalid orientation');
-    if (typeof data.started !== 'boolean' || !Array.isArray(data.moves) || data.moves.length > MAX_NODES) throw new Error('Invalid game');
+    if (typeof data.started !== 'boolean' || !Array.isArray(data.moves) || data.moves.length > MAX_GAME_TREE_NODES) throw new Error('Invalid game');
     const preferences = normalizePlayPreferences(data.preferences, validEngineIds);
     const savedPreferences = object(data.preferences);
     for (const key of Object.keys(preferences) as Array<keyof PlayPreferences>) {

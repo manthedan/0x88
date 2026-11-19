@@ -227,9 +227,7 @@ function defaultManifestUrlForModel(modelUrl: string): string {
     const url = new URL(modelUrl, location.href);
     if (url.pathname.startsWith('/models/lc0/')) return '/models/lc0/manifest.json';
     if (url.pathname.startsWith('/models/maia3/')) return '/models/maia3/manifest.json';
-  } catch {
-    // Fall through to the configured local/default manifest.
-  }
+  } catch {}
   return DEFAULT_MANIFEST_URL;
 }
 
@@ -675,7 +673,6 @@ interface FetchModelBytesResult {
   preallocated: boolean;
 }
 
-/** Fetch model bytes and preallocate the decoded target buffer when its size is known. */
 async function fetchModelBytes(
   request: Request,
   modelUrl: string,
@@ -1032,9 +1029,7 @@ async function fetchUncachedVerifiedModel(
 ): Promise<Lc0ModelLoadResult> {
   options.signal?.throwIfAborted();
   refuseUnapprovedDownload(options, modelUrl);
-  // A prefetch would download bytes only to drop them; its caller loads them itself.
   if (options.cacheOnly) throw new Error(`LC0 model cannot be cached here (${cacheStatus}): ${modelUrl}`);
-  // The lab opt-out only skips checks that have no metadata; it never skips a known hash.
   if (options.allowUnverified && !options.onProgress && !resolved.expectedSha256 && resolved.expectedBytes === undefined) {
     return {
       model: resolved.url,
@@ -1056,7 +1051,6 @@ async function fetchUncachedVerifiedModel(
   );
   options.signal?.throwIfAborted();
   const check = await verifyLc0ModelBytes(download.bytes, resolved, options.allowUnverified);
-  // ResolvedModelArtifact uses expectedBytes/expectedSha256, just like the verifier.
   options.signal?.throwIfAborted();
   if (!check.ok) throw new Error(`LC0 model validation failed for ${modelUrl}: ${check.reason}`);
   return {

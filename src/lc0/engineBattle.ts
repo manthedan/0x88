@@ -5,14 +5,6 @@ import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import type { Lc0PolicyOnlyPlayer } from './policyOnlyPlayer.ts';
 import type { Lc0PuctSearcher } from './search.ts';
 
-/**
- * Minimal engine-vs-engine battle harness. The core game loop is engine-
- * agnostic: any opponent (LC0 policy-only, LC0 fixed-visit search, or an
- * external UCI engine such as Stockfish.wasm) is a BattleEngine. LC0 adapters
- * are provided; a Stockfish opponent is wired by implementing the same
- * interface around its UCI loop.
- */
-
 export type GameResultCode = '1-0' | '0-1' | '1/2-1/2';
 
 export interface BattleEngine {
@@ -43,7 +35,6 @@ function isAbortError(error: unknown): boolean {
 function terminalResult(board: BoardState): { result: GameResultCode; reason: string } | null {
   if (legalMoves(board).length === 0) {
     if (inCheck(board)) {
-      // The side to move is checkmated; the other side wins.
       return { result: board.turn === 'w' ? '0-1' : '1-0', reason: 'checkmate' };
     }
     return { result: '1/2-1/2', reason: 'stalemate' };
@@ -89,7 +80,6 @@ export async function playGame(white: BattleEngine, black: BattleEngine, options
     }
     const move = uci ? legal.find((m) => moveToUci(m) === uci) : undefined;
     if (!move) {
-      // A resignation or an illegal/missing move forfeits the game.
       const reason = uci ? `illegal move ${uci}` : 'resigned';
       return { result: board.turn === 'w' ? '0-1' : '1-0', reason, plies: ply, moves, finalFen: boardToFen(board) };
     }
@@ -156,8 +146,6 @@ export async function runMatch(engineA: BattleEngine, engineB: BattleEngine, gam
   }
   return { engineA: engineA.name, engineB: engineB.name, games, played, aWins, bWins, draws, aScore: aWins + draws * 0.5, cancelled, results };
 }
-
-// --- LC0 engine adapters ---
 
 export function lc0PolicyBattleEngine(player: Lc0PolicyOnlyPlayer, name = 'lc0-policy'): BattleEngine {
   return {

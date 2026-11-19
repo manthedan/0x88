@@ -74,7 +74,6 @@ export interface CachedEvaluatorOptions {
   includeHistory?: boolean;
   /** Include legal move action IDs in the key. Keep true for move-token models. */
   includeLegalMoves?: boolean;
-  /** Human/debug label. */
   label?: string;
   /**
    * Newest history positions the wrapped net reads. Longer histories (search
@@ -115,13 +114,6 @@ function evalCacheKey(board: BoardState, context: EvaluationContext | undefined,
   return `${fen}\nh:${history}\nl:${moves}\na:${attackMask}`;
 }
 
-/**
- * Browser-side neural-eval cache for playable frontend search/render paths.
- *
- * Keyed by current FEN + history FENs + ordered legal move action IDs by default.
- * Including legal moves matters for MoveFormer/SquareFormer move-token exports where
- * the provided legal list is part of the evaluator input, not just a convenience.
- */
 export interface BrokeredEvaluatorMetrics {
   logicalRequests: number;
   logicalPositions: number;
@@ -139,10 +131,14 @@ export interface BrokeredEvaluatorOptions {
   maxBatchSize?: number;
   /** Milliseconds to wait for more concurrent requests before flushing. 0 flushes on next microtask. */
   maxWaitMs?: number;
-  /** Human/debug label. */
   label?: string;
 }
 
+/**
+ * Neural-eval cache keyed by current FEN + history FENs + ordered legal move action IDs by default.
+ * Legal moves are part of the key because MoveFormer/SquareFormer move-token exports take the
+ * provided legal list as evaluator input.
+ */
 export class CachedEvaluator implements Evaluator {
   readonly inner: Evaluator;
   readonly label: string;
@@ -357,9 +353,6 @@ export class BrokeredEvaluator implements Evaluator {
       n += next.boards.length;
       if (n >= this.maxBatchSize) break;
     }
-    // If a single logical request is larger than maxBatchSize, allow it through;
-    // inner evaluators already support their own fixed/static batching fallbacks.
-    if (!batch.length && this.pending.length) batch.push(this.pending.shift() as BrokerPending);
     return batch;
   }
 

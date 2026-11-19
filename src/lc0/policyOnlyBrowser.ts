@@ -15,6 +15,7 @@ import {
   requestedOrtRuntimeDiagnosticOptions,
 } from '../nn/ortRuntime.ts';
 import { publishBrowserRuntimeAudit } from '../nn/runtimeAudit.ts';
+import { GPU_BUFFER_USAGE, GPU_MAP_MODE_READ } from '../nn/webgpuFlags.ts';
 import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { bestMoveShapes, searchShapes } from './boardArrows.ts';
@@ -1017,7 +1018,6 @@ function clampFloat(value: string | null, min: number, max: number, fallback: nu
   return Math.min(max, Math.max(min, parsed));
 }
 
-// Runtime-adjustable settings: seeded from query params, then driven by the UI.
 let playerSide: 'white' | 'black' = params.get('side') === 'black' ? 'black' : 'white';
 let searchVisits = clampInt(params.get('visits') ?? '32', 1, 100000, 32);
 let searchBatchSize = clampInt(params.get('batch') ?? params.get('batchSize') ?? '1', 1, 512, 1);
@@ -1070,7 +1070,6 @@ let activeWorkerSearchId: number | null = null;
 let workerSearchCancellationRequested = false;
 let battleRunning = false;
 let battleGames = Math.max(1, Math.floor(Number(params.get('battleGames') ?? '1') || 1));
-// Delay between plies so the game is watchable on the board.
 let battleDelayMs = Math.max(0, Math.floor(Number(params.get('battleDelay') ?? '350') || 350));
 let battleAbort: AbortController | null = null;
 type BattleOpponent = 'policy' | 'stockfish';
@@ -1294,7 +1293,6 @@ function renderSearchResult(result: RenderableSearchResult) {
       return `<li class="${i === 0 ? 'best' : ''}"><span>${i + 1}</span><b>${htmlEscape(entry.uci)}</b><meter min="0" max="100" value="${width}"></meter><code>${entry.visits} · ${(entry.prior * 100).toFixed(1)}%</code></li>`;
     })
     .join('');
-  // Draw the chosen move (green) and other MultiPV candidates (blue) on the board.
   setBoardShapes(searchShapes(result.move, result.multiPv));
 }
 
@@ -1325,7 +1323,6 @@ function renderEvaluation() {
           return `<li class="${i === 0 ? 'best' : ''}"><span>${i + 1}</span><b>${htmlEscape(entry.uci)}</b><meter min="0" max="100" value="${width}"></meter><code>${(entry.prior * 100).toFixed(2)}%</code></li>`;
         })
         .join('');
-      // Reflect the policy pick on the board so analysis is visible there.
       setBoardShapes(bestMoveShapes(choice.move));
     })
     .catch((error) => {
@@ -1803,49 +1800,11 @@ function renderBenchmarkResult(result: EvalBenchResult) {
     `BENCH_DONE ${rounded.iterations} evals · avg ${rounded.avgMs.toFixed(1)} ms · ${rounded.evalsPerSecond.toFixed(2)} eval/s · ${rounded.backend}`;
 }
 
-// Minimal structural WebGPU surface used by the shader-f16 probe (TypeScript's
-// DOM lib does not declare WebGPU and the project has no @webgpu/types).
-type ShaderF16ProbeBuffer = {
-  mapAsync: (mode: number) => Promise<void>;
-  getMappedRange: () => ArrayBuffer;
-  unmap: () => void;
-  destroy: () => void;
-};
-type ShaderF16ProbeComputePass = {
-  setPipeline: (pipeline: unknown) => void;
-  setBindGroup: (index: number, bindGroup: unknown) => void;
-  dispatchWorkgroups: (x: number) => void;
-  end: () => void;
-};
-type ShaderF16ProbeDevice = {
-  queue: { submit: (commandBuffers: unknown[]) => void };
-  createBuffer: (descriptor: { size: number; usage: number }) => ShaderF16ProbeBuffer;
-  createShaderModule: (descriptor: { label: string; code: string }) => unknown;
-  createComputePipeline: (descriptor: Record<string, unknown>) => { getBindGroupLayout: (index: number) => unknown };
-  createBindGroup: (descriptor: Record<string, unknown>) => unknown;
-  createCommandEncoder: () => {
-    beginComputePass: () => ShaderF16ProbeComputePass;
-    copyBufferToBuffer: (
-      source: ShaderF16ProbeBuffer,
-      sourceOffset: number,
-      destination: ShaderF16ProbeBuffer,
-      destinationOffset: number,
-      size: number,
-    ) => void;
-    finish: () => unknown;
-  };
-  destroy?: () => void;
-};
-type ShaderF16ProbeGlobals = typeof globalThis & {
-  GPUBufferUsage: Record<'STORAGE' | 'COPY_SRC' | 'COPY_DST' | 'MAP_READ', number>;
-  GPUMapMode: Record<'READ', number>;
-};
-
 async function runShaderF16Probe(): Promise<void> {
   el('benchResult').textContent = 'SHADER_F16_PROBE_RUNNING';
   setBusy(true, 'Probing WebGPU shader-f16 feature support…');
   const started = performance.now();
-  const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
+  const gpu = navigator.gpu;
   const maxAbsError = (actual: Float32Array, expected: number[]) => Math.max(0, ...expected.map((value, index) => Math.abs((actual[index] ?? NaN) - value)));
   try {
     if (!gpu) {
@@ -1860,11 +1819,7 @@ async function runShaderF16Probe(): Promise<void> {
       el('message').textContent = 'SHADER_F16_PROBE_DONE unavailable: no navigator.gpu';
       return;
     }
-    const adapter = (await gpu.requestAdapter()) as {
-      features?: Iterable<string> & { has?: (feature: string) => boolean };
-      requestDevice: (descriptor?: Record<string, unknown>) => Promise<unknown>;
-      info?: Record<string, unknown>;
-    } | null;
+    const adapter = await gpu.requestAdapter();
     if (!adapter) {
       const result = {
         status: 'SHADER_F16_PROBE_DONE',
@@ -1877,8 +1832,8 @@ async function runShaderF16Probe(): Promise<void> {
       el('message').textContent = 'SHADER_F16_PROBE_DONE unavailable: no WebGPU adapter';
       return;
     }
-    const adapterFeatures = adapter.features ? Array.from(adapter.features).map(String).sort() : [];
-    const shaderF16Supported = adapter.features?.has?.('shader-f16') ?? adapterFeatures.includes('shader-f16');
+    const adapterFeatures = Array.from(adapter.features).sort();
+    const shaderF16Supported = adapter.features.has('shader-f16');
     if (!shaderF16Supported) {
       const result = {
         status: 'SHADER_F16_PROBE_DONE',
@@ -1893,11 +1848,9 @@ async function runShaderF16Probe(): Promise<void> {
       el('message').textContent = 'SHADER_F16_PROBE_DONE unsupported on this adapter';
       return;
     }
-    const device = (await adapter.requestDevice({ requiredFeatures: ['shader-f16'] })) as ShaderF16ProbeDevice;
-    const bufferUsage = (globalThis as ShaderF16ProbeGlobals).GPUBufferUsage;
-    const mapMode = (globalThis as ShaderF16ProbeGlobals).GPUMapMode;
-    const outputBuffer = device.createBuffer({ size: 16, usage: bufferUsage.STORAGE | bufferUsage.COPY_SRC });
-    const readbackBuffer = device.createBuffer({ size: 16, usage: bufferUsage.MAP_READ | bufferUsage.COPY_DST });
+    const device = await adapter.requestDevice({ requiredFeatures: ['shader-f16'] });
+    const outputBuffer = device.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE.STORAGE | GPU_BUFFER_USAGE.COPY_SRC });
+    const readbackBuffer = device.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE.MAP_READ | GPU_BUFFER_USAGE.COPY_DST });
     try {
       const shader = `enable f16;
 @group(0) @binding(0) var<storage, read_write> output: array<f32>;
@@ -1924,7 +1877,7 @@ fn main() {
       pass.end();
       encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, 16);
       device.queue.submit([encoder.finish()]);
-      await readbackBuffer.mapAsync(mapMode.READ);
+      await readbackBuffer.mapAsync(GPU_MAP_MODE_READ);
       const actual = new Float32Array(readbackBuffer.getMappedRange().slice(0));
       readbackBuffer.unmap();
       const expected = [3.5, 0, 2.25, 1.5];
@@ -1943,7 +1896,7 @@ fn main() {
     } finally {
       outputBuffer.destroy();
       readbackBuffer.destroy();
-      device.destroy?.();
+      device.destroy();
     }
   } catch (error) {
     el('benchResult').textContent = `SHADER_F16_PROBE_FAILED ${(error as Error).message}`;
@@ -4004,7 +3957,6 @@ function beginSearch() {
   searching = true;
   activeWorkerSearchId = null;
   workerSearchCancellationRequested = false;
-  // Worker searches are cancelled by message id; main-thread searches by signal.
   mainSearchAbort = useSearchWorker ? null : new AbortController();
 }
 
@@ -4020,8 +3972,6 @@ function endSearch() {
 async function executeSearchResult(): Promise<RenderableSearchResult> {
   if (useSearchWorker) return await searchWithWorker();
   const started = performance.now();
-  // yieldEveryMs lets the main-thread search relinquish the event loop so the
-  // Stop button stays responsive and the page never feels frozen.
   const search = await searcher!.search(
     currentEvaluationInput(),
     currentSearchOptions({
@@ -4059,8 +4009,6 @@ async function searchRootPosition() {
   } finally {
     endSearch();
     setBusy(false);
-    // Keep the search arrows when a result is shown; otherwise refresh the
-    // evaluation (which restores the plain best-move arrow).
     if (rendered) renderStatic();
     else renderEvaluation();
   }
@@ -4070,7 +4018,6 @@ function stopSearch() {
   if (battleRunning) {
     el('message').textContent = 'Stopping game…';
     battleAbort?.abort();
-    // Also abort the in-flight per-move worker search so it stops immediately.
     if (activeWorkerSearchId !== null) {
       workerSearchCancellationRequested = true;
       if (searchWorkerReady) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
@@ -4404,8 +4351,6 @@ async function resetBattleSearchTree(): Promise<void> {
   }
 }
 
-// LC0 search move, run in the worker when available so the board keeps
-// animating; falls back to a cancellable main-thread search otherwise.
 async function battleSearchMove(positions: BoardState[]): Promise<string | null> {
   if (searchWorkerReady) {
     const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>(
@@ -4430,7 +4375,6 @@ function getStockfish(): StockfishEngine {
   return stockfish;
 }
 
-// Stockfish only needs the current FEN, not LC0 history.
 async function battleStockfishMove(positions: BoardState[]): Promise<string | null> {
   const current = positions[positions.length - 1];
   return getStockfish().bestMove(boardToFen(current), battleAbort?.signal);
@@ -4441,8 +4385,6 @@ function opponentProvider(): { provider: MoveProvider; label: string } {
   return { provider: battlePolicyMove, label: 'LC0 policy' };
 }
 
-// Play one full game on the visible board, animating each ply, so the engines'
-// moves are watchable. Reuses the page board/history/move-list state.
 async function playGameOnBoard(white: MoveProvider, black: MoveProvider, signal: AbortSignal): Promise<{ result: GameResultCode; reason: string }> {
   loadPosition(parseFen(START_FEN));
   await resetBattleSearchTree();
@@ -4535,7 +4477,6 @@ async function startBattle() {
   }
 }
 
-// Load a fresh root position with no real prior boards, matching a ?fen= load.
 function loadPosition(next: BoardState) {
   board = next;
   historyBoards = [board];
@@ -4915,8 +4856,6 @@ function wireEvents(): void {
     void searchRootPosition();
   });
   el('stopSearch').addEventListener('click', stopSearch);
-  // "Analyze position" runs a search on the current board. Loading a different
-  // position is the explicit job of the FEN box + Load FEN.
   el('analyze').addEventListener('click', () => {
     void searchRootPosition();
   });
