@@ -25,6 +25,7 @@ import {
   transitionHiddenTab,
 } from '../src/lc0/hiddenTabPause.ts';
 import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
+import { LC0_MODEL_DOWNLOAD_NOT_APPROVED } from '../src/lc0/modelCache.ts';
 
 // A big net picks its served model (the shipped export or, on Apple WebGPU, its
 // split-K rewrite) when its worker initializes, and that URL is part of every
@@ -200,7 +201,7 @@ function centipawnFixture() {
   return fixture;
 }
 
-function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet = async (key) => searchers.get(key) }) {
+function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet = async (key) => searchers.get(key), phone = false, consent = {} }) {
   const admissions = [];
   const centipawn = centipawnFixture();
   // The real host, on the test's searchers and Centipawn cache.
@@ -295,7 +296,9 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
       return true;
     };
     const isStaleMount = (signal) => signal.aborted || signal !== mountAbort.signal;
-    const isMemoryConstrainedDevice = () => false, deviceMemoryClass = () => 'desktop';
+    const isMemoryConstrainedDevice = () => phone, deviceMemoryClass = () => phone ? 'phone' : 'desktop';
+    const unloadMaia3Panel = () => {}, releaseBigNetSearcher = () => {}, preparePhoneBigNet = () => {};
+    const { requestLargeNetDownloadConsent, requestLargeNetRedownloadConsent } = consent;
     let maia3PanelBlockedByRun = null;
     const shouldAutoAnalyzePosition = () => true, mainlineNodes = () => [];
     const awaitEngineRetirements = async () => {}, hasEngineRetirements = () => false;
@@ -343,6 +346,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     const settingsChanged = (maintenance) => invalidateAnalysisSettings(maintenance, true);
     return {
       analyzeCurrent, holdBackend, admissions: stateHelpers.admissions,
+      recordBigNetConsent: engines.recordBigNetConsent,
       loadBackend: (auto = true) => loadLc0Backend(auto),
       modelProgress: () => modelProgressVisible,
       backendCompletions,
@@ -410,6 +414,8 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     'centipawn',
     'ANALYSIS_BIG_NET_KEYS',
     'ANALYSIS_BIG_NET_SESSION',
+    'phone',
+    'consent',
     code,
   )(
     START_FEN,
@@ -437,6 +443,8 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     centipawn,
     ANALYSIS_BIG_NET_KEYS,
     ANALYSIS_BIG_NET_SESSION,
+    phone,
+    consent,
   );
 }
 
@@ -725,6 +733,37 @@ test('a big-net init failure stays that engine’s failed row and does not suppr
     assert.equal(page.completeAnalysisKeys.size, 0, 'a run with a failed engine is not marked complete');
     t3.dispose();
     bt4.dispose();
+  }));
+
+test('an Analysis cache-only load failure asks for forced redownload with a signal that Stop aborts', (t) =>
+  withWorkers({ [T3_ORIGINAL]: [{ error: `${LC0_MODEL_DOWNLOAD_NOT_APPROVED}: ${T3_ORIGINAL}` }] }, async () => {
+    const t3 = new Bt4WorkerSearcher(T3_NET);
+    const answer = Promise.withResolvers();
+    const requestLargeNetDownloadConsent = t.mock.fn(async () => 'cached');
+    const requestLargeNetRedownloadConsent = t.mock.fn(() => answer.promise);
+    const page = analysisPage({
+      rows: [t3Row],
+      searchers: new Map([['t3', t3]]),
+      phone: true,
+      consent: { requestLargeNetDownloadConsent, requestLargeNetRedownloadConsent },
+    });
+    page.recordBigNetConsent('t3', 'cached');
+    const running = page.analyzeCurrent();
+    try {
+      await until(() => requestLargeNetRedownloadConsent.mock.callCount() || page.idle());
+      assert.equal(requestLargeNetDownloadConsent.mock.callCount(), 0, 'ordinary consent could return cached again');
+      assert.equal(requestLargeNetRedownloadConsent.mock.callCount(), 1, 'the cache-only failure must reach the forced-redownload helper');
+      const [config, signal] = requestLargeNetRedownloadConsent.mock.calls[0].arguments;
+      assert.equal(config, T3_NET);
+      assert.equal(signal?.aborted, false, 'the forced-redownload helper receives a live signal');
+      page.stop();
+      assert.equal(signal.aborted, true, 'Stop aborts the pending consent even while the page is still mounted');
+    } finally {
+      answer.resolve(false);
+      await running;
+      await t3.dispose();
+    }
+    assert.deepEqual(FakeWorker.instances.map((worker) => worker.init.noModelDownload), [true]);
   }));
 
 test('a rejected big-net acquisition reports that row’s error and keeps the other engines running', () =>
