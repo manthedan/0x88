@@ -15,19 +15,32 @@ test('the static adapter writes its fallback shell to 404.html with static not-f
   // The adapter empties its output dir, so it gets the temp dir explicitly: never the configured
   // dist-client or release dir, whatever the environment or module cache holds.
   const { createAdapter, default: config, STATIC_NOT_FOUND_ID } = await import('../kit.config.js');
+  const server = await mkdtemp(join(tmpdir(), 'kit-server-'));
+  t.after(() => rm(server, { recursive: true, force: true }));
+  await mkdir(join(server, 'nodes'));
+  await writeFile(
+    join(server, 'nodes', '1.js'),
+    'export const imports = ["_app/immutable/nodes/1.e.js","_app/immutable/chunks/shared.js","_app/immutable/chunks/err.js"]; export const stylesheets = ["_app/immutable/assets/1.e.css"];',
+  );
+  const playHead = '<head><link href="/_app/immutable/chunks/shared.js" rel="modulepreload"></head>';
   const calls = [];
   const log = Object.assign(() => undefined, { info() {}, warn() {}, error() {}, minor() {} });
   await createAdapter(out).adapt({
     config: { kit: {}, router: {} },
     routes: [],
+    prerendered: { pages: new Map([['/app/play/', { file: 'app/play/index.html' }]]) },
+    getServerDirectory: () => server,
     log,
     generateEnvModule() {},
     writeClient: (dir) => calls.push(['client', dir]),
-    writePrerendered: (dir) => calls.push(['prerendered', dir]),
+    writePrerendered: async (dir) => {
+      calls.push(['prerendered', dir]);
+      await mkdir(join(out, 'app/play'), { recursive: true }); // the adapter clears the output dir first
+      await writeFile(join(out, 'app/play/index.html'), `${playHead}<body></body>`);
+    },
     generateFallback: async (file) => {
       calls.push(['fallback', file]);
-      await mkdir(out, { recursive: true }); // the adapter clears the output dir first
-      await writeFile(file, '<body><div style="display: contents"><script>start()</script></div></body>');
+      await writeFile(file, '<head></head><body><div style="display: contents"><script>start()</script></div></body>');
     },
   });
   assert.deepEqual(calls, [
@@ -40,6 +53,11 @@ test('the static adapter writes its fallback shell to 404.html with static not-f
   const staticCopy = html.slice(html.indexOf(target) + target.length, html.indexOf('<script>start()</script>'));
   assert.ok(staticCopy.startsWith(`<main id="${STATIC_NOT_FOUND_ID}"`), html);
   assert.ok(staticCopy.includes('<h1>Page not found</h1>') && staticCopy.includes('href="/"'), staticCopy);
+  // Kit 3 hydration awaits the root error node, so every page links it (and sw.js precaches it).
+  const errorNodeLinks =
+    '<link href="/_app/immutable/nodes/1.e.js" rel="modulepreload"><link href="/_app/immutable/chunks/err.js" rel="modulepreload"><link href="/_app/immutable/assets/1.e.css" rel="preload" as="style"></head>';
+  assert.ok(html.startsWith(`<head>${errorNodeLinks}`), html);
+  assert.equal(await readFile(join(out, 'app/play/index.html'), 'utf8'), `${playHead.replace('</head>', errorNodeLinks)}<body></body>`);
   assert.equal(config.paths.relative, false, 'cached pages served at other depths need root-absolute build URLs');
   const errorPage = await readFile(join(repoRoot, 'src/routes/+error.svelte'), 'utf8');
   assert.ok(errorPage.includes(`getElementById('${STATIC_NOT_FOUND_ID}')?.remove()`), 'the mounted error page replaces the static copy');
