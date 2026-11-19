@@ -12,13 +12,22 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const SYNC_PHRASE = /keep in step with|keep in sync with|mirror\s+\S+'s layout|copied from/i;
 const SOURCE_FILE = /\.(ts|js|mjs|svelte|css|html)$/;
 
-/** Files that may still carry a sync-phrase comment. Remove an entry once its file is fixed. */
-export const ALLOWLIST = {
-  'src/lc0/analysisBrowser.ts':
-    'wave 2 (fenced during comment cleanup 1): variant->big-net key mapping copied in several places; needs bigNetKeyForVariant() in engineCatalog.ts',
-  'src/lc0/batchingStrengthMatch.ts':
-    'wave 2 (fenced during comment cleanup 1): constants copied from playBrowser.ts and kept equal by a source-scraping test; export them once',
-};
+/**
+ * Sync-phrase comments that may stay for now: each entry permits one comment in `path` whose normalized text
+ * contains `comment`. Remove an entry once its comment is gone.
+ */
+export const ALLOWLIST = [
+  {
+    path: 'src/lc0/analysisBrowser.ts',
+    comment: 'keep in step with engineAnalysisCacheKey',
+    reason: 'wave 2 (fenced during comment cleanup 1): variant->big-net key mapping copied in several places; needs bigNetKeyForVariant() in engineCatalog.ts',
+  },
+  {
+    path: 'src/lc0/batchingStrengthMatch.ts',
+    comment: 'Copied from playBrowser.ts. tests/batching_strength.test.mjs checks the source still has these literals.',
+    reason: 'wave 2 (fenced during comment cleanup 1): constants copied from playBrowser.ts and kept equal by a source-scraping test; export them once',
+  },
+];
 
 /** A JS/TS comment run: one block comment, or consecutive line comments. */
 function scriptComments(text, lineOffset) {
@@ -112,11 +121,16 @@ export function sourceComments(text, path) {
     .sort((a, b) => a.line - b.line);
 }
 
-/** 1-based start lines of comments in `text` that contain a sync phrase. */
-export function syncPhraseCommentLines(text, path = 'source.ts') {
+/** Comments in `text` that contain a sync phrase, as { line (1-based start), text (normalized) }. */
+export function syncPhraseComments(text, path = 'source.ts') {
   return sourceComments(text, path)
     .filter((comment) => SYNC_PHRASE.test(comment.text))
-    .map((comment) => comment.line + 1);
+    .map((comment) => ({ line: comment.line + 1, text: comment.text }));
+}
+
+/** 1-based start lines of comments in `text` that contain a sync phrase. */
+export function syncPhraseCommentLines(text, path = 'source.ts') {
+  return syncPhraseComments(text, path).map((comment) => comment.line);
 }
 
 function walk(dir, out) {
@@ -128,17 +142,22 @@ function walk(dir, out) {
   return out;
 }
 
-/** Every sync-phrase comment under src/, as { path, line }. */
+/** Every sync-phrase comment under src/, as { path, line, text }. */
 export function findSyncPhraseComments() {
-  return walk('src', []).flatMap((path) => syncPhraseCommentLines(readFileSync(join(REPO_ROOT, path), 'utf8'), path).map((line) => ({ path, line })));
+  return walk('src', []).flatMap((path) => syncPhraseComments(readFileSync(join(REPO_ROOT, path), 'utf8'), path).map((comment) => ({ path, ...comment })));
 }
 
-/** Problems: hits outside the allowlist, and allowlist entries with nothing left to excuse. */
+/** Problems: hits no allowlist entry permits, and allowlist entries that match no comment. Each entry permits one comment. */
 export function checkSyncPhraseComments(hits = findSyncPhraseComments(), allowlist = ALLOWLIST) {
-  const problems = hits.filter((hit) => !(hit.path in allowlist)).map((hit) => `${hit.path}:${hit.line}: comment asks to keep code in sync`);
-  const hitPaths = new Set(hits.map((hit) => hit.path));
-  for (const path of Object.keys(allowlist)) {
-    if (!hitPaths.has(path)) problems.push(`${path}: allowlisted but has no sync-phrase comment left; remove it from ALLOWLIST`);
+  const permitted = new Set();
+  const problems = [];
+  for (const entry of allowlist) {
+    const hit = hits.find((candidate) => !permitted.has(candidate) && candidate.path === entry.path && candidate.text.includes(entry.comment));
+    if (hit) permitted.add(hit);
+    else problems.push(`${entry.path}: allowlisted comment "${entry.comment}" not found; remove it from ALLOWLIST`);
+  }
+  for (const hit of hits) {
+    if (!permitted.has(hit)) problems.push(`${hit.path}:${hit.line}: comment asks to keep code in sync`);
   }
   return problems;
 }

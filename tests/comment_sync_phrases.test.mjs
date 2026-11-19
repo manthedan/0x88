@@ -19,10 +19,27 @@ test('sync phrases are found in line, block and JSDoc comments, not in code or s
   assert.deepEqual(syncPhraseCommentLines(text), [1, 2, 3]);
 });
 
-test('the allowlist must shrink: a fixed file left on it is a failure', () => {
-  assert.deepEqual(checkSyncPhraseComments([{ path: 'src/a.ts', line: 3 }], {}), ['src/a.ts:3: comment asks to keep code in sync']);
-  assert.deepEqual(checkSyncPhraseComments([], { 'src/b.ts': 'wave 2' }), [
-    'src/b.ts: allowlisted but has no sync-phrase comment left; remove it from ALLOWLIST',
+test('each allowlist entry permits one matching comment, and an entry with no comment left fails', () => {
+  const allowlist = [{ path: 'src/a.ts', comment: 'keep in step with foo', reason: 'wave 2' }];
+  const permitted = { path: 'src/a.ts', line: 3, text: 'keep in step with foo' };
+  assert.deepEqual(checkSyncPhraseComments([permitted], allowlist), []);
+  assert.deepEqual(checkSyncPhraseComments([{ path: 'src/b.ts', line: 3, text: 'keep in step with foo' }], allowlist), [
+    'src/a.ts: allowlisted comment "keep in step with foo" not found; remove it from ALLOWLIST',
+    'src/b.ts:3: comment asks to keep code in sync',
+  ]);
+  assert.deepEqual(checkSyncPhraseComments([], allowlist), ['src/a.ts: allowlisted comment "keep in step with foo" not found; remove it from ALLOWLIST']);
+});
+
+test('a new sync comment in an allowlisted file still fails', () => {
+  const allowlist = [{ path: 'src/a.ts', comment: 'keep in step with foo', reason: 'wave 2' }];
+  const hits = [
+    { path: 'src/a.ts', line: 3, text: 'keep in step with foo' },
+    { path: 'src/a.ts', line: 9, text: 'Copied from bar.ts' },
+    { path: 'src/a.ts', line: 12, text: 'also keep in step with foo' },
+  ];
+  assert.deepEqual(checkSyncPhraseComments(hits, allowlist), [
+    'src/a.ts:9: comment asks to keep code in sync',
+    'src/a.ts:12: comment asks to keep code in sync',
   ]);
 });
 
