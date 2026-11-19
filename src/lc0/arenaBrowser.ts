@@ -117,7 +117,7 @@ import {
   probeBt4Support,
 } from './bt4Engine.ts';
 import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
-import { type ChartSeries, hBarChartSvg, lineChartSvg } from './charts.ts';
+import { barChartRowAt, barChartViewHeight, type ChartSeries, hBarChartSvg, lineChartFractionAt, lineChartSvg } from './charts.ts';
 import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryClass.ts';
 import { DisposableVariantPool } from './disposableVariantPool.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
@@ -1715,10 +1715,9 @@ function reviewRootChartClick(event: MouseEvent): void {
     }
   }
   if (index < 0) return;
-  // Mirror hBarChartSvg's layout: each bar row is 14 viewBox units high.
   const rect = svg.getBoundingClientRect();
-  const viewH = rootChartContext.top.length * 14 + 2;
-  const row = Math.floor((((event.clientY - rect.top) / rect.height) * viewH - 1) / 14);
+  const viewH = barChartViewHeight(rootChartContext.top.length);
+  const row = barChartRowAt(((event.clientY - rect.top) / rect.height) * viewH);
   previewRootCandidate(Math.max(0, Math.min(row, rootChartContext.top.length - 1)), index);
 }
 
@@ -1749,12 +1748,11 @@ function chartPlyFromClick(chartId: 'evalChart' | 'timeChart' | 'npsChart', targ
   if (!svg || !plies.length) return null;
   const rect = svg.getBoundingClientRect();
   if (!rect.width) return null;
-  // Mirror lineChartSvg's plot padding at the responsive SVG viewBox width.
   const width = svg.viewBox.baseVal.width;
   const viewX = ((event.clientX - rect.left) / rect.width) * width;
   const xMin = Math.min(...plies);
   const xMax = Math.max(...plies);
-  const frac = Math.max(0, Math.min(1, (viewX - 36) / (width - 8 - 36)));
+  const frac = Math.max(0, Math.min(1, lineChartFractionAt(viewX, width)));
   return Math.round(xMin + frac * (xMax - xMin));
 }
 

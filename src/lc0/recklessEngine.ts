@@ -696,10 +696,6 @@ export class RecklessEngine implements BrowserUciEngine {
     return status.persistentAvailable ? 'persistent available' : 'one-shot fallback';
   }
 
-  async search(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null> {
-    return this.bestMove(fen, signal, opts);
-  }
-
   async bestMove(fen: string, signal?: AbortSignal, opts: BrowserUciSearchOptions = {}): Promise<string | null> {
     return this.runExclusive(async () => {
       if (this.runtimeOptions.backend === 'browser-api') {

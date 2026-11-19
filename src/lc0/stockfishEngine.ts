@@ -494,10 +494,6 @@ export class StockfishEngine implements BrowserUciEngine {
   }
 
   /** Best move for a FEN. Aborting sends `stop`, so Stockfish returns its current best. */
-  async search(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null> {
-    return this.bestMove(fen, signal, opts);
-  }
-
   async bestMove(fen: string, signal?: AbortSignal, opts: BrowserUciSearchOptions = {}): Promise<string | null> {
     return this.runExclusive(async () => {
       const position = uciPositionCommand(fen, opts.moves);

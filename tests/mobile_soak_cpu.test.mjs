@@ -38,7 +38,7 @@ for (const [id, Engine] of [
     assert.equal(probe.runtime().residentAfterPrepare, false);
     assert.equal(probe.runtime().initializationMs, null);
     // Mimic the actual one-shot path: each request instantiates WASI and then searches.
-    t.mock.method(cpu, 'search', async function () {
+    t.mock.method(cpu, 'bestMove', async function () {
       clock += 2500;
       this.workerMode = 'oneshot';
       this.lastInfoLines = [{ nodes: 1000, nps: 1000, multipv: 1, depth: 4, pvUci: ['e2e4'] }];
@@ -67,7 +67,7 @@ for (const mode of ['worker', 'emscripten-worker', 'persistent', 'browser-api'])
       runtimeStatus: () => status,
       runtimeLabel: () => mode,
       setOptions() {},
-      async search() {
+      async bestMove() {
         clock += 1000;
         return 'e2e4';
       },
@@ -96,7 +96,7 @@ test('persistent fallback during search suppresses wall throughput even if prewa
       runtimeStatus: () => status,
       runtimeLabel: () => status.mode,
       setOptions() {},
-      async search() {
+      async bestMove() {
         clock += 4000;
         status = { mode: 'oneshot', persistentDisabled: true };
         return 'e2e4';

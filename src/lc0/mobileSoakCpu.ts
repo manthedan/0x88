@@ -38,7 +38,7 @@ export function createSoakCpuProbe(id: string, cpu: BrowserUciEngine, now = () =
       let move: string | null;
       try {
         cpu.setOptions({ depth: undefined, movetimeMs: durationMs });
-        move = await cpu.search(fen, signal);
+        move = await cpu.bestMove(fen, signal);
       } finally {
         ms = now() - started;
         initializationIncluded ||= !soakCpuResident(cpu.runtimeStatus());

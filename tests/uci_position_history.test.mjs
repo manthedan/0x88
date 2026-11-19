@@ -142,7 +142,7 @@ for (const [label, Worker, create] of ADAPTERS) {
     t.after(() => engine.dispose());
     assert.equal(await engine.bestMove(START_FEN), 'e2e4');
     assert.equal(await engine.bestMove(START_FEN, undefined, { moves: START_MOVES }), 'e2e4');
-    assert.equal(await engine.search(CUSTOM_FEN, undefined, { moves: CUSTOM_MOVES }), 'e2e4');
+    assert.equal(await engine.bestMove(CUSTOM_FEN, undefined, { moves: CUSTOM_MOVES }), 'e2e4');
     await flush();
     const positions = Worker.instances.flatMap((worker) => worker.messages).filter((command) => command.startsWith('position '));
     assert.deepEqual(positions, [

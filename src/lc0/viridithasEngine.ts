@@ -501,10 +501,6 @@ export class ViridithasEngine implements BrowserUciEngine {
     }, signal);
   }
 
-  async search(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null> {
-    return this.bestMove(fen, signal, opts);
-  }
-
   async bestMove(fen: string, signal?: AbortSignal, opts: BrowserUciSearchOptions = {}): Promise<string | null> {
     return this.runExclusive(async () => {
       const result = await this.runCommands(this.searchCommands(fen, this.options, 1, opts.moves), signal);

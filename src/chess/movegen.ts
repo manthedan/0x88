@@ -299,3 +299,7 @@ export function makeMove(board: BoardState, move: Move): BoardState {
   next.fullmove += board.turn === 'b' ? 1 : 0;
   return next;
 }
+
+export function givesCheck(board: BoardState, move: Move): boolean {
+  return inCheck(makeMove(board, move));
+}

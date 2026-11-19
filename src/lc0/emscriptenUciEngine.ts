@@ -488,10 +488,6 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
     this.initialized = true;
   }
 
-  async search(fen: string, signal?: AbortSignal, opts?: BrowserUciSearchOptions): Promise<string | null> {
-    return this.bestMove(fen, signal, opts);
-  }
-
   async bestMove(fen: string, signal?: AbortSignal, opts: BrowserUciSearchOptions = {}): Promise<string | null> {
     return this.runExclusive(async () => {
       const position = this.positionCommand(fen, opts.moves);

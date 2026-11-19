@@ -1,7 +1,7 @@
 import { type BoardState, boardToFen } from '../chess/board.ts';
 import { automaticDrawReason } from '../chess/drawRules.ts';
 import { type Move, moveToActionId, moveToUci } from '../chess/moveCodec.ts';
-import { inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
+import { givesCheck, inCheck, legalMoves, makeMove } from '../chess/movegen.ts';
 import type { Evaluation, EvaluationBatchRequest, Evaluator } from '../nn/evaluator.ts';
 
 export interface SearchPolicyEntry {
@@ -645,11 +645,7 @@ function isForcingMove(board: BoardState, move: Move): boolean {
   const target = board.squares[move.to];
   if (target && target[0] !== board.turn) return true;
   if (moving?.[1] === 'p' && move.to === board.epSquare) return true;
-  // Search edges must contain legal moves. If that invariant breaks, surface
-  // the error instead of silently changing progressive-widening behavior.
-  // makeMove flips side-to-move, so the default inCheck(child) asks whether
-  // the opponent is in check after this move.
-  return inCheck(makeMove(board, move));
+  return givesCheck(board, move);
 }
 
 export class ProgressiveWideningPUCTPolicy extends ClassicPUCTPolicy {
@@ -1160,14 +1156,15 @@ function makeSearchRoot(
   return { board, historyFens, historyBoards, explicitHistory, expanded: false, terminalValue: null, edges: [], visits: 0, isRoot: true };
 }
 
+const NEUTRAL_SEARCH_VALUE_KEY = 'drawScore=0;scLimit=0';
+
 function searchValueKey(context: SearchPolicyContext): string {
-  if (context.drawScore === 0 && context.searchContemptLimit === 0 && context.contemptElo === 0) return 'drawScore=0;scLimit=0';
+  if (context.drawScore === 0 && context.searchContemptLimit === 0 && context.contemptElo === 0) return NEUTRAL_SEARCH_VALUE_KEY;
   return `drawScore=${context.drawScore};scLimit=${context.searchContemptLimit};contemptElo=${context.contemptElo};rootSide=${context.rootSideToMove ?? ''}`;
 }
 
 function nodeSearchValueCompatible(node: Node, key: string): boolean {
-  // Pre-key/default trees are compatible only with the historical neutral default.
-  return node.searchValueKey === key || (node.searchValueKey === undefined && key === 'drawScore=0;scLimit=0');
+  return node.searchValueKey === key || (node.searchValueKey === undefined && key === NEUTRAL_SEARCH_VALUE_KEY);
 }
 
 // History links contain positions only, never ancestor search nodes. Advancing

@@ -112,3 +112,16 @@ test('makeMove updates en passant, en passant capture, and castling rook movemen
   assert.equal(result.oldRook, null);
   assert.equal(result.castling.includes('K'), false);
 });
+
+test('givesCheck reports whether the move checks the opponent, not the mover', () => {
+  const result = runSnippet(`
+    import { parseFen } from './src/chess/board.ts';
+    import { givesCheck, legalMoves } from './src/chess/movegen.ts';
+    import { moveToUci } from './src/chess/moveCodec.ts';
+    const board = parseFen('4k3/8/8/8/8/8/8/R3K3 w - - 0 1');
+    const checks = legalMoves(board).filter((move) => givesCheck(board, move)).map(moveToUci).sort();
+    console.log(JSON.stringify({ checks, board: JSON.stringify(board) === JSON.stringify(parseFen('4k3/8/8/8/8/8/8/R3K3 w - - 0 1')) }));
+  `);
+  assert.deepEqual(result.checks, ['a1a8']);
+  assert.equal(result.board, true, 'the probed board is not mutated');
+});
