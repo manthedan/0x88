@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
+import { createAnalysisEngines } from '../src/lc0/analysis/analysisEngines.ts';
 
 function extracted(path, start, end) {
   const source = readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -11,49 +12,81 @@ function extracted(path, start, end) {
   return stripTypeScriptTypes(source.slice(from, to));
 }
 
-test('Analysis disposes Stockfish Lite and Full when no row (or running review) uses them', () => {
-  const source = `let stockfishLite = state.lite; let stockfishFull = state.full;
-${extracted('../src/lc0/analysisBrowser.ts', 'function disposeStockfish(', 'const ANALYSIS_CPU_ENGINE_OPTIONS')}
-${extracted('../src/lc0/analysisBrowser.ts', 'function disposeUnusedEngines(', '// Default: one best-move arrow')}
-disposeUnusedEngines();
-return { lite: stockfishLite, full: stockfishFull };`;
-  const pool = { retain() {} };
-  const run = (rows, { reviewing = false } = {}) => {
-    const disposed = [];
-    const engine = (name) => ({ dispose: () => disposed.push(name) });
-    const prepared = new Set(['sf:lite', 'sf:full', 'berserk:x']);
-    const dependencies = {
-      state: { lite: engine('lite'), full: engine('full') },
-      resetSearchWorker: () => {},
-      mainEvaluator: null,
-      searcher: null,
-      isLc0BigNetVariant: (variant) => ['bt4', 't3', 'lqo'].includes(variant),
-      ANALYSIS_BIG_NET_KEYS: [],
-      usesBigNetRow: () => false,
-      peekBigNetSearcher: () => null,
-      releaseBigNetSearcher: () => {},
-      disposeUnusedCentipawnEvaluators: () => {},
-      activeEngineRows: () => rows,
-      reviewAbort: reviewing ? new AbortController() : null,
-      reviewEngineRows: () => [{ family: 'sf', variant: 'lite' }],
-      preparedCpuEngineKeys: prepared,
-      recklessEngines: pool,
-      viridithasEngines: pool,
-      berserkEngines: pool,
-      plentyChessEngines: pool,
-      stormphraxEngines: pool,
-      recklessVariantForKey: () => ({}),
-      viridithasVariantForKey: () => ({}),
-      berserkVariantForKey: () => ({}),
-      plentyChessVariantForKey: () => ({}),
-      stormphraxVariantForKey: () => ({}),
-      renderRecklessRuntimeInfo: () => {},
-    };
-    const left = new Function(...Object.keys(dependencies), source)(...Object.values(dependencies));
-    return { disposed, kept: Object.keys(left).filter((kind) => left[kind]), prepared: [...prepared] };
+const PREPARATION_KEYS = ['sf:lite', 'sf:full', 'berserk:x'];
+
+// The production disposeUnusedEngines on the real host; only the engines are fakes.
+async function run(rows, { reviewing = false } = {}) {
+  const disposed = [];
+  const startups = [];
+  const engines = createAnalysisEngines({
+    port: { live: () => true, loading: (id, item) => item && startups.push(id), runtimeInfoChanged: () => {} },
+    dial: 'balanced',
+    centipawn: { legacyOverride: false, modelUrl: '', metaUrl: '', legacyModelUrl: '', legacyMetaUrl: '', manifestUrl: '' },
+    loadCentipawn: () => assert.fail('unused'),
+    centipawnCache: { retain() {}, clear() {}, has: () => false, get: () => assert.fail('unused') },
+    variants: { reckless: () => ({}), viridithas: () => ({}), berserk: () => ({}), plentyChess: () => ({}), stormphrax: () => ({}) },
+    activeRows: () => rows,
+    preload: async () => {},
+    createStockfish: (_options, url) => {
+      const kind = url.includes('lite') ? 'lite' : 'full';
+      return { dispose: () => disposed.push(kind) };
+    },
+    bigNets: { peek: () => null, release() {}, acquire: () => assert.fail('unused'), disposeNow() {} },
+  });
+  const game = {};
+  const prepare = (key) =>
+    engines.prepareCpuEngine(
+      { family: 'sf', strength: 1 },
+      {},
+      key,
+      key,
+      game,
+      new AbortController().signal,
+      [],
+      async () => {},
+      () => {},
+    );
+  const lite = engines.getStockfish('lite');
+  const full = engines.getStockfish('full');
+  for (const key of PREPARATION_KEYS) await prepare(key);
+  startups.length = 0;
+
+  const dependencies = {
+    engines,
+    engineRows: rows,
+    resetSearchWorker: () => {},
+    mainEvaluator: null,
+    searcher: null,
+    isLc0BigNetVariant: (variant) => ['bt4', 't3'].includes(variant),
+    activeEngineRows: () => rows,
+    reviewAbort: reviewing ? new AbortController() : null,
+    reviewEngineRows: () => [{ family: 'sf', variant: 'lite' }],
+    renderRecklessRuntimeInfo: () => {},
   };
-  assert.deepEqual(run([{ family: 'lc0', variant: 'small' }]), { disposed: ['lite', 'full'], kept: [], prepared: ['berserk:x'] });
-  assert.deepEqual(run([{ family: 'sf', variant: 'full' }]).disposed, ['lite']);
-  assert.deepEqual(run([{ family: 'sf', variant: 'lite' }]).kept, ['lite']);
-  assert.deepEqual(run([{ family: 'berserk', variant: 'x' }], { reviewing: true }).kept, ['lite'], 'review keeps SF Lite');
+  const mark = disposed.length;
+  new Function(
+    ...Object.keys(dependencies),
+    `${extracted('../src/lc0/analysisBrowser.ts', 'function disposeUnusedEngines(', '// Default: one best-move arrow')}\ndisposeUnusedEngines();`,
+  )(...Object.values(dependencies));
+  const released = disposed.slice(mark);
+
+  const kept = [];
+  if (engines.getStockfish('lite') === lite) kept.push('lite');
+  if (engines.getStockfish('full') === full) kept.push('full');
+  // A key is still prepared when its next preparation shows no engine startup.
+  const prepared = [];
+  for (const key of PREPARATION_KEYS) {
+    const before = startups.length;
+    await prepare(key);
+    if (startups.length === before) prepared.push(key);
+  }
+  engines.disposeAnalysisCpuEngines();
+  return { disposed: released, kept, prepared };
+}
+
+test('Analysis disposes Stockfish Lite and Full when no row (or running review) uses them', async () => {
+  assert.deepEqual(await run([{ family: 'lc0', variant: 'small' }]), { disposed: ['lite', 'full'], kept: [], prepared: ['berserk:x'] });
+  assert.deepEqual((await run([{ family: 'sf', variant: 'full' }])).disposed, ['lite']);
+  assert.deepEqual((await run([{ family: 'sf', variant: 'lite' }])).kept, ['lite']);
+  assert.deepEqual((await run([{ family: 'berserk', variant: 'x' }], { reviewing: true })).kept, ['lite'], 'review keeps SF Lite');
 });

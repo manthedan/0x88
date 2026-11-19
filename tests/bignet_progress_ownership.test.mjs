@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { parseFen, START_FEN } from '../src/chess/board.ts';
 import { Bt4WorkerSearcher, T3_NET } from '../src/lc0/bt4Engine.ts';
+import { productionEnginePort, testAnalysisEngines } from './lib/analysis_engines.mjs';
 
 function extract(file, first, last) {
   const source = readFileSync(new URL(file, import.meta.url), 'utf8');
@@ -13,7 +14,6 @@ function extract(file, first, last) {
   return stripTypeScriptTypes(source.slice(start, end));
 }
 const arena = extract('../src/lc0/arenaBrowser.ts', '  const lc0BigNetWarmup =', '  const centipawnWarmup =');
-const analysis = extract('../src/lc0/analysisBrowser.ts', 'async function initBigNetsForRun(', '/** After initBigNetsForRun:');
 
 for (const workflow of ['Arena', 'Analysis']) {
   for (const effect of ['download progress', 'cleanup']) {
@@ -61,12 +61,16 @@ for (const workflow of ['Arena', 'Analysis']) {
                 hide,
                 () => 2048,
               )(controller.signal)
-            : new Function('bigNetFor', 'showModelProgress', 'hideModelProgress', 'ANALYSIS_BIG_NET_SESSION', `${analysis}\nreturn initBigNetsForRun;`)(
-                bigNetFor,
-                show,
-                hide,
-                { evalCacheEntries: 0 },
-              )(['t3'], () => controller.signal.aborted);
+            : testAnalysisEngines({
+                // The controller's port: its model progress item is the shared slot.
+                port: productionEnginePort({
+                  mountAbort: new AbortController(),
+                  showLoadingProgressItem: (id, item) => id === 'model' && show(item),
+                  hideLoadingProgressItem: (id) => id === 'model' && hide(),
+                  renderRecklessRuntimeInfo: () => {},
+                }),
+                bigNets: { acquire: async () => searcher, peek: () => searcher, release() {}, disposeNow() {} },
+              }).initBigNetsForRun(['t3'], controller, () => controller.signal.aborted);
         await new Promise(setImmediate);
         const init = commands.find((message) => message.type === 'init');
         assert.ok(init, 'the real pooled searcher is waiting for model initialization');

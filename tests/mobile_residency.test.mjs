@@ -7,6 +7,7 @@ import { deviceMemoryClass, shouldAutoAnalyzePosition } from '../src/lc0/deviceM
 import { awaitEngineRetirements, trackEngineRetirement } from '../src/lc0/engineRetirement.ts';
 import { untilAborted } from '../src/lc0/modelCache.ts';
 import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
+import { testAnalysisEngines } from './lib/analysis_engines.mjs';
 
 const source = (name) => readFileSync(new URL(`../src/lc0/${name}.ts`, import.meta.url), 'utf8');
 function extract(text, start, end) {
@@ -167,18 +168,12 @@ test('Analysis retires Small only after its last row is removed (eval bar is cac
       {
         events,
         trackEngineRetirement,
-        ANALYSIS_BIG_NET_KEYS: [],
-        disposeUnusedCentipawnEvaluators: () => {},
+        engines: testAnalysisEngines({ activeRows: () => active }),
+        engineRows: active,
         activeEngineRows: () => active,
-        isLc0BigNetVariant: (v) => ['bt4', 't3', 'lqo'].includes(v),
+        isLc0BigNetVariant: (v) => ['bt4', 't3'].includes(v),
         resetSearchWorker: () => events.push('worker'),
         reviewAbort: null,
-        disposeStockfish: () => {},
-        recklessEngines: { retain() {} },
-        viridithasEngines: { retain() {} },
-        berserkEngines: { retain() {} },
-        plentyChessEngines: { retain() {} },
-        stormphraxEngines: { retain() {} },
         renderRecklessRuntimeInfo: () => {},
       },
     );
@@ -242,7 +237,8 @@ test('Analysis unloading Maia clears the panel and awaits even an in-flight init
   assert.equal(elements.get('maia3Grid').hidden, true);
   const perform = extract(source('analysisBrowser'), 'async function performAnalysis(owner:', 'let analysisGameTree = tree;');
   assert.match(perform, /isMemoryConstrainedDevice\(\).*rows.some/s);
-  assert.ok(perform.indexOf('unloadMaia3Panel(') < perform.indexOf('initBigNetsForRun(uninitializedBigNets'));
+  const bigNetInit = perform.indexOf('engines.initBigNetsForRun(');
+  assert.ok(bigNetInit > 0 && perform.indexOf('unloadMaia3Panel(') < bigNetInit);
 });
 
 test('Analysis cancels a pending Maia panel load, awaits terminal cleanup, and re-enable reloads it', async () => {

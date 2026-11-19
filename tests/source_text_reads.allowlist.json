@@ -5,10 +5,6 @@
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/analysisBrowser.ts"]
     },
-    "tests/analysis_bignet_search_progress.test.mjs": {
-      "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
-      "reads": ["src/lc0/analysisBrowser.ts"]
-    },
     "tests/analysis_bignet_served_model.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/analysisBrowser.ts"]
@@ -16,6 +12,10 @@
     "tests/analysis_continuity.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/searchWorkerCore.ts"]
+    },
+    "tests/analysis_engines_host.test.mjs": {
+      "reason": "walks the Analysis engine host's import graph to keep it free of DOM, chessground and Svelte code",
+      "reads": ["src/lc0/analysis/analysisEngines.ts"]
     },
     "tests/analysis_hidden_status.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
@@ -27,7 +27,7 @@
     },
     "tests/analysis_progress.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
-      "reads": ["src/lc0/analysisBrowser.ts"]
+      "reads": ["src/lc0/analysis/analysisEngines.ts", "src/lc0/analysisBrowser.ts"]
     },
     "tests/analysis_pv.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
@@ -109,7 +109,7 @@
     },
     "tests/bignet_progress_ownership.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
-      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts"]
+      "reads": ["src/lc0/arenaBrowser.ts"]
     },
     "tests/browser_dom_contract.test.mjs": {
       "reason": "cross-checks literal el()/maybeEl() ids in each controller against the ids its route markup and generated HTML provide",
@@ -141,7 +141,13 @@
     },
     "tests/centipawn_search_history.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
-      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts", "src/lc0/centipawnEvaluatorCache.ts", "src/lc0/playBrowser.ts"]
+      "reads": [
+        "src/lc0/analysis/analysisEngines.ts",
+        "src/lc0/analysisBrowser.ts",
+        "src/lc0/arenaBrowser.ts",
+        "src/lc0/centipawnEvaluatorCache.ts",
+        "src/lc0/playBrowser.ts"
+      ]
     },
     "tests/csp_policy.test.mjs": {
       "reason": "src/app.html is a static HTML template; its inline-script order is the CSP contract under test",
@@ -385,6 +391,10 @@
     "tests/wake_lock.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/playBrowser.ts"]
+    },
+    "tests/lib/analysis_engines.mjs": {
+      "reason": "evaluates the controller's AnalysisEnginePort literal so host tests run through the production port wiring",
+      "reads": ["src/lc0/analysisBrowser.ts"]
     }
   }
 }

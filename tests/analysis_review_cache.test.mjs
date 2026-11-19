@@ -8,6 +8,7 @@ import { evalBarWhitePercent, stockfishAnalysisLines } from '../src/lc0/analysis
 import { analysisOperationId, initialAnalysisRunState, transitionAnalysis } from '../src/lc0/analysisRunState.ts';
 import { GameTree } from '../src/lc0/gameTree.ts';
 import { cancelHiddenTabWork, initialHiddenTabPause, transitionHiddenTab } from '../src/lc0/hiddenTabPause.ts';
+import { testAnalysisEngines } from './lib/analysis_engines.mjs';
 
 const row = { family: 'sf', variant: 'lite', strength: 12 };
 const settings = { multiPv: 1, runtime: '', cpu: 'balanced/2/sf-lite' };
@@ -113,10 +114,12 @@ function reviewHandoffPage() {
     const maia3PanelTask = { invalidate() {} };
     let maia3PanelTimer = null;
     const maia3PanelEvaluator = null, maia3PanelLoading = false, maia3PanelStatusText = '';
-    const retireAnalysisRunCentipawnKeys = () => {}, clearAnalysisSearchProgress = () => {};
+    const clearAnalysisSearchProgress = () => {};
     let failChoice = false, failSetup = false;
     const closePvPreview = () => {}, hidePromotionOverlay = () => {};
-    const syncBrokerParticipants = () => { if (failSetup) throw new Error('setup failed'); };
+    // The real engine host; only broker registration can be made to fail.
+    const host = helpers.testAnalysisEngines();
+    const engines = { ...host, syncBrokerParticipants: (rows) => { if (failSetup) throw new Error('setup failed'); host.syncBrokerParticipants(rows); } };
     const quarantineRetryPanels = () => () => {}, renderMistakeRetry = () => {};
     const renderAll = () => {}, renderAnalysisStatus = () => {}, scheduleMaia3Panel = () => {};
     const activeEngineRows = () => [], reviewer = { engine: {}, row: { family: 'sf', variant: 'lite', strength: 12 }, label: 'SF Lite', depth: 12 };
@@ -156,6 +159,7 @@ function reviewHandoffPage() {
     cancelHiddenTabWork,
     transitionHiddenTab,
     cachedReviewPosition,
+    testAnalysisEngines,
   });
 }
 

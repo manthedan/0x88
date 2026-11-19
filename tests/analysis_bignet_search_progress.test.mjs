@@ -1,24 +1,15 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { parseFen, START_FEN } from '../src/chess/board.ts';
 import { Bt4WorkerSearcher, T3_NET } from '../src/lc0/bt4Engine.ts';
+import { productionEnginePort, testAnalysisEngines } from './lib/analysis_engines.mjs';
 
 // Companion to bignet_progress_ownership.test.mjs, for the search step instead
 // of init: a cancelled Analysis big-net search settles after
 // cancelAnalysisOperation has released the shared model progress slot, so its
 // finally must not clear whatever the next run or mount has shown there.
-// Found by the round 4 model-hot-spot run (P6, F1).
-
-function extract(file, first, last) {
-  const source = readFileSync(new URL(file, import.meta.url), 'utf8');
-  const start = source.indexOf(first);
-  const end = source.indexOf(last, start);
-  assert.ok(start >= 0 && end > start, 'production function boundaries');
-  return stripTypeScriptTypes(source.slice(start, end));
-}
-const workerBigNetLinesSource = extract('../src/lc0/analysisBrowser.ts', 'async function workerBigNetLines(', '/**\n * A big net picks its served model');
+// Found by the round 4 model-hot-spot run (P6, F1). Runs the engine host's
+// bigNetLines through the controller's own port.
 
 const tick = () => new Promise(setImmediate);
 
@@ -53,21 +44,18 @@ for (const ending of ['live', 'stopped', 'unmounted']) {
 
     const effects = [];
     const mountAbort = new AbortController();
-    const workerBigNetLines = new Function(
-      'deps',
-      `const { bigNetFor, showModelProgress, hideModelProgress, ANALYSIS_BIG_NET_SESSION, lc0AnalysisLines, showAnalysisProgress, mountAbort } = deps;\n${workerBigNetLinesSource}\nreturn workerBigNetLines;`,
-    )({
-      bigNetFor: () => ({ config: T3_NET, searcher }),
-      showModelProgress: (...args) => effects.push(['show', ...args]),
-      hideModelProgress: () => effects.push(['hide']),
-      ANALYSIS_BIG_NET_SESSION: session,
-      lc0AnalysisLines: () => [],
-      showAnalysisProgress: () => {},
-      mountAbort,
+    const engines = testAnalysisEngines({
+      port: productionEnginePort({
+        mountAbort,
+        showLoadingProgressItem: (id, item) => effects.push(['show', id, item]),
+        hideLoadingProgressItem: (id) => effects.push(['hide', id]),
+        renderRecklessRuntimeInfo: () => {},
+      }),
+      bigNets: { acquire: async () => searcher, peek: () => searcher, release() {}, disposeNow() {} },
     });
 
     const controller = new AbortController();
-    const pending = workerBigNetLines(1, 't3', START_FEN, 8, [parseFen(START_FEN)], 1, searcher.servedModelUrl, controller.signal);
+    const pending = engines.bigNetLines('t3', START_FEN, 8, [parseFen(START_FEN)], 1, searcher.servedModelUrl, controller.signal, () => {});
     await tick();
     const search = workers[0].messages.find((message) => message.type === 'search');
     assert.ok(search, 'the real searcher posted the search');
@@ -75,12 +63,12 @@ for (const ending of ['live', 'stopped', 'unmounted']) {
     if (ending === 'stopped') controller.abort();
     if (ending === 'unmounted') mountAbort.abort();
     effects.length = 0; // From here the shared slot may belong to the next run or mount.
-    if (ending !== 'stopped') workers[0].reply({ id: search.id, type: 'searchResult', result: { visits: 8 } });
+    if (ending !== 'stopped') workers[0].reply({ id: search.id, type: 'searchResult', result: { visits: 8, pv: [] } });
     await pending;
 
     assert.deepEqual(
-      effects.map(([kind]) => kind),
-      ending === 'live' ? ['hide'] : [],
+      effects.map(([kind, id]) => `${kind}:${id}`),
+      ending === 'live' ? ['hide:model'] : [],
       'a cancelled search cleared the model progress slot it no longer owns',
     );
   });

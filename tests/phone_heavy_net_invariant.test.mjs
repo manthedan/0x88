@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
+import { ANALYSIS_BIG_NET_KEYS, ANALYSIS_BIG_NET_SESSION, createAnalysisEngines } from '../src/lc0/analysis/analysisEngines.ts';
 import * as pool from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
 import { createCriticalEngines } from '../src/lc0/criticalMomentsEngines.ts';
@@ -225,8 +226,23 @@ function playOwner(native) {
   };
 }
 
+// The production host on the shared pool; only Stockfish's worker is native.
+function analysisEngines(native) {
+  return createAnalysisEngines({
+    port: { live: () => true, loading: nop, runtimeInfoChanged: nop },
+    dial: 'balanced',
+    centipawn: { legacyOverride: false, modelUrl: '', metaUrl: '', legacyModelUrl: '', legacyMetaUrl: '', manifestUrl: '' },
+    loadCentipawn: () => assert.fail('unused'),
+    variants: {},
+    activeRows: () => [],
+    preload: async () => {},
+    createStockfish: (options, url) => new native.StockfishEngine(options, url),
+  });
+}
+
 function analysisOwner(native) {
   const message = {};
+  const engines = analysisEngines(native);
   return link(
     `
     const mountAbort=new AbortController();
@@ -234,24 +250,19 @@ function analysisOwner(native) {
     const analysisRunState={revision:0,execution:{tag:'idle'}},owner={},analysisOperations=new Map();
     const activeAnalysisRunId=1,hiddenTab={hidden:false};
     const automaticAnalysisAllowed=()=>true,analysisIntent=()=>({});
-    let analysisAbort=null, criticalDeferredMaia=false,stockfishLite=null,stockfishFull=null;
+    let analysisAbort=null, criticalDeferredMaia=false;
     ${slice(analysis, 'let analysisReclaimOwner:', 'function deferAnalysisSettingsRefresh(')}
     const analysisReloadAbort=null,activeWorkerSearchId=null,searchWorker=null;
     ${slice(analysis, 'function cancelAnalysisOperation(', 'function scheduleAnalyzeCurrent(')}
-    const tree={current:{fen:''}},preparedCpuEngineKeys=new Set(),cpu={disposeAll(){}};
-    const recklessEngines=cpu,viridithasEngines=cpu,berserkEngines=cpu,plentyChessEngines=cpu,stormphraxEngines=cpu;
-    ${slice(analysis, 'function threadedStockfishAvailable()', 'const ANALYSIS_CPU_ENGINE_OPTIONS')}
-    ${slice(analysis, 'function disposeAnalysisCpuEngines()', 'function disposeUnusedEngines()')}
+    const tree={current:{fen:''}};
     const criticalCallbacks={${slice(analysis, '    pauseAnalysis: (maiaOwner) => {', '    updateView: (moment, lines) => {')}};
-    ${slice(analysis, 'async function bigNetFor(', '\n}', analysis.indexOf('async function bigNetFor('))}}
-    ${slice(analysis, 'const ANALYSIS_BIG_NET_SESSION', '/** After initBigNetsForRun')}
     ${slice(analysis, 'const MAIA3_PANEL_RATINGS', 'function scheduleMaia3Panel()')}
     async function prepare(rows, controller = new AbortController()){
       analysisOperations.set(1,controller);
       analysisAbort=controller;
       try {
-        ${slice(analysis, '    const bigNetInitErrors =', '    snapshotBigNetServedModels(rows);')}
-        for (const row of rows) if (row.family === 'sf') getStockfish('lite').analyze(row.strength);
+        ${slice(analysis, '    const bigNetInitErrors =', '    engines.snapshotBigNetServedModels(rows);')}
+        for (const row of rows) if (row.family === 'sf') engines.getStockfish('lite').analyze(row.strength);
         return bigNetInitErrors;
       } finally {
         ${slice(analysis, '    if (maia3PanelBlockedByRun === controller)', '\n    }', analysis.indexOf('async function performAnalysis(owner:'))}
@@ -260,16 +271,16 @@ function analysisOwner(native) {
         analysisAbort=null;
       }
     }
-    return {prepare,cancel:()=>cancelAnalysisOperation(1),stop:()=>{stopAnalysisBigNetInit();cancelAnalysisOperation(1);},changeRows:()=>invalidateAnalysisSettings({disposeUnused:true},true),enableMaia3Panel,unloadMaia3Panel,...criticalCallbacks,getStockfish,message,disposeAnalysisCpuEngines};`,
+    // Stop's own big-net call, then the cancel it leads to.
+    const stop=()=>{${slice(analysis, 'if (engines.stopBigNetInit(', ';')};cancelAnalysisOperation(1);};
+    return {prepare,cancel:()=>cancelAnalysisOperation(1),stop,changeRows:()=>invalidateAnalysisSettings({disposeUnused:true},true),enableMaia3Panel,unloadMaia3Panel,...criticalCallbacks,getStockfish:engines.getStockfish,message,disposeAnalysisCpuEngines:engines.disposeAnalysisCpuEngines};`,
     {
-      ANALYSIS_BIG_NET_KEYS: keys,
+      engines,
+      ANALYSIS_BIG_NET_KEYS,
+      ANALYSIS_BIG_NET_SESSION,
       message,
       el: (id) => (id === 'message' ? message : node()),
       selectEl: node,
-      retireAnalysisRunCentipawnKeys: nop,
-      StockfishEngine: native.StockfishEngine,
-      stockfishFlavorUrl: (flavor) => flavor,
-      cpuEngineHashMbForSurface: () => 128,
       analysisCanPrepare: () => true,
       maybeEl: node,
       dispatchAnalysis: nop,
