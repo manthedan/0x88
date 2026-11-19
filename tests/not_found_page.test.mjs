@@ -57,10 +57,14 @@ test('the static adapter writes its fallback shell to 404.html with static not-f
   assert.ok(staticCopy.startsWith(`<main id="${STATIC_NOT_FOUND_ID}"`), html);
   assert.ok(staticCopy.includes('<h1>Page not found</h1>') && staticCopy.includes('href="/"'), staticCopy);
   // Kit 3 hydration awaits the root error node, so every page links it (and sw.js precaches it).
-  const errorNodeLinks =
-    '<link href="/_app/immutable/nodes/1.e.js" rel="modulepreload"><link href="/_app/immutable/chunks/err.js" rel="modulepreload"><link href="/_app/immutable/assets/1.e.css" rel="preload" as="style"></head>';
-  assert.ok(html.startsWith(`<head>${errorNodeLinks}`), html);
-  assert.equal(await readFile(join(out, 'app/play/index.html'), 'utf8'), `${playHead.replace('</head>', errorNodeLinks)}<body></body>`);
+  // Links a page already has are skipped: 404.html gets every chunk, the play page all but shared.js.
+  const link = (path) => `<link href="/_app/immutable/${path}" rel="modulepreload">`;
+  const css = '<link href="/_app/immutable/assets/1.e.css" rel="preload" as="style">';
+  assert.ok(html.startsWith(`<head>${link('nodes/1.e.js')}${link('chunks/shared.js')}${link('chunks/err.js')}${css}</head>`), html);
+  assert.equal(
+    await readFile(join(out, 'app/play/index.html'), 'utf8'),
+    `${playHead.replace('</head>', `${link('nodes/1.e.js')}${link('chunks/err.js')}${css}</head>`)}<body></body>`,
+  );
   assert.equal(config.paths.relative, false, 'cached pages served at other depths need root-absolute build URLs');
   const errorPage = await readFile(join(repoRoot, 'src/routes/+error.svelte'), 'utf8');
   assert.ok(errorPage.includes(`getElementById('${STATIC_NOT_FOUND_ID}')?.remove()`), 'the mounted error page replaces the static copy');
