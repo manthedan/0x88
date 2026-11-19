@@ -355,9 +355,6 @@ export class BrokeredEvaluator implements Evaluator {
       n += next.boards.length;
       if (n >= this.maxBatchSize) break;
     }
-    // If a single logical request is larger than maxBatchSize, allow it through;
-    // inner evaluators already support their own fixed/static batching fallbacks.
-    if (!batch.length && this.pending.length) batch.push(this.pending.shift() as BrokerPending);
     return batch;
   }
 

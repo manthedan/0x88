@@ -47,3 +47,28 @@ test('broker bounds queue timing even when every evaluation fails', async () => 
   assert.equal(broker.metrics().runMs.length, 0);
   assert.equal(broker.metrics().flushes, 0);
 });
+
+test('a request larger than maxBatchSize is flushed alone, whole', async () => {
+  const batches = [];
+  const broker = new BrokeredEvaluator(
+    {
+      evaluate() {},
+      async evaluateBatch(boards) {
+        batches.push(boards.map((board) => board.id));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return boards.map((board) => ({ policy: new Map(), wdl: [board.id, 0, 0] }));
+      },
+    },
+    { maxBatchSize: 4, maxWaitMs: 0 },
+  );
+  const boards = (ids) => ids.map((id) => ({ id }));
+  const small = broker.evaluateBatch(boards([1, 2]));
+  const oversized = broker.evaluateBatch(boards([3, 4, 5, 6, 7, 8]));
+  const tail = broker.evaluateBatch(boards([9]));
+  const results = await Promise.all([small, oversized, tail]);
+  assert.deepEqual(batches, [[1, 2], [3, 4, 5, 6, 7, 8], [9]]);
+  assert.deepEqual(
+    results.map((evals) => evals.map((e) => e.wdl[0])),
+    [[1, 2], [3, 4, 5, 6, 7, 8], [9]],
+  );
+});

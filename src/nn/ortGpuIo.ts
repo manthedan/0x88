@@ -22,6 +22,7 @@
 // first one's readback.
 import type * as ort from 'onnxruntime-web/webgpu';
 import { ExclusiveQueue } from '../lc0/exclusiveQueue.ts';
+import { GPU_BUFFER_USAGE, GPU_MAP_MODE_READ } from './webgpuFlags.ts';
 
 export type OrtGpuIoTensorType = 'float16' | 'float32';
 
@@ -68,14 +69,6 @@ const BYTES_PER_ELEMENT: Record<OrtGpuIoTensorType, number> = { float16: 2, floa
 // ORT's own gpu-buffer downloader rounds sizes up to 16 bytes; copyBufferToBuffer
 // needs multiples of 4. Every buffer and staging slot uses 16.
 const ALIGN = 16;
-
-// WebGPU usage/map flags (spec constants), so this module imports cleanly where
-// GPUBufferUsage is not a global (Node tests).
-const USAGE_MAP_READ = 0x1;
-const USAGE_COPY_SRC = 0x4;
-const USAGE_COPY_DST = 0x8;
-const USAGE_STORAGE = 0x80;
-const MAP_MODE_READ = 0x1;
 
 function elementCount(dims: readonly number[]): number {
   return dims.reduce((a, b) => a * b, 1);
@@ -200,14 +193,17 @@ export class OrtGpuIoBinding {
       return tensor;
     };
     try {
-      this.inputBuffer = device.createBuffer({ size: alignUp(this.inputBytes), usage: USAGE_STORAGE | USAGE_COPY_DST | USAGE_COPY_SRC });
+      this.inputBuffer = device.createBuffer({
+        size: alignUp(this.inputBytes),
+        usage: GPU_BUFFER_USAGE.STORAGE | GPU_BUFFER_USAGE.COPY_DST | GPU_BUFFER_USAGE.COPY_SRC,
+      });
       created.push(this.inputBuffer);
       this.outputBuffers = (outputMode === 'session' ? [] : this.layout.slots).map((slot) => {
-        const buffer = device.createBuffer({ size: slot.paddedBytes, usage: USAGE_STORAGE | USAGE_COPY_SRC | USAGE_COPY_DST });
+        const buffer = device.createBuffer({ size: slot.paddedBytes, usage: GPU_BUFFER_USAGE.STORAGE | GPU_BUFFER_USAGE.COPY_SRC | GPU_BUFFER_USAGE.COPY_DST });
         created.push(buffer);
         return buffer;
       });
-      this.staging = device.createBuffer({ size: this.layout.stagingBytes, usage: USAGE_MAP_READ | USAGE_COPY_DST });
+      this.staging = device.createBuffer({ size: this.layout.stagingBytes, usage: GPU_BUFFER_USAGE.MAP_READ | GPU_BUFFER_USAGE.COPY_DST });
       created.push(this.staging);
       this.pins = pin ? [this.inputBuffer, ...this.outputBuffers].map((buffer) => pinOrtGpuBufferImport(buffer)) : [];
       if (!pin) this.pinsChecked = true;
@@ -280,7 +276,7 @@ export class OrtGpuIoBinding {
       // session, and the copy above is already queued.
       if (!this.fetches) for (const tensor of Object.values(results)) tensor.dispose();
     }
-    await this.staging.mapAsync(MAP_MODE_READ);
+    await this.staging.mapAsync(GPU_MAP_MODE_READ);
     let bytes: ArrayBuffer;
     try {
       bytes = this.staging.getMappedRange().slice(0);

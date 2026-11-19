@@ -15,6 +15,7 @@ import {
   requestedOrtRuntimeDiagnosticOptions,
 } from '../nn/ortRuntime.ts';
 import { publishBrowserRuntimeAudit } from '../nn/runtimeAudit.ts';
+import { GPU_BUFFER_USAGE, GPU_MAP_MODE_READ } from '../nn/webgpuFlags.ts';
 import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { bestMoveShapes, searchShapes } from './boardArrows.ts';
@@ -1803,49 +1804,11 @@ function renderBenchmarkResult(result: EvalBenchResult) {
     `BENCH_DONE ${rounded.iterations} evals · avg ${rounded.avgMs.toFixed(1)} ms · ${rounded.evalsPerSecond.toFixed(2)} eval/s · ${rounded.backend}`;
 }
 
-// Minimal structural WebGPU surface used by the shader-f16 probe (TypeScript's
-// DOM lib does not declare WebGPU and the project has no @webgpu/types).
-type ShaderF16ProbeBuffer = {
-  mapAsync: (mode: number) => Promise<void>;
-  getMappedRange: () => ArrayBuffer;
-  unmap: () => void;
-  destroy: () => void;
-};
-type ShaderF16ProbeComputePass = {
-  setPipeline: (pipeline: unknown) => void;
-  setBindGroup: (index: number, bindGroup: unknown) => void;
-  dispatchWorkgroups: (x: number) => void;
-  end: () => void;
-};
-type ShaderF16ProbeDevice = {
-  queue: { submit: (commandBuffers: unknown[]) => void };
-  createBuffer: (descriptor: { size: number; usage: number }) => ShaderF16ProbeBuffer;
-  createShaderModule: (descriptor: { label: string; code: string }) => unknown;
-  createComputePipeline: (descriptor: Record<string, unknown>) => { getBindGroupLayout: (index: number) => unknown };
-  createBindGroup: (descriptor: Record<string, unknown>) => unknown;
-  createCommandEncoder: () => {
-    beginComputePass: () => ShaderF16ProbeComputePass;
-    copyBufferToBuffer: (
-      source: ShaderF16ProbeBuffer,
-      sourceOffset: number,
-      destination: ShaderF16ProbeBuffer,
-      destinationOffset: number,
-      size: number,
-    ) => void;
-    finish: () => unknown;
-  };
-  destroy?: () => void;
-};
-type ShaderF16ProbeGlobals = typeof globalThis & {
-  GPUBufferUsage: Record<'STORAGE' | 'COPY_SRC' | 'COPY_DST' | 'MAP_READ', number>;
-  GPUMapMode: Record<'READ', number>;
-};
-
 async function runShaderF16Probe(): Promise<void> {
   el('benchResult').textContent = 'SHADER_F16_PROBE_RUNNING';
   setBusy(true, 'Probing WebGPU shader-f16 feature support…');
   const started = performance.now();
-  const gpu = (navigator as Navigator & { gpu?: { requestAdapter: () => Promise<unknown> } }).gpu;
+  const gpu = navigator.gpu;
   const maxAbsError = (actual: Float32Array, expected: number[]) => Math.max(0, ...expected.map((value, index) => Math.abs((actual[index] ?? NaN) - value)));
   try {
     if (!gpu) {
@@ -1860,11 +1823,7 @@ async function runShaderF16Probe(): Promise<void> {
       el('message').textContent = 'SHADER_F16_PROBE_DONE unavailable: no navigator.gpu';
       return;
     }
-    const adapter = (await gpu.requestAdapter()) as {
-      features?: Iterable<string> & { has?: (feature: string) => boolean };
-      requestDevice: (descriptor?: Record<string, unknown>) => Promise<unknown>;
-      info?: Record<string, unknown>;
-    } | null;
+    const adapter = await gpu.requestAdapter();
     if (!adapter) {
       const result = {
         status: 'SHADER_F16_PROBE_DONE',
@@ -1877,8 +1836,8 @@ async function runShaderF16Probe(): Promise<void> {
       el('message').textContent = 'SHADER_F16_PROBE_DONE unavailable: no WebGPU adapter';
       return;
     }
-    const adapterFeatures = adapter.features ? Array.from(adapter.features).map(String).sort() : [];
-    const shaderF16Supported = adapter.features?.has?.('shader-f16') ?? adapterFeatures.includes('shader-f16');
+    const adapterFeatures = Array.from(adapter.features).sort();
+    const shaderF16Supported = adapter.features.has('shader-f16');
     if (!shaderF16Supported) {
       const result = {
         status: 'SHADER_F16_PROBE_DONE',
@@ -1893,11 +1852,9 @@ async function runShaderF16Probe(): Promise<void> {
       el('message').textContent = 'SHADER_F16_PROBE_DONE unsupported on this adapter';
       return;
     }
-    const device = (await adapter.requestDevice({ requiredFeatures: ['shader-f16'] })) as ShaderF16ProbeDevice;
-    const bufferUsage = (globalThis as ShaderF16ProbeGlobals).GPUBufferUsage;
-    const mapMode = (globalThis as ShaderF16ProbeGlobals).GPUMapMode;
-    const outputBuffer = device.createBuffer({ size: 16, usage: bufferUsage.STORAGE | bufferUsage.COPY_SRC });
-    const readbackBuffer = device.createBuffer({ size: 16, usage: bufferUsage.MAP_READ | bufferUsage.COPY_DST });
+    const device = await adapter.requestDevice({ requiredFeatures: ['shader-f16'] });
+    const outputBuffer = device.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE.STORAGE | GPU_BUFFER_USAGE.COPY_SRC });
+    const readbackBuffer = device.createBuffer({ size: 16, usage: GPU_BUFFER_USAGE.MAP_READ | GPU_BUFFER_USAGE.COPY_DST });
     try {
       const shader = `enable f16;
 @group(0) @binding(0) var<storage, read_write> output: array<f32>;
@@ -1924,7 +1881,7 @@ fn main() {
       pass.end();
       encoder.copyBufferToBuffer(outputBuffer, 0, readbackBuffer, 0, 16);
       device.queue.submit([encoder.finish()]);
-      await readbackBuffer.mapAsync(mapMode.READ);
+      await readbackBuffer.mapAsync(GPU_MAP_MODE_READ);
       const actual = new Float32Array(readbackBuffer.getMappedRange().slice(0));
       readbackBuffer.unmap();
       const expected = [3.5, 0, 2.25, 1.5];
@@ -1943,7 +1900,7 @@ fn main() {
     } finally {
       outputBuffer.destroy();
       readbackBuffer.destroy();
-      device.destroy?.();
+      device.destroy();
     }
   } catch (error) {
     el('benchResult').textContent = `SHADER_F16_PROBE_FAILED ${(error as Error).message}`;
