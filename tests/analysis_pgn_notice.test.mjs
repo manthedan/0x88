@@ -35,7 +35,8 @@ function controller() {
   const document = { getElementById: (id) => elements.get(id) ?? null, createElement: element };
   const code = ts.transpile(
     `
-    let tree = new GameTree(), workspaceHeaders = {}, workspaceResult = '*';
+    // TS 6 emits strict code, so every free variable the sliced functions assign must be declared here.
+    let tree = new GameTree(), workspaceHeaders = {}, workspaceResult = '*', analysisHasExplicitInput = false;
     const el = id => document.getElementById(id), inputEl = el, maybeEl = el;
     const reviewMetadata = new Map(), lineCache = new Map(), completeAnalysisKeys = new Set();
     const retry = false, reviewSignature = () => '', clearAnalysisWorkspace = () => {};

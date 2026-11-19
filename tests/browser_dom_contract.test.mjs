@@ -48,7 +48,7 @@ function routeIds(file, props = {}, seen = new Set()) {
     ids = markupIds(source, props);
   for (const imported of source.matchAll(/import\s+(\w+)\s+from\s+['"]([^'"]+\.svelte)['"]/g)) {
     const [, name, path] = imported;
-    const child = path.startsWith('$lib/') ? resolve('src/lib', path.slice(5)) : resolve(dirname(file), path);
+    const child = /^[$#]lib\//.test(path) ? resolve('src/lib', path.slice(5)) : resolve(dirname(file), path);
     for (const use of source.matchAll(new RegExp(`<${name}\\b([^>]*?)/?>`, 'g'))) {
       const attributes = Object.fromEntries([...use[1].matchAll(/(\w+)=["']([^"']*)["']/g)].map((match) => [match[1], match[2]]));
       for (const id of routeIds(child, attributes, seen)) ids.add(id);

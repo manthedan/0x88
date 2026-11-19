@@ -61,11 +61,11 @@ function conditionalIds(source) {
   return new Set([...occurrences].filter(([, list]) => !always(list)).map(([id]) => id));
 }
 
-/** Page ids plus ids of every $lib component the page renders, with that usage's string props. */
+/** Page ids plus ids of every #lib ($lib before Kit 3) component the page renders, with that usage's string props. */
 function routeMarkupIds(pagePath) {
   const page = read(pagePath);
   const ids = markupIds(page);
-  for (const [, name, file] of page.matchAll(/import (\w+) from '\$lib\/components\/(\w+\.svelte)'/g)) {
+  for (const [, name, file] of page.matchAll(/import (\w+) from '[$#]lib\/components\/(\w+\.svelte)'/g)) {
     const component = read(`src/lib/components/${file}`);
     for (const usage of page.matchAll(new RegExp(`<${name}\\b([^>]*)>`, 'g'))) {
       const props = Object.fromEntries([...usage[1].matchAll(/(\w+)="([^"]*)"/g)].map((match) => [match[1], match[2]]));

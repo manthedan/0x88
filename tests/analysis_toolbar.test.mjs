@@ -24,3 +24,15 @@ test('the desktop toolbar wraps based on the untruncated status and action width
   assert.match(template, /\.analysis-overview\{display:flex; flex-wrap:wrap;/);
   assert.match(template, /\.position-status\{[^}]*flex:1 0 max-content;[^}]*max-inline-size:100%/);
 });
+
+test('the Stop progress slot reserves no width while empty and never clips the button', () => {
+  // A fixed flex-basis on the empty label overflowed Stop on iPhone (content 132px in a 74px button).
+  // Hidden only in the phone layout; desktop keeps the slot so the first progress update can't wrap the controls.
+  const phone = template.slice(template.indexOf('@media (max-width:767px){'));
+  assert.match(phone, /\.stop-progress:empty\{display:none\}/);
+  assert.doesNotMatch(template.slice(0, template.indexOf('@media (max-width:767px){')), /\.stop-progress:empty/);
+  assert.doesNotMatch(template, /\.stop-progress\{[^}]*flex:0 0 \d/);
+  assert.match(template, /\.stop-action\{[^}]*min-width:max-content/);
+  // "searching" is ~58px at 12px; percentages are narrower. One floor keeps Stop's width fixed during a run.
+  assert.match(template, /\.stop-progress\{[^}]*min-width:5em/);
+});
