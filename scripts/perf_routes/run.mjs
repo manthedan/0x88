@@ -106,8 +106,6 @@ function build(source, out, arm) {
   const sameLock = readFileSync(join(stage, 'package-lock.json')).equals(readFileSync(join(root, 'package-lock.json')));
   if (sameLock) linkNodeModules(join(root, 'node_modules'), join(stage, 'node_modules'));
   else command('npm', ['ci', '--ignore-scripts'], stage);
-  // Both installs skip `svelte-kit sync`, which writes the arm's own node_modules/$app (tsconfig extends it).
-  command('npx', ['--no-install', 'svelte-kit', 'sync'], stage);
   const links = localAssets(root, stage);
   command('env', ['BUILD_SCOPE=product', 'npm', 'run', 'build:client'], stage);
   linkAssets(links, join(stage, 'dist-client'));

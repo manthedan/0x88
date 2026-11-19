@@ -988,6 +988,7 @@ test('resume checks the browser identity of later saved sessions before replacin
     'perf_routes/resume.mjs',
     'perf_matrix/proxy.mjs',
     'lib/perf_canary_stats.mjs',
+    'lib/link_node_modules.mjs',
   ]) {
     const dst = join(root, 'scripts', file);
     mkdirSync(dirname(dst), { recursive: true });
