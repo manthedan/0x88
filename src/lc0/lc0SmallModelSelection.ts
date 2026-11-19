@@ -166,8 +166,8 @@ export async function createLc0OnnxEvaluatorFromUrl(
   loadOptions.signal?.throwIfAborted();
   let selectedUrl = options.selectedModelUrl ?? requestedUrl;
   if (selectedUrl !== requestedUrl) {
-    const { providers } = await untilAborted(deps.placement(), loadOptions.signal);
-    if (providers[0] !== 'webgpu') selectedUrl = requestedUrl;
+    const { providers, adapterVendor } = await untilAborted(deps.placement(), loadOptions.signal);
+    if (providers[0] !== 'webgpu' || (adapterVendor !== undefined && !lc0SplitKAdapterEligible(adapterVendor))) selectedUrl = requestedUrl;
   } else if (options.selectedModelUrl === undefined && options.deviceSelection) {
     selectedUrl = selectLc0OrtModelUrl(requestedUrl, await untilAborted(deps.placement(), loadOptions.signal));
   }

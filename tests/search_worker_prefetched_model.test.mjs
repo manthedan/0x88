@@ -8,7 +8,7 @@ import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { startSearchWorker } from '../src/lc0/searchWorkerCore.ts';
 import { resetWebGpuAdapterProbeForTests, resolveOrtSessionPlacement } from '../src/nn/ortRuntime.ts';
 
-test('search worker uses transferred split-K bytes even when its probe would select the original', async (t) => {
+test('a WebGPU worker with an unknown vendor uses transferred split-K bytes', async (t) => {
   const descriptors = new Map(['self', 'navigator', 'fetch', 'caches'].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   t.after(() => {
     for (const [key, descriptor] of descriptors) {
@@ -27,7 +27,7 @@ test('search worker uses transferred split-K bytes even when its probe would sel
       replies.get(message.id)?.(message);
     },
   });
-  define('navigator', { gpu: { requestAdapter: async () => ({ features: new Set(['shader-f16']), info: { vendor: 'nvidia' } }) } });
+  define('navigator', { gpu: { requestAdapter: async () => ({ features: new Set(['shader-f16']), info: { vendor: '' } }) } });
   resetWebGpuAdapterProbeForTests();
   t.after(resetWebGpuAdapterProbeForTests);
   define('caches', undefined);
@@ -65,14 +65,20 @@ test('search worker uses transferred split-K bytes even when its probe would sel
   assert.match(reply.error, /stop after session input/);
 });
 
-test('a WASM-only worker releases transferred split-K bytes before loading the original', () => {
-  const source = `
+for (const { worker, vendor, providers } of [
+  { worker: 'WASM-only', providers: ['wasm'] },
+  { worker: 'non-Apple WebGPU', vendor: 'nvidia', providers: ['webgpu', 'wasm'] },
+]) {
+  test(`a ${worker} worker releases transferred split-K bytes before loading the original`, () => {
+    const source = `
 import assert from 'node:assert/strict';
 import { DEFAULT_LC0_ORT_EVALUATOR_DEPS, lc0SplitKUrl } from ${JSON.stringify(new URL('../src/lc0/lc0SmallModelSelection.ts', import.meta.url).href)};
 import { startSearchWorker } from ${JSON.stringify(new URL('../src/lc0/searchWorkerCore.ts', import.meta.url).href)};
 import { InferenceSession } from ${JSON.stringify(new URL('../src/nn/ortRuntime.ts', import.meta.url).href)};
 
-Object.defineProperty(globalThis, 'navigator', { value: { gpu: { requestAdapter: async () => null } } });
+const vendor = ${JSON.stringify(vendor)};
+const adapter = vendor ? { features: new Set(['shader-f16']), info: { vendor } } : null;
+Object.defineProperty(globalThis, 'navigator', { value: { gpu: { requestAdapter: async () => adapter } } });
 const reply = Promise.withResolvers();
 let handle;
 globalThis.self = { addEventListener: (_type, listener) => { handle = listener; }, postMessage: reply.resolve };
@@ -99,20 +105,22 @@ DEFAULT_LC0_ORT_EVALUATOR_DEPS.load = async (url) => {
   assert.equal(transferred.deref(), undefined, 'split-K buffer is still pinned when loading the original');
   return loadResult(url, 'original');
 };
+const sessions = [];
 InferenceSession.create = async (model, options) => {
-  assert.deepEqual(options.executionProviders, ['wasm']);
-  assert.equal(new TextDecoder().decode(model), 'original', 'WASM must use the original bytes');
+  sessions.push({ input: new TextDecoder().decode(model), providers: options.executionProviders });
   return { async release() {} };
 };
 startSearchWorker();
 handOffSplitK();
 const message = await reply.promise;
 assert.equal(message.type, 'ready', message.error);
+assert.deepEqual(sessions, [{ input: 'original', providers: ${JSON.stringify(providers)} }]);
 assert.equal(message.servedModelUrl, originalUrl);
 `;
-  const child = spawnSync(process.execPath, ['--expose-gc', '--input-type=module', '-e', source], { encoding: 'utf8', timeout: 15000 });
-  assert.equal(child.status, 0, `${child.error ?? ''}\n${child.stdout}\n${child.stderr}`);
-});
+    const child = spawnSync(process.execPath, ['--expose-gc', '--input-type=module', '-e', source], { encoding: 'utf8', timeout: 15000 });
+    assert.equal(child.status, 0, `${child.error ?? ''}\n${child.stdout}\n${child.stderr}`);
+  });
+}
 
 // Arena's cache-hit consent: the worker's loader must refuse network bytes, not download them.
 test('search worker init with noModelDownload refuses to download an uncached model', async (t) => {
