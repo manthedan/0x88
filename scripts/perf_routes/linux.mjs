@@ -171,13 +171,11 @@ export async function warmWebGpu(browser, isRendererGone, { signal, timeoutMs = 
   return { ...adapter, attempts: tries - 1, ms: Date.now() - started };
 }
 
-/**
- * The warm-up only proves an f16 adapter exists: every ORT session requests its own and silently falls
- * back to WASM, which would report CPU numbers as the WebGPU datapoint. Workers report their backend on
- * ready (`workerReady`, e.g. `auto->webgpu`); Arena runs Lc0 on the main thread, whose ORT logs
- * "session ready with WebGPU|WASM provider" (`ortSessions`). CPU engines report no backend.
- */
-export function webgpuBackendProblem(journey, workerReady, ortSessions) {
+// ORT 1.27 can remove WebGPU during backend initialization without rejecting session creation.
+// The app's worker and console ready messages still describe the requested providers in that case.
+export function webgpuBackendProblem(journey, workerReady, ortSessions, consoleWarnings = []) {
+  const removedWebGpu = consoleWarnings.find((text) => text.startsWith('removing requested execution provider "webgpu" from session options '));
+  if (removedWebGpu) return `ORT removed WebGPU: ${removedWebGpu}`;
   const backends = [...(workerReady ?? []).map((w) => w?.backend).filter((b) => typeof b === 'string'), ...ortSessions];
   const cpu = backends.filter((b) => !/webgpu/i.test(b));
   if (cpu.length) return `ORT ran on WASM, not WebGPU (${cpu.join(', ')})`;

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer, get } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -20,6 +20,7 @@ import {
   parseArgs,
   peakFootprint,
   plan,
+  platformProblem,
   previewEnvironment,
   requestFailures,
   safariWebContentPid,
@@ -944,6 +945,88 @@ test('resume reuses every recorded outcome and reruns only missing or operator-s
   assert.throws(() => selectSessions(cells, (id) => (id === ids[0] ? { result: result(1) } : { result: null })), /different arm/);
   // An orphaned wrapper from a SIGKILLed coordinator may still start this cell's browser.
   assert.throws(() => selectSessions(cells, (id) => (id === ids[6] ? { result: null, owner: 4242 } : { result: null })), /006.*live process 4242/);
+});
+
+test('resume checks the browser identity of later saved sessions before replacing a truncated first result', {
+  skip: !!platformProblem({ browser: 'chrome' }),
+}, (t) => {
+  const root = scratch(t);
+  for (const file of [
+    'perf_routes/run.mjs',
+    'perf_routes/assets.mjs',
+    'perf_routes/gate.mjs',
+    'perf_routes/lifecycle.mjs',
+    'perf_routes/resume.mjs',
+    'perf_matrix/proxy.mjs',
+    'lib/perf_canary_stats.mjs',
+  ]) {
+    const dst = join(root, 'scripts', file);
+    mkdirSync(dirname(dst), { recursive: true });
+    copyFileSync(new URL(`../scripts/${file}`, import.meta.url), dst);
+  }
+  writeFileSync(
+    join(root, 'scripts/perf_routes/session.mjs'),
+    `
+    import { readFileSync, writeFileSync } from 'node:fs';
+    const [spec, out] = process.argv.slice(2);
+    const row = JSON.parse(readFileSync(spec, 'utf8'));
+    const version = process.env.TEST_BROWSER_VERSION;
+    Object.assign(row, row.expectedBrowser && row.expectedBrowser !== version
+      ? { status: 'invalid', browserMismatch: version }
+      : { status: 'ok', browserVersion: version, metrics: {} });
+    writeFileSync(out, JSON.stringify(row));
+  `,
+  );
+  const argv = [
+    '--baseline',
+    'a',
+    '--candidate',
+    'a',
+    '--baseline-url',
+    'http://127.0.0.1:1',
+    '--candidate-url',
+    'http://127.0.0.1:1',
+    '--browser',
+    'chrome',
+    '--repeats',
+    '1',
+    '--journey',
+    'navigation',
+    '--journey',
+    'play-maia3',
+    '--out',
+    'out',
+    '--lock-dir',
+    'mutex',
+  ];
+  const invoke = (version, flag) =>
+    spawnSync(process.execPath, ['scripts/perf_routes/run.mjs', ...argv, flag], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 10000,
+      env: { ...process.env, TEST_BROWSER_VERSION: version },
+    });
+  const prepare = invoke('149.0', '--build-only');
+  assert.equal(prepare.status, 0, prepare.stderr);
+  const cells = plan(parseArgs(argv));
+  const path = (i, ext = 'json') => join(root, 'out/sessions', `${sessionId(cells[i], i)}.${ext}`);
+  const save = (i, version) => writeJsonAtomic(path(i), { ...cells[i], status: 'ok', browserVersion: version, metrics: {} });
+  writeFileSync(path(0), '{"truncated":');
+  for (const i of [1, 2, 3]) save(i, '149.0');
+
+  const updated = invoke('150.0', '--resume');
+  assert.match(updated.stderr, /browser build changed mid-cohort \(150\.0\); restore 149\.0/);
+  assert.equal(readJson(path(0)).browserMismatch, '150.0');
+  assert.equal(existsSync(join(root, 'out/runs.jsonl')), false);
+  const restored = invoke('149.0', '--resume');
+  assert.equal(restored.status, 2, restored.stderr); // One repeat cannot pass the gate.
+  assert.equal(readJson(path(0)).browserVersion, '149.0');
+
+  rmSync(path(0));
+  rmSync(path(0, 'spec.json'));
+  save(3, '150.0');
+  assert.match(invoke('149.0', '--resume').stderr, /different browser builds: 149\.0; 150\.0/);
+  assert.equal(existsSync(path(0, 'spec.json')), false, 'a mixed saved cohort fails before creating a replacement session');
 });
 
 test('arm builds link ignored local assets instead of copying them, never replacing tracked bytes', () => {

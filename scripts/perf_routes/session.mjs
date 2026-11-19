@@ -50,6 +50,7 @@ const guarded =
     return value;
   };
 let proxy, browser, sid, cdp, page, evaluate, navigate, close, sampling, safariPid;
+const consoleWarnings = [];
 const routeMarks = [{ route: routeFor(spec.journey), at: Date.now() }];
 result.routeMarks = routeMarks;
 const mark = (value) => {
@@ -199,8 +200,10 @@ try {
     // Main-thread ORT sessions (Arena's Lc0) post no worker ready message; their console line names the provider.
     result.ortSessions = [];
     page.on('console', (message) => {
-      const ready = /^Centipawn ORT: session ready with (WebGPU|WASM) provider/.exec(message.text());
+      const text = message.text();
+      const ready = /^Centipawn ORT: session ready with (WebGPU|WASM) provider/.exec(text);
       if (ready) result.ortSessions.push(ready[1].toLowerCase());
+      if (linux && message.type() === 'warning') consoleWarnings.push(text);
     });
     page.setDefaultTimeout(120000);
     evaluate = guarded((expression) => bounded(page.evaluate(expression), 'Chrome page evaluation'));
@@ -265,7 +268,7 @@ try {
   result.probe = await evaluate(`JSON.parse(JSON.stringify(window.__routePerf))`);
   result.workerReady = await evaluate(`window.__perfWorkerReady`);
   if (linux) {
-    const problem = webgpuBackendProblem(spec.journey, result.workerReady, result.ortSessions);
+    const problem = webgpuBackendProblem(spec.journey, result.workerReady, result.ortSessions, consoleWarnings);
     if (problem) throw Error(`${problem}: CPU numbers would stand in for the Linux WebGPU datapoint`);
   }
   result.transitions = await evaluate(`window.__analysisTransitionLog?.() ?? []`);

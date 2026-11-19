@@ -7,7 +7,7 @@ import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { linkAssets, localAssets } from './assets.mjs';
-import { browserIdentity, compareRuns, HELP, parseArgs, plan, platformProblem, previewEnvironment } from './gate.mjs';
+import { browserIdentity, cohortBrowserIdentities, compareRuns, HELP, parseArgs, plan, platformProblem, previewEnvironment } from './gate.mjs';
 import {
   acquireLock,
   cancellationMarker,
@@ -209,7 +209,9 @@ async function measure(signal, out, sources, resuming) {
     const file = join(out, 'sessions', `${id}.json`);
     return { result: readJson(file), cleanupPending: existsSync(cleanupMarker(file)), owner: liveOwner(file) };
   });
-  if (resuming) console.log(`resume ${out}: reusing ${cells.filter((c) => c.reuse).length}/${cells.length} sessions`);
+  const reused = cells.flatMap(({ reuse }) => (reuse ? [reuse] : []));
+  const cohortBrowser = cohortBrowserIdentities(reused);
+  if (resuming) console.log(`resume ${out}: reusing ${reused.length}/${cells.length} sessions`);
   const servers = [];
   try {
     const builds = {};
@@ -229,13 +231,9 @@ async function measure(signal, out, sources, resuming) {
     if (args['build-only']) return;
     // runs.jsonl is rebuilt in plan order from the session files; keep the old index for audit.
     if (existsSync(join(out, 'runs.jsonl'))) renameSync(join(out, 'runs.jsonl'), join(out, `runs.${Date.now()}.prev.jsonl`));
-    // Each session refuses, before measuring, a browser build other than the one already in the cohort.
-    const cohortBrowser = {};
-    const claim = (row) => (cohortBrowser[row.browser] ??= browserIdentity(row));
     for (const [i, { cell, id, reuse }] of cells.entries()) {
       signal.throwIfAborted();
       if (reuse) {
-        claim(reuse);
         appendFileSync(join(out, 'runs.jsonl'), `${JSON.stringify(reuse)}\n`);
         continue;
       }
@@ -292,7 +290,7 @@ async function measure(signal, out, sources, resuming) {
       // Not an outcome (resume re-runs it), and never appended: the cohort stays combinable.
       if (row.browserMismatch && cleanupConfirmed)
         throw Error(`${id}: browser build changed mid-cohort (${row.browserMismatch}); restore ${row.expectedBrowser} and --resume, or start a new cohort`);
-      claim(row);
+      cohortBrowser[row.browser] ??= browserIdentity(row);
       appendFileSync(join(out, 'runs.jsonl'), `${JSON.stringify(row)}\n`);
       signal.throwIfAborted();
       if (!cleanupConfirmed) {

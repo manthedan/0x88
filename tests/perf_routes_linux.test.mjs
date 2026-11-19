@@ -306,10 +306,17 @@ test('Linux sessions refuse journeys whose ORT sessions ran on WASM or reported 
   assert.match(webgpuBackendProblem('arena-lc0', [cpuEngine], []), /No ORT backend observed for arena-lc0/);
   const source = readFileSync(new URL('../scripts/perf_routes/session.mjs', import.meta.url), 'utf8');
   const ready = source.indexOf('result.workerReady = await evaluate(');
-  const check = source.indexOf('webgpuBackendProblem(spec.journey, result.workerReady, result.ortSessions)');
+  const check = source.indexOf('webgpuBackendProblem(spec.journey, result.workerReady, result.ortSessions, consoleWarnings)');
   assert.ok(check > ready && check < source.indexOf("result.status = 'ok'"), 'checked once workers have reported, before the session counts');
   assert.ok(source.indexOf("page.on('console'") < source.indexOf('await navigate(entryUrl())'), 'listening before the app loads');
   assert.match(source, /warmWebGpu\(browser, [^\n]*\{ signal \}\)/, 'warm-up observes the session shutdown signal');
+});
+
+test('Linux rejects ORT dropping WebGPU even when Maia3 and the ready log still claim it', () => {
+  const ready = [{ backend: 'auto->webgpu,wasm' }];
+  const warning = 'removing requested execution provider "webgpu" from session options because it is not available: Error: Failed to get GPU adapter.';
+  assert.match(webgpuBackendProblem('play-maia3', ready, ['webgpu'], [warning]), /ORT removed WebGPU.*Failed to get GPU adapter/);
+  assert.equal(webgpuBackendProblem('play-maia3', ready, ['webgpu'], [warning.replace('"webgpu"', '"wasm"')]), null);
 });
 
 test('a browser build that differs from the cohort is refused before measuring and re-runs on resume', () => {

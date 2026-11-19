@@ -86,6 +86,19 @@ export const runPlatform = (row) => row.platform ?? row.host?.platform;
 // same version). Sessions that never launched a browser have no identity and are not compared.
 export const browserIdentity = (row) => (row.browserVersion ? [row.browserVersion, row.browserExecutable].filter(Boolean).join(' @ ') : null);
 
+export function cohortBrowserIdentities(rows) {
+  const identities = {};
+  for (const row of rows) {
+    const identity = browserIdentity(row);
+    if (!identity) continue;
+    const previous = identities[row.browser];
+    if (previous && previous !== identity)
+      throw Error(`Refusing to combine ${row.browser} sessions from different browser builds: ${previous}; ${identity}. Start a new cohort.`);
+    identities[row.browser] = identity;
+  }
+  return identities;
+}
+
 export function plan(options) {
   const browsers = options.browser === 'all' ? ['safari', 'chrome'] : [options.browser];
   return Array.from({ length: options.repeats }, (_, repeat) =>
@@ -280,18 +293,7 @@ export function compareRuns(runs, options) {
   const platforms = [...new Set(runs.map(runPlatform).filter(Boolean))];
   // macOS phys_footprint and Linux Pss_Dirty+VRAM measure different things; never mix them in one verdict.
   if (platforms.length > 1) throw Error(`Refusing to compare runs from different platforms: ${platforms.join(', ')}`);
-  // A browser update or a changed PERF_ROUTES_CHROMIUM between --resume invocations must not mix builds.
-  for (const browser of new Set(runs.map((r) => r.browser))) {
-    const builds = [
-      ...new Set(
-        runs
-          .filter((r) => r.browser === browser)
-          .map(browserIdentity)
-          .filter(Boolean),
-      ),
-    ];
-    if (builds.length > 1) throw Error(`Refusing to combine ${browser} sessions from different browser builds: ${builds.join('; ')}. Start a new cohort.`);
-  }
+  cohortBrowserIdentities(runs);
   const platform = platforms[0] ?? null;
   const groups = [...new Set(plan(options).map((r) => `${r.browser}/${r.journey}`))];
   return groups.map((key) => {
