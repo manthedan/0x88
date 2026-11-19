@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { T3_NET } from '../src/lc0/bt4Engine.ts';
+import { lc0SplitKUrl, selectLc0OrtModelUrl } from '../src/lc0/lc0SmallModelSelection.ts';
 import { LC0_MODEL_DOWNLOAD_NOT_APPROVED } from '../src/lc0/modelCache.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { startSearchWorker } from '../src/lc0/searchWorkerCore.ts';
+import { resetWebGpuAdapterProbeForTests, resolveOrtSessionPlacement } from '../src/nn/ortRuntime.ts';
 
-// Phone cold load whose cache.put failed (largeNetDownload.ts): the page hands the
-// prefetch worker's verified bytes to the search worker, which must create the
-// session from them instead of downloading the net a second time.
-test('search worker init loads a prefetched model from memory, once, without fetching', async (t) => {
+test('search worker uses transferred split-K bytes even when its probe would select the original', async (t) => {
   const descriptors = new Map(['self', 'navigator', 'fetch', 'caches'].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   t.after(() => {
     for (const [key, descriptor] of descriptors) {
@@ -26,20 +26,25 @@ test('search worker init loads a prefetched model from memory, once, without fet
       replies.get(message.id)?.(message);
     },
   });
-  define('navigator', { userAgent: 'test' });
+  define('navigator', { gpu: { requestAdapter: async () => ({ features: new Set(['shader-f16']), info: { vendor: 'nvidia' } }) } });
+  resetWebGpuAdapterProbeForTests();
+  t.after(resetWebGpuAdapterProbeForTests);
   define('caches', undefined);
-  define('fetch', async () => assert.fail('a prefetched model must not be fetched again'));
-  const created = [];
-  t.mock.method(Lc0OnnxEvaluator, 'create', async (model) => {
-    created.push(new TextDecoder().decode(model));
+  const fetch = t.mock.fn(async (input) => assert.fail(`unexpected fetch: ${input}`));
+  define('fetch', fetch);
+  const modelUrl = `https://test.invalid${new URL(T3_NET.modelUrl, 'https://test.invalid').pathname}`;
+  const ep = 'auto';
+  assert.equal(selectLc0OrtModelUrl(modelUrl, await resolveOrtSessionPlacement(ep)), modelUrl);
+  const splitKUrl = lc0SplitKUrl(modelUrl);
+  assert.ok(splitKUrl);
+  const model = new TextEncoder().encode('abc').buffer;
+  const create = t.mock.method(Lc0OnnxEvaluator, 'create', async () => {
     throw new Error('stop after session input');
   });
   startSearchWorker();
-  const modelUrl = 'https://test.invalid/models/lc0/prefetched.onnx';
-  const model = new TextEncoder().encode('abc').buffer;
   const load = {
     model,
-    url: modelUrl,
+    url: splitKUrl,
     mode: 'memory',
     cacheStatus: 'unavailable',
     bytes: 3,
@@ -50,11 +55,13 @@ test('search worker init loads a prefetched model from memory, once, without fet
   };
   const reply = await new Promise((resolve) => {
     replies.set(1, resolve);
-    handle({ data: { type: 'init', id: 1, modelUrl, ep: 'wasm', cacheModel: true, prefetchedModel: { url: modelUrl, load } } });
+    handle({ data: { type: 'init', id: 1, modelUrl, ep, deviceModelSelection: true, cacheModel: true, prefetchedModel: { url: splitKUrl, load } } });
   });
+  assert.equal(fetch.mock.callCount(), 0, 'no second model load');
+  assert.equal(create.mock.callCount(), 1);
+  assert.equal(create.mock.calls[0].arguments[0], model);
   assert.equal(reply.type, 'error');
   assert.match(reply.error, /stop after session input/);
-  assert.deepEqual(created, ['abc']);
 });
 
 // Arena's cache-hit consent: the worker's loader must refuse network bytes, not download them.

@@ -108,6 +108,7 @@ export type Lc0OrtEvaluatorFromUrlOptions = {
    * tools leave it off so they get exactly the bytes they named.
    */
   deviceSelection?: boolean;
+  selectedModelUrl?: string;
 };
 
 export type Lc0OrtEvaluatorFromUrl = {
@@ -163,7 +164,9 @@ export async function createLc0OnnxEvaluatorFromUrl(
 ): Promise<Lc0OrtEvaluatorFromUrl> {
   const loadOptions = options.load ?? {};
   loadOptions.signal?.throwIfAborted();
-  const selectedUrl = options.deviceSelection ? selectLc0OrtModelUrl(requestedUrl, await untilAborted(deps.placement(), loadOptions.signal)) : requestedUrl;
+  const selectedUrl =
+    options.selectedModelUrl ??
+    (options.deviceSelection ? selectLc0OrtModelUrl(requestedUrl, await untilAborted(deps.placement(), loadOptions.signal)) : requestedUrl);
   loadOptions.signal?.throwIfAborted();
   let fallbackReason: string | undefined;
   let modelLoad: LoadedModel | undefined;

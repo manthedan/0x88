@@ -50,7 +50,8 @@ export type LargeNetPrefetchOptions = {
  * session worker, so the net is still downloaded once.
  */
 export type LargeNetPrefetchResult =
-  | { status: 'cached' | 'prefetched' | 'fallback' }
+  | { status: 'fallback' }
+  | { status: 'cached' | 'prefetched'; modelUrl: string }
   | { status: 'memory'; modelUrl: string; load: Lc0ModelLoadResult & { model: ArrayBuffer } };
 
 const defaultPrefetchDeps = {
@@ -75,14 +76,12 @@ export async function prefetchLargeNetToCache(
 ): Promise<LargeNetPrefetchResult> {
   const { signal } = options;
   signal.throwIfAborted();
-  // A net with a split-K file is resolved in the prefetch worker, with the session
-  // worker's own probe (modelPrefetchWorker.ts sessionModelUrl); others are fixed.
   const selectFor = lc0SplitKUrl(config.modelUrl) ? options.ep : undefined;
   if (!selectFor) {
     try {
       // Key presence only, no body read: a cached net must not pay for a worker or a second read.
       // The session worker's loader still verifies the entry (metadata, else a rehash).
-      if (await untilAborted(deps.cached(config.modelUrl, { signal }), signal)) return { status: 'cached' };
+      if (await untilAborted(deps.cached(config.modelUrl, { signal }), signal)) return { status: 'cached', modelUrl: config.modelUrl };
     } catch (error) {
       signal.throwIfAborted();
       console.warn(`Lc0 ${config.name}: cache probe failed; loading without prefetch.`, error);
@@ -97,7 +96,7 @@ export async function prefetchLargeNetToCache(
         const data = event.data;
         if (data.type === 'progress') options.onProgress?.(data.loadedBytes, data.totalBytes);
         else if (data.type === 'error') reject(new Error(data.error));
-        else resolve(data.cached ? { status: 'prefetched' } : { status: 'memory', modelUrl: data.modelUrl, load: data.load });
+        else resolve(data.cached ? { status: 'prefetched', modelUrl: data.modelUrl } : { status: 'memory', modelUrl: data.modelUrl, load: data.load });
       });
       worker.addEventListener('messageerror', () => reject(new Error('model prefetch reply could not be received')));
       worker.addEventListener('error', (event) => reject(new Error(event.message || 'model prefetch worker failed')));

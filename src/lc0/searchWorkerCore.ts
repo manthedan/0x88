@@ -79,8 +79,7 @@ type InitMessage = {
   minimumFreeBytesAfterModelCache?: number;
   /** Load from Cache Storage only (a cache-hit approval); downloading fails instead (modelCache.ts noDownload). */
   noModelDownload?: boolean;
-  /** Verified bytes from a phone prefetch whose cache.put failed (largeNetDownload.ts), for one load of `url`. */
-  prefetchedModel?: { url: string; load: Lc0ModelLoadResult };
+  prefetchedModel?: { url: string; load?: Lc0ModelLoadResult };
 };
 
 type SearchMessage = {
@@ -319,9 +318,11 @@ function enqueueModelOperation(work: () => Promise<void>): Promise<void> {
 }
 
 async function handleInit(message: InitMessage): Promise<void> {
+  const selectedModelUrl = message.prefetchedModel?.url;
   const initKey = JSON.stringify({
     runtime: message.runtime ?? 'onnx',
     modelUrl: message.modelUrl,
+    selectedModelUrl,
     deviceModelSelection: message.deviceModelSelection === true,
     ep: message.ep,
     cacheModel: message.cacheModel,
@@ -433,21 +434,21 @@ async function handleInit(message: InitMessage): Promise<void> {
   const physicalBatchMode = message.physicalBatchMode === 'logical' ? 'logical' : 'declared';
   const initAbort = new AbortController();
   activeInit = initAbort;
-  let prefetched = message.prefetchedModel;
-  message.prefetchedModel = undefined; // Only `prefetched` may keep the bytes alive.
-  const deps = prefetched && {
+  let prefetchedLoad = message.prefetchedModel?.load;
+  message.prefetchedModel = undefined;
+  const deps = prefetchedLoad && {
     ...DEFAULT_LC0_ORT_EVALUATOR_DEPS,
     load: (url: string, options: Parameters<typeof DEFAULT_LC0_ORT_EVALUATOR_DEPS.load>[1]) => {
-      if (prefetched?.url !== url) return DEFAULT_LC0_ORT_EVALUATOR_DEPS.load(url, options);
-      const { load } = prefetched;
-      prefetched = undefined; // Reloads (recovery, fallbacks) go through the loader again.
-      return Promise.resolve(load);
+      const load = url === selectedModelUrl ? prefetchedLoad : undefined;
+      prefetchedLoad = undefined;
+      return load ? Promise.resolve(load) : DEFAULT_LC0_ORT_EVALUATOR_DEPS.load(url, options);
     },
   };
   const created = await createLc0OnnxEvaluatorFromUrl(
     message.modelUrl,
     {
       deviceSelection: message.deviceModelSelection === true,
+      selectedModelUrl,
       evaluator: {
         physicalBatchMode,
         ioMode: message.ortIoMode ?? defaultLc0OrtIoMode(message.deviceModelSelection === true),

@@ -466,8 +466,8 @@ export class Bt4WorkerSearcher {
         if (this.prefetchAbort === prefetchAbort) this.prefetchAbort = null;
       }
       if (generation !== this.lifecycleGeneration) throw new Error('Lc0 BT4 worker disposed');
-      // cache.put failed after a verified download: hand the bytes over rather than download twice.
-      const prefetchedModel = prefetched?.status === 'memory' ? { url: prefetched.modelUrl, load: prefetched.load } : undefined;
+      const prefetchedLoad = prefetched?.status === 'memory' ? prefetched.load : undefined;
+      const prefetchedModel = prefetched && prefetched.status !== 'fallback' ? { url: prefetched.modelUrl, load: prefetchedLoad } : undefined;
       const worker = this.startWorker();
       // Big nets opt into app-owned Cache Storage so immutable model bytes
       // survive route changes even when the browser HTTP cache skips large
@@ -496,7 +496,7 @@ export class Bt4WorkerSearcher {
         },
         undefined,
         undefined,
-        prefetchedModel ? [prefetchedModel.load.model] : [],
+        prefetchedLoad ? [prefetchedLoad.model] : [],
       );
       if (this.worker !== worker) throw new Error('Lc0 BT4 worker invalidated during initialization');
       this.ready = true;
