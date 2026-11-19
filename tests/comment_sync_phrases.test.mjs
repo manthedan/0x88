@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { checkSyncPhraseComments, syncPhraseCommentLines } from '../scripts/check_comment_sync_phrases.mjs';
+import { checkSyncPhraseComments, syncPhraseCommentLines, syncPhraseComments } from '../scripts/check_comment_sync_phrases.mjs';
 
 test('no comment in src/ asks to keep code in sync, outside the shrinking allowlist', () => {
   assert.deepEqual(checkSyncPhraseComments(), [], 'Share a constant, type or helper (or pin the relation in a test) instead of a "keep in sync" comment.');
@@ -41,6 +41,14 @@ test('a new sync comment in an allowlisted file still fails', () => {
     'src/a.ts:9: comment asks to keep code in sync',
     'src/a.ts:12: comment asks to keep code in sync',
   ]);
+});
+
+test('an adjacent sync directive cannot hide in an allowlisted comment', () => {
+  const path = 'src/a.ts';
+  const allowlist = [{ path, comment: 'keep in step with foo', reason: 'wave 2' }];
+  const text = 'const key = foo(); // keep in step with foo\n// keep in sync with another helper\nconst value = bar();';
+  const hits = syncPhraseComments(text, path).map((hit) => ({ path, ...hit }));
+  assert.match(checkSyncPhraseComments(hits, allowlist).join('\n'), /src\/a\.ts:\d+: comment asks to keep code in sync/);
 });
 
 test('comment markers inside strings, templates and regexes are not comments', () => {

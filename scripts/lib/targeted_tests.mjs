@@ -223,10 +223,10 @@ export function normalizeChangedPath(file, cwd = process.cwd()) {
 /**
  * Decide which tests cover `changedFiles`.
  * status `run` — execute `tests`.
- * status `skip` — no executable source; a zero-test result is explicit, not a pass of product code.
+ * status `skip` — no tests and no uncovered source; a zero-test result is explicit, not a pass of product code.
  * status `fail` — executable source matched nothing. Callers must exit non-zero or run the full suite.
  */
-export function selectTargetedTests(changedFiles, graph) {
+export function selectTargetedTests(changedFiles, graph, { ignoreMissingSources = false } = {}) {
   const tests = new Set();
   const covered = [];
   const uncovered = [];
@@ -242,7 +242,7 @@ export function selectTargetedTests(changedFiles, graph) {
     if (matched.size) {
       covered.push(file);
       for (const test of matched) tests.add(test);
-    } else if (isExecutableSource(file)) uncovered.push(file);
+    } else if (isExecutableSource(file) && (!ignoreMissingSources || graph.files.has(file))) uncovered.push(file);
     else ignored.push(file);
   }
   let status = 'run';

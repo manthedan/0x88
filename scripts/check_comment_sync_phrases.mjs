@@ -13,8 +13,8 @@ export const SYNC_PHRASE = /keep in step with|keep in sync with|mirror\s+\S+'s l
 const SOURCE_FILE = /\.(ts|js|mjs|svelte|css|html)$/;
 
 /**
- * Sync-phrase comments that may stay for now: each entry permits one comment in `path` whose normalized text
- * contains `comment`. Remove an entry once its comment is gone.
+ * Sync-phrase comments that may stay for now: each entry permits one exact normalized comment in `path`.
+ * Remove an entry once its comment is gone.
  */
 export const ALLOWLIST = [
   {
@@ -24,7 +24,11 @@ export const ALLOWLIST = [
   },
   {
     path: 'src/lc0/batchingStrengthMatch.ts',
-    comment: 'Copied from playBrowser.ts. tests/batching_strength.test.mjs checks the source still has these literals.',
+    comment:
+      'Copied from playBrowser.ts. tests/batching_strength.test.mjs checks the source still has these literals. Do not retune them here. ' +
+      'LQO black (queen-less): draw -0.6, contempt 32, cpuct 1.5, fpu 0.4, SwapColors. ' +
+      'LQO white (queen-less): draw -0.4, contempt 40, cpuct 1.5, fpu 0.4, no swap. ' +
+      'Regular Play Lc0: draw -0.25, contempt 16.',
     reason: 'wave 2 (fenced during comment cleanup 1): constants copied from playBrowser.ts and kept equal by a source-scraping test; export them once',
   },
 ];
@@ -152,7 +156,7 @@ export function checkSyncPhraseComments(hits = findSyncPhraseComments(), allowli
   const permitted = new Set();
   const problems = [];
   for (const entry of allowlist) {
-    const hit = hits.find((candidate) => !permitted.has(candidate) && candidate.path === entry.path && candidate.text.includes(entry.comment));
+    const hit = hits.find((candidate) => !permitted.has(candidate) && candidate.path === entry.path && candidate.text === entry.comment);
     if (hit) permitted.add(hit);
     else problems.push(`${entry.path}: allowlisted comment "${entry.comment}" not found; remove it from ALLOWLIST`);
   }

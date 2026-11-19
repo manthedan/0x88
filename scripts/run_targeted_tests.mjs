@@ -14,7 +14,7 @@ filename and family mappings (search/PUCT, engine adapters, wasm, cloudflare).
 
 An executable source change that matches nothing fails closed. It does not
 exit 0. Pass tests explicitly, or use --on-unmatched full to run npm test.
-Docs and other non-executable paths still select nothing and exit 0.
+Unmapped Git deletions and non-executable paths do not block selection.
 
 Options:
   --base REF            Include git diff --name-only REF...HEAD (default: origin/main)
@@ -89,7 +89,7 @@ function main() {
     return;
   }
   const graph = buildImportGraph(process.cwd());
-  const decision = selectTargetedTests(changedFiles(args), graph);
+  const decision = selectTargetedTests(changedFiles(args), graph, { ignoreMissingSources: !args.files.length });
   const fallback = decision.status === 'fail' && args.onUnmatched === 'full';
   if (decision.status === 'fail' && !fallback) {
     console.error(formatUnmatched(decision));
