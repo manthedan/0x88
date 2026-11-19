@@ -179,8 +179,9 @@ export async function pollUntil(check, timeoutMs, intervalMs = 150) {
     }
     const remaining = deadline - Date.now();
     if (remaining <= 0) return false;
+    const lastSleep = remaining <= intervalMs;
     await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, remaining)));
-    if (Date.now() >= deadline) return false;
+    if (lastSleep || Date.now() >= deadline) return false;
   }
 }
 
