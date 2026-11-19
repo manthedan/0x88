@@ -2053,7 +2053,7 @@ async function initBigNetsForRun(
             const consent = await requestLargeNetRedownloadConsent(config, prompt.signal);
             if (cancelled()) return;
             if (consent !== 'download') {
-              analysisDeclinedBigNetDownloads.add(key);
+              if (consent === false) analysisDeclinedBigNetDownloads.add(key);
               throw notApproved();
             }
             analysisCacheOnlyBigNets.delete(key);

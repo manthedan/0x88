@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { BIG_NETS, bigNetLoadWarning } from '../src/lc0/bt4Engine.ts';
-import { requestLargeNetConsent, requestLargeNetDownloadConsent } from '../src/lc0/largeNetConsent.ts';
+import { requestLargeNetConsent, requestLargeNetDownloadConsent, requestLargeNetRedownloadConsent } from '../src/lc0/largeNetConsent.ts';
 import { inspectLargeNetDownload } from '../src/lc0/largeNetDownload.ts';
 import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
 import { createSoakBigNetBinding } from '../src/lc0/mobileSoakBigNet.ts';
@@ -244,6 +244,37 @@ test('a newer picker choice cancels a stale cache probe rather than opening two 
   probe.resolve({ url: BIG_NETS.bt4.modelUrl, cached: false });
   await tick();
   assert.equal(f.body.children.length, 1);
+});
+
+test('a BT4 cache retry leaves an open t3 picker prompt alone', async (t) => {
+  const f = browser(t, 'desktop');
+  const picker = f.request(BIG_NETS.t3, { desktopWarning: true });
+  const dialog = await f.dialog();
+
+  const retry = requestLargeNetRedownloadConsent(BIG_NETS.bt4, f.abort.signal);
+  const activeDialog = await f.dialog();
+  choose(activeDialog, true);
+  assert.ok(activeDialog === dialog, 'the picker still owns the dialog');
+  assert.equal(await retry, 'aborted');
+  assert.equal(await picker, true);
+});
+
+test('a t3 picker supersedes an open BT4 cache retry without dismissing it', async (t) => {
+  const f = browser(t, 'desktop');
+  const retry = requestLargeNetRedownloadConsent(BIG_NETS.bt4, f.abort.signal);
+  const retryDialog = await f.dialog();
+  const picker = f.request(BIG_NETS.t3, { desktopWarning: true });
+  const pickerDialog = await f.dialog();
+
+  assert.equal(retryDialog.open, false);
+  assert.notEqual(pickerDialog, retryDialog);
+  choose(pickerDialog, true);
+  assert.equal(await retry, 'aborted');
+  assert.equal(await picker, true);
+
+  const nextRetry = requestLargeNetRedownloadConsent(BIG_NETS.bt4, f.abort.signal);
+  choose(await f.dialog(), false);
+  assert.equal(await nextRetry, false, 'Cancel is an explicit decline');
 });
 
 test('a failed cache inspection never suppresses an uncached download warning', async (t) => {
