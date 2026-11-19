@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -33,10 +34,12 @@ test('the static adapter writes its fallback shell to 404.html with static not-f
     log,
     generateEnvModule() {},
     writeClient: (dir) => calls.push(['client', dir]),
-    writePrerendered: async (dir) => {
+    // Kit's builder.writePrerendered is synchronous and adapter-static does not await it, so the
+    // mock must be synchronous too or generateFallback can run before the output dir exists.
+    writePrerendered: (dir) => {
       calls.push(['prerendered', dir]);
-      await mkdir(join(out, 'app/play'), { recursive: true }); // the adapter clears the output dir first
-      await writeFile(join(out, 'app/play/index.html'), `${playHead}<body></body>`);
+      mkdirSync(join(out, 'app/play'), { recursive: true }); // the adapter clears the output dir first
+      writeFileSync(join(out, 'app/play/index.html'), `${playHead}<body></body>`);
     },
     generateFallback: async (file) => {
       calls.push(['fallback', file]);
