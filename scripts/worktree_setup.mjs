@@ -142,8 +142,10 @@ function verify(main, worktree, log) {
   } else if (!existsSync(join(dir, '.bin/vite'))) log.problems.push('node_modules/.bin/vite missing');
   if (plan === 'share' && stat?.isDirectory()) log.problems.push(...linkNodeModules(join(main, 'node_modules'), dir, 'check').problems);
   if (stat?.isSymbolicLink()) log.problems.push(`node_modules is a whole-directory symlink to ${readlinkSync(dir)}; migrate it or install locally`);
-  const app = realOrNull(join(dir, '$app'));
-  if (app && !within(app, worktree)) log.problems.push(`node_modules/$app resolves outside the worktree to ${app}`);
+  const app = join(dir, '$app');
+  const appReal = realOrNull(app);
+  if (appReal && !within(appReal, worktree)) log.problems.push(`node_modules/$app resolves outside the worktree to ${appReal}`);
+  else if (!appReal && lstatIfExists(app)?.isSymbolicLink()) log.problems.push(`node_modules/$app is a dangling symlink to ${readlinkSync(app)}`);
   if (!realOrNull(join(worktree, '..', 'models'))) log.problems.push(`${resolve(worktree, '..', 'models')} does not resolve`);
   for (const dir of ['public/models/lc0', 'public/models/maia3']) {
     const manifest = JSON.parse(readFileSync(join(worktree, dir, 'manifest.json'), 'utf8'));

@@ -172,6 +172,29 @@ test('reconciles added and removed dependencies after matching lockfile updates'
   assert.equal(setup(worktree, '--check').status, 0);
 });
 
+test('setup and --check report dependency links to another install without replacing them', (t) => {
+  const { ws, worktree } = fixture(t);
+  assert.equal(setup(worktree).status, 0);
+  const modules = join(worktree, 'node_modules');
+  rmSync(join(modules, '@scope'));
+  const localPackage = join(modules, '@scope/pkg/package.json');
+  write(localPackage, 'local package');
+
+  const link = join(modules, 'vite');
+  const foreignVite = join(ws, 'other/node_modules/vite');
+  write(join(foreignVite, 'package.json'), '{}');
+  rmSync(link);
+  symlinkSync(foreignVite, link);
+  for (const flags of [['--check'], []]) {
+    const result = setup(worktree, ...flags);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /node_modules\/vite resolves to .*other\/node_modules\/vite, expected .*repo\/node_modules\/vite/);
+    assert.doesNotMatch(result.stderr, /node_modules\/@scope/);
+    assert.equal(readlinkSync(link), foreignVite);
+    assert.equal(readFileSync(localPackage, 'utf8'), 'local package');
+  }
+});
+
 test('repairs a missing .bin link in an otherwise shared install', (t) => {
   const { repo, worktree } = fixture(t);
   assert.equal(setup(worktree).status, 0);
@@ -210,6 +233,21 @@ test('--check reports $app resolving outside a worktree with local node_modules'
   const check = setup(worktree, '--check');
   assert.equal(check.status, 1);
   assert.match(check.stderr, /node_modules\/\$app resolves outside the worktree/);
+});
+
+test('setup and --check reject a dangling $app symlink', (t) => {
+  const { repo, worktree } = fixture(t);
+  assert.equal(setup(worktree).status, 0);
+  const target = join(repo, 'node_modules/$app');
+  const link = join(worktree, 'node_modules/$app');
+  rmSync(target, { recursive: true });
+  symlinkSync(target, link);
+  for (const flags of [['--check'], []]) {
+    const result = setup(worktree, ...flags);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /node_modules\/\$app is a dangling symlink/);
+    assert.equal(readlinkSync(link), target);
+  }
 });
 
 test('a perf:routes archive with the same lockfile generates its own $app types', (t) => {
