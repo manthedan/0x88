@@ -13,42 +13,55 @@ export function showPhoneLargeNetFallback(modelOverride = false): void {
   }
 }
 
-let activeConsent: AbortController | undefined;
+type ConsentRequest = { controller: AbortController; dialog?: HTMLDialogElement };
+let activeConsent: ConsentRequest | undefined;
 
 /**
  * 'cached' approves no download: the model was cached when checked, and storage
  * can evict it before the load. 'download' covers a download.
  */
 export type LargeNetConsent = false | 'cached' | 'download';
+type LargeNetConsentResult = LargeNetConsent | 'aborted';
 
 /**
  * A 'cached' approval's load found the model evicted or its body unreadable. The cache key can
  * still be there, so the inspection is overridden to ask as for a download, never 'cached'.
  */
-export function requestLargeNetRedownloadConsent(config: BigNetConfig, signal?: AbortSignal): Promise<LargeNetConsent> {
+export async function requestLargeNetRedownloadConsent(config: BigNetConfig, signal?: AbortSignal): Promise<LargeNetConsentResult> {
+  // HTML dialogs clear `open` synchronously and dispatch `close` in a later task.
+  if (activeConsent?.dialog?.open === false) activeConsent = undefined;
+  if (activeConsent) return 'aborted';
   const uncached = (inspected: BigNetConfig, inspectSignal?: AbortSignal) =>
     inspectLargeNetDownload(inspected, inspectSignal).then((state) => ({ ...state, cached: false }));
-  return requestLargeNetDownloadConsent(config, signal, true, undefined, uncached);
+  return requestDownloadConsent(config, signal, true, undefined, uncached);
 }
 
 /** A newer picker choice supersedes an earlier metadata probe or open dialog. */
-export async function requestLargeNetConsent(...args: Parameters<typeof requestLargeNetDownloadConsent>): Promise<boolean> {
-  return (await requestLargeNetDownloadConsent(...args)) !== false;
+export async function requestLargeNetConsent(...args: Parameters<typeof requestDownloadConsent>): Promise<boolean> {
+  const consent = await requestDownloadConsent(...args);
+  return consent === 'cached' || consent === 'download';
 }
 
-export async function requestLargeNetDownloadConsent(
+export async function requestLargeNetDownloadConsent(...args: Parameters<typeof requestDownloadConsent>): Promise<LargeNetConsent> {
+  const consent = await requestDownloadConsent(...args);
+  return consent === 'aborted' ? false : consent;
+}
+
+async function requestDownloadConsent(
   config: BigNetConfig,
   signal?: AbortSignal,
   desktopWarning = true,
   downloadNotice?: string,
   inspect = inspectLargeNetDownload,
-): Promise<LargeNetConsent> {
-  if (signal?.aborted) return false;
-  const request = new AbortController();
-  activeConsent?.abort();
+): Promise<LargeNetConsentResult> {
+  if (signal?.aborted) return 'aborted';
+  const controller = new AbortController();
+  const request: ConsentRequest = { controller };
+  activeConsent?.controller.abort();
   activeConsent = request;
   try {
-    return await showLargeNetConsent(config, signal ? AbortSignal.any([signal, request.signal]) : request.signal, desktopWarning, downloadNotice, inspect);
+    const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    return await showLargeNetConsent(request, config, requestSignal, desktopWarning, downloadNotice, inspect);
   } finally {
     if (activeConsent === request) activeConsent = undefined;
   }
@@ -56,14 +69,15 @@ export async function requestLargeNetDownloadConsent(
 
 /** Native modal, like Analysis's engine manager: inert background, focus trap and Escape. */
 async function showLargeNetConsent(
+  request: ConsentRequest,
   config: BigNetConfig,
   signal?: AbortSignal,
   desktopWarning = true,
   downloadNotice?: string,
   inspect = inspectLargeNetDownload,
-): Promise<LargeNetConsent> {
+): Promise<LargeNetConsentResult> {
   const phone = isMemoryConstrainedDevice();
-  if (signal?.aborted) return false;
+  if (signal?.aborted) return 'aborted';
   if (!phone && !desktopWarning) return 'download';
   const previousFocus = document.activeElement as HTMLElement | null;
   const previousFocusId = previousFocus?.id;
@@ -77,7 +91,7 @@ async function showLargeNetConsent(
   } finally {
     signal?.removeEventListener('abort', abortLookup);
   }
-  if (signal?.aborted) return false;
+  if (signal?.aborted) return 'aborted';
   const phoneRisk = phone && config.key !== 'lqo';
   if (phone && state?.cached && !phoneBigNetBlocked(config.key)) return 'cached';
   const name = config.key === 'bt4' ? 'BT4' : config.key === 't3' ? 't3' : 'Queen Odds';
@@ -117,7 +131,7 @@ async function showLargeNetConsent(
   actions.append(cancel, use);
   dialog.append(title, description, actions);
   document.body.append(dialog);
-  return new Promise<LargeNetConsent>((resolve) => {
+  return new Promise<LargeNetConsentResult>((resolve) => {
     let accepted = false;
     const abort = () => dialog.close();
     cancel.addEventListener('click', () => dialog.close());
@@ -152,11 +166,12 @@ async function showLargeNetConsent(
           if (notice) notice.hidden = true;
           phoneLargeNetPreference.setEnabled(true);
         }
-        resolve(accepted && !signal?.aborted && (state?.cached ? 'cached' : 'download'));
+        resolve(signal?.aborted ? 'aborted' : accepted && (state?.cached ? 'cached' : 'download'));
       },
       { once: true },
     );
     signal?.addEventListener('abort', abort, { once: true });
+    request.dialog = dialog;
     dialog.showModal();
     cancel.focus();
   });

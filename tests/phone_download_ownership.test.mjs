@@ -538,8 +538,8 @@ for (const outcome of ['declined', 'accepted', 'download-approved', 'resume']) {
   });
 }
 
-for (const answer of [false, 'download']) {
-  test(`Analysis loads a cache-hit approval cache-only and asks before downloading an evicted net (accepted=${!!answer})`, async () => {
+for (const answer of [false, 'aborted', 'download']) {
+  test(`Analysis loads a cache-hit approval cache-only and asks before downloading an evicted net (consent=${answer})`, async () => {
     const inits = [];
     const prompts = [];
     let initialized = false;
@@ -577,17 +577,16 @@ for (const answer of [false, 'download']) {
     const prompt = { signal, current: () => true };
     const errors = await initBigNetsForRun(['t3'], () => false, prompt);
     assert.deepEqual(prompts, ['t3'], 'the evicted net is a download prompt, asked once');
-    if (answer) {
+    if (answer === 'download') {
       assert.deepEqual(inits, [{ evalCacheEntries: 0, noDownload: true }, { evalCacheEntries: 0 }]);
       assert.equal(errors.size, 0);
       assert.equal(cacheOnly.has('t3'), false, 'an accepted download covers later loads');
     } else {
-      assert.deepEqual(inits, [{ evalCacheEntries: 0, noDownload: true }], 'a declined download never reaches the loader');
+      assert.deepEqual(inits, [{ evalCacheEntries: 0, noDownload: true }], 'a download without approval never reaches the loader');
       assert.match(errors.get('t3').message, /no longer cached and its download was not approved/);
       assert.equal(cacheOnly.has('t3'), true);
-      // The next automatic run (Auto analysis stepping through a game) fails the row without asking again.
       const again = await initBigNetsForRun(['t3'], () => false, prompt);
-      assert.deepEqual(prompts, ['t3'], 'a decline is remembered across automatic runs');
+      assert.deepEqual(prompts, answer === false ? ['t3'] : ['t3', 't3'], 'only an explicit decline suppresses the next prompt');
       assert.match(again.get('t3').message, /not approved/);
     }
   });
