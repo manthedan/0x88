@@ -87,6 +87,8 @@ export interface Lc0ModelLoadOptions {
   forceReload?: boolean;
   /** Lab/dev only: allow models without hash verification. Unverified bytes are never persisted. */
   allowUnverified?: boolean;
+  /** Product models may require an app-manifest digest before consulting external channel metadata. */
+  requireManifestEntry?: boolean;
   cacheName?: string;
   manifestUrl?: string;
   /** Already-validated entry from another model family's manifest (e.g. TVMJS). */
@@ -113,6 +115,17 @@ export interface Lc0ModelLoadOptions {
   maxCacheBytes?: number;
   /** Injectable for tests or non-browser hosts; IndexedDB is used by default. */
   metadataStore?: Lc0ModelVerificationMetadataStore;
+  /** Set by prefetchLc0ModelToCache: fail instead of downloading bytes Cache Storage cannot keep. */
+  cacheOnly?: boolean;
+  /** Serve Cache Storage only: fail with LC0_MODEL_DOWNLOAD_NOT_APPROVED instead of downloading. */
+  noDownload?: boolean;
+}
+
+/** Error text of a noDownload load that needs network bytes; plain text survives worker messages. */
+export const LC0_MODEL_DOWNLOAD_NOT_APPROVED = 'LC0 model download not approved';
+
+function refuseUnapprovedDownload(options: Lc0ModelLoadOptions, modelUrl: string): void {
+  if (options.noDownload) throw new Error(`${LC0_MODEL_DOWNLOAD_NOT_APPROVED}: ${modelUrl}`);
 }
 
 /**
@@ -390,13 +403,22 @@ async function fetchModelManifest(manifestUrl: string): Promise<Lc0ModelManifest
   }
 }
 
+export function modelFileName(modelUrl: string): string | undefined {
+  const raw = new URL(absoluteUrl(modelUrl)).pathname.split('/').pop();
+  try {
+    return raw === undefined ? undefined : decodeURIComponent(raw).split('/').pop();
+  } catch {
+    return raw; // Exact URL pins and legacy non-UTF-8 URL octets remain valid.
+  }
+}
+
 async function fetchManifestEntry(modelUrl: string, manifestUrl: string): Promise<Lc0ModelManifestEntry | undefined> {
   const manifest = await fetchModelManifest(manifestUrl);
   const absolute = absoluteUrl(modelUrl);
-  return manifest?.models?.find((entry) => {
-    const entryUrl = absoluteUrl(entry.url);
-    return entry.url === modelUrl || entryUrl === absolute || entry.file === modelUrl.split('/').pop();
-  });
+  const exact = manifest?.models?.find((entry) => entry.url === modelUrl || absoluteUrl(entry.url) === absolute);
+  if (exact) return exact;
+  const file = modelFileName(modelUrl);
+  return manifest?.models?.find((entry) => entry.file === file);
 }
 
 async function fetchManifestEntryWithTiming(
@@ -599,12 +621,7 @@ export interface Lc0ModelDownloadState {
  * create a cache bucket, update LRU metadata, or weaken the inference loader.
  */
 export async function inspectLc0ModelDownload(modelUrl: string, options: Lc0ModelLoadOptions = {}): Promise<Lc0ModelDownloadState> {
-  options.signal?.throwIfAborted();
-  const manifest = options.manifestEntry
-    ? { entry: options.manifestEntry, manifestUrl: options.manifestUrl ?? modelUrl }
-    : await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
-  const channelUrl = options.channelUrl === null ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
-  const resolved = await untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
+  const resolved = await resolveLoaderArtifact(modelUrl, options);
   const state: Lc0ModelDownloadState = { url: resolved.url, downloadBytes: resolved.downloadBytes, cached: false };
   const cacheName = options.cacheName ?? DEFAULT_CACHE_NAME;
   try {
@@ -628,6 +645,28 @@ export async function inspectLc0ModelDownload(modelUrl: string, options: Lc0Mode
     if (options.signal?.aborted) throw error;
     return state; // Missing/denied/stale verification is never a confirmed cache hit.
   }
+}
+
+/** The artifact (URL and integrity pins) the loader would fetch for modelUrl. */
+async function resolveLoaderArtifact(modelUrl: string, options: Lc0ModelLoadOptions): Promise<ResolvedModelArtifact> {
+  options.signal?.throwIfAborted();
+  const manifest = options.manifestEntry
+    ? { entry: options.manifestEntry, manifestUrl: options.manifestUrl ?? modelUrl }
+    : await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
+  const channelUrl = options.channelUrl === null ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
+  return untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
+}
+
+/** Whether Cache Storage has an entry for the loader's exact artifact, without
+ * reading its body or consulting verification metadata. Not proof of integrity:
+ * the loader still verifies the entry (metadata, else a rehash) when it reads it.
+ */
+export async function lc0ModelCacheEntryExists(modelUrl: string, options: Lc0ModelLoadOptions = {}): Promise<boolean> {
+  const resolved = await resolveLoaderArtifact(modelUrl, options);
+  const cacheName = options.cacheName ?? DEFAULT_CACHE_NAME;
+  if (!cacheApiAvailable() || !(await untilAborted(caches.has(cacheName), options.signal))) return false;
+  const cache = await untilAborted(caches.open(cacheName), options.signal);
+  return (await untilAborted(cache.keys(new Request(resolved.url)), options.signal)).length > 0;
 }
 
 interface FetchModelBytesResult {
@@ -763,12 +802,15 @@ function modelLoadFlightKey(modelUrl: string, options: Lc0ModelLoadOptions): str
     options.manifestEntry ?? null,
     options.channelUrl ?? configuredChannelUrl() ?? null,
     options.allowUnverified ?? false,
+    options.requireManifestEntry ?? false,
     options.forceReload ?? false,
     options.rehashAfterMs ?? DEFAULT_REHASH_AFTER_MS,
     options.requestPersistentStorage ?? false,
     options.minimumFreeBytesAfterCache ?? DEFAULT_CACHE_FREE_BYTES_RESERVE,
     options.maxCacheEntries ?? DEFAULT_MAX_CACHE_ENTRIES,
     options.maxCacheBytes ?? DEFAULT_MAX_CACHE_BYTES,
+    options.cacheOnly ?? false,
+    options.noDownload ?? false,
   ]);
 }
 
@@ -811,9 +853,12 @@ export function loadLc0ModelForOrt(modelUrl: string, options: Lc0ModelLoadOption
  * work is left running because metadata requests are shared through
  * single-flight maps, and one caller's abort must not cancel another's wait.
  */
-function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+export function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return promise;
-  signal.throwIfAborted();
+  if (signal.aborted) {
+    void promise.catch(() => undefined); // The shared operation may fail after this consumer has stopped waiting.
+    return Promise.reject(signal.reason);
+  }
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(signal.reason);
     signal.addEventListener('abort', onAbort, { once: true });
@@ -828,6 +873,9 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
   const manifest = options.manifestEntry
     ? { entry: options.manifestEntry, manifestUrl: options.manifestUrl ?? modelUrl, elapsedMs: 0 }
     : await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
+  if (options.requireManifestEntry && !/^[a-f0-9]{64}$/i.test(manifest.entry?.sha256 ?? '')) {
+    throw new Error(`App-origin model integrity metadata is unavailable for ${modelUrl}. Please retry loading the model.`);
+  }
   const resolved = await untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
   const expectation: Lc0ModelBytesExpectation = { expectedBytes: resolved.expectedBytes, expectedSha256: resolved.expectedSha256 };
   if (!options.allowUnverified && !/^[a-f0-9]{64}$/i.test(expectation.expectedSha256 ?? '')) {
@@ -963,6 +1011,16 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
   });
 }
 
+/**
+ * Download, verify and store a model in Cache Storage through the normal
+ * loader. mode 'cache' means Cache Storage holds verified bytes (already, or
+ * now); 'memory' means cache.put failed and `model` holds the verified bytes.
+ * Rejects before downloading when Cache Storage or its quota cannot keep the model.
+ */
+export function prefetchLc0ModelToCache(modelUrl: string, options: Lc0ModelLoadOptions = {}): Promise<Lc0ModelLoadResult> {
+  return loadLc0ModelForOrt(modelUrl, { ...options, cache: true, cacheOnly: true });
+}
+
 async function fetchUncachedVerifiedModel(
   modelUrl: string,
   resolved: ResolvedModelArtifact,
@@ -973,7 +1031,11 @@ async function fetchUncachedVerifiedModel(
   storagePersistent?: boolean,
 ): Promise<Lc0ModelLoadResult> {
   options.signal?.throwIfAborted();
-  if (options.allowUnverified && !options.onProgress) {
+  refuseUnapprovedDownload(options, modelUrl);
+  // A prefetch would download bytes only to drop them; its caller loads them itself.
+  if (options.cacheOnly) throw new Error(`LC0 model cannot be cached here (${cacheStatus}): ${modelUrl}`);
+  // The lab opt-out only skips checks that have no metadata; it never skips a known hash.
+  if (options.allowUnverified && !options.onProgress && !resolved.expectedSha256 && resolved.expectedBytes === undefined) {
     return {
       model: resolved.url,
       url: resolved.url,
@@ -1032,6 +1094,7 @@ async function fetchAndCacheModel(
   storagePersistent: boolean | undefined,
   inheritedTelemetry: Pick<Lc0ModelLoadTelemetry, 'manifestMs' | 'cacheReadMs' | 'hashMs'> = {},
 ): Promise<Lc0ModelLoadResult> {
+  refuseUnapprovedDownload(options, logicalModelUrl);
   const download = await fetchModelBytes(fetchRequest, fetchModelUrl, expectation.expectedBytes, options.onProgress);
   options.signal?.throwIfAborted();
   const check = await verifyLc0ModelBytes(download.bytes, expectation, options.allowUnverified);

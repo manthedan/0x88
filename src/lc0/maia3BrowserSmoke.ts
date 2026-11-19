@@ -153,8 +153,9 @@ async function main(): Promise<void> {
         const choice = await evaluator.chooseMove(fixture.fen, { selfElo, oppoElo, style, temperature, topP });
         result.evalElapsedMs += performance.now() - evalStarted;
         result.evalCount += 1;
-        const valueSum = sum(choice.evaluation.valueProbabilities);
-        if (choice.evaluation.valueProbabilities.length && Math.abs(valueSum - 1) > 1e-4) {
+        const { win, draw, loss } = choice.evaluation.valueProbabilities;
+        const valueSum = win + draw + loss;
+        if (!(Math.abs(valueSum - 1) <= 1e-4)) {
           result.errors.push(`${fixture.name}: value probabilities sum to ${valueSum}`);
         }
         result.errors.push(...validateFixture(fixture.name, expectedLegal, choice.evaluation.legalPriors, choice.move, fixture.expectLegal));

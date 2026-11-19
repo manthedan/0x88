@@ -43,11 +43,11 @@ const analyzeFunction = slice('async function performAnalysisMaintenance(', 'let
 const schedulerFunctions = slice('function hasActiveAnalysisRun(', 'function hiddenTabActive(');
 const cancelFunctions = slice('function cancelActiveAnalysisRun(', 'function scheduleAnalyzeCurrent(');
 const scheduleFunction = slice('function scheduleAnalyzeCurrent(', 'async function withCpuLease');
-const invalidateFunction = slice('function invalidateAnalysisSettings(', 'function deferAnalysisSettingsRefresh(');
+const invalidateFunction = slice('const ANALYSIS_REFRESH_PENDING_MESSAGE', 'function deferAnalysisSettingsRefresh(');
 const backendFunction = slice('async function loadLc0Backend(', 'async function loadLc0BackendOwned(');
 const reloadFunction = slice('async function reloadLc0Backend(', 'async function init(');
 const hiddenFunctions = slice('function hiddenTabActive(', 'function installHiddenTabPause(');
-const criticalHandoff = slice('    pauseAnalysis: () => {', '    updateView: (moment, lines) => {');
+const criticalHandoff = slice('    pauseAnalysis: (maiaOwner) => {', '    updateView: (moment, lines) => {');
 const navigationFunction = slice(
   'let analysisGameTree = tree;',
   '// ---------------------------------------------------------------------------\n// Human moves',
@@ -191,10 +191,10 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     const engineLineCache = new Map(), lineCache = new Map(), completeAnalysisKeys = new Set();
     const published = [];
     let history = [parseFen(START_FEN)], cpuHistory = [];
-    let tree = { current: { fen: START_FEN }, historyBoards: () => history };
+    let tree = { root: { fen: START_FEN }, current: { fen: START_FEN }, historyBoards: () => history };
     const elements = new Map();
     const el = (id) => elements.get(id) ?? (elements.set(id, element()), elements.get(id));
-    const selectEl = el, inputEl = el;
+    const selectEl = el, inputEl = el, maybeEl = el;
     const document = { getElementById: el };
     const BIG_NETS = { bt4: BT4_NET, t3: T3_NET };
     const bigNetFor = async (variant) => {
@@ -246,6 +246,10 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
       return true;
     };
     const isStaleMount = (signal) => signal.aborted || signal !== mountAbort.signal;
+    const isMemoryConstrainedDevice = () => false, deviceMemoryClass = () => 'desktop';
+    let maia3PanelBlockedByRun = null;
+    const shouldAutoAnalyzePosition = () => true, mainlineNodes = () => [];
+    const awaitEngineRetirements = async () => {}, hasEngineRetirements = () => false;
     const reconcileActiveRuntimeFallbackWarning = () => {}, renderRecklessRuntimeInfo = () => {};
     let centipawnHybridManifestStatus = 'unknown';
     // The TVMJS manifest fallback only runs for the legacy research override;
@@ -416,6 +420,28 @@ test('post-capture controls cannot relabel search arguments, cached rows or comp
       assert.deepEqual([...page.completeAnalysisKeys], [originalKey, nextKey]);
       assert.equal(page.engineLineCache.get(originalKey)[0].searchedMultiPv, 1);
       assert.equal(page.lineCache.get(START_FEN)[0].searchedMultiPv, 3, 'only the current selection publishes');
+    } finally {
+      t3.dispose();
+    }
+  }));
+
+test('Stop clears the queued MultiPV refresh message even after the old search settles', () =>
+  withWorkers({ [T3_ORIGINAL]: [{}] }, async () => {
+    const t3 = new Bt4WorkerSearcher(T3_NET);
+    try {
+      await t3.init({ evalCacheEntries: 0 });
+      const page = analysisPage({ rows: [t3Row], searchers: new Map([['t3', t3]]) });
+      const running = page.analyzeCurrent();
+      await until(() => FakeWorker.searchLog.length === 1);
+      page.setMultiPv(3);
+      assert.ok(page.state().wanted, 'the MultiPV change queued a refresh');
+      assert.match(page.el('message').textContent, /Finishing previous search/);
+      page.stop();
+      await running;
+      assert.equal(page.idle(), true);
+      assert.equal(page.state().wanted, null);
+      assert.equal(FakeWorker.searchLog.length, 1, 'Stop discarded the queued search');
+      assert.equal(page.el('message').textContent, 'Analysis stopped.');
     } finally {
       t3.dispose();
     }

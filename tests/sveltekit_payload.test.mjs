@@ -5,13 +5,21 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { checkSvelteKitRuntimeId } from '../scripts/check_sveltekit_runtime_id.mjs';
 
-async function fixture(t, { version = 'build.1', pageVersion = version, init = '__sveltekit_payload', start = true, app = true } = {}) {
+async function fixture(
+  t,
+  { version = 'build.1', pageVersion = version, init = '__sveltekit_payload', start = true, app = true, payload = true, runtime = true } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), 'sveltekit-payload-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const entries = join(root, '_app/immutable/entry');
   await mkdir(entries, { recursive: true });
   await writeFile(join(root, '_app/version.json'), JSON.stringify({ version }));
-  if (start) await writeFile(join(entries, 'start.hash.js'), 'export function init(payload) {}');
+  await mkdir(join(root, '_app/immutable/chunks'));
+  // Mirrors Kit 3 output: start statically imports the payload module and loads the runtime on init.
+  const startSource = 'import{set_payload as e}from"./payload.hash.js";var n;function r(r){e(r),n??=import(`../chunks/runtime.js`)}export{r as init};';
+  if (start) await writeFile(join(entries, 'start.hash.js'), startSource);
+  if (payload) await writeFile(join(entries, 'payload.hash.js'), 'export function set_payload(p) {}');
+  if (runtime) await writeFile(join(root, '_app/immutable/chunks/runtime.js'), 'export function start() {}');
   if (app) await writeFile(join(entries, 'app.hash.js'), 'export const nodes = [];');
   const html = `<script>{
     __sveltekit_payload = { base: '', version: ${JSON.stringify(pageVersion)} };
@@ -52,6 +60,22 @@ for (const entry of ['start', 'app']) {
     await assert.rejects(checkSvelteKitRuntimeId(root), { code: 'ENOENT' });
   });
 }
+
+test('Kit 3 rejects a missing payload module imported by the start entry', async (t) => {
+  const { root } = await fixture(t, { payload: false });
+  await assert.rejects(checkSvelteKitRuntimeId(root), { code: 'ENOENT', path: /payload\.hash\.js$/ });
+});
+
+test('Kit 3 rejects a missing runtime chunk loaded on init', async (t) => {
+  const { root } = await fixture(t, { runtime: false });
+  await assert.rejects(checkSvelteKitRuntimeId(root), { code: 'ENOENT', path: /runtime\.js$/ });
+});
+
+test('Kit 3 rejects entry imports outside the immutable directory', async (t) => {
+  const { root } = await fixture(t);
+  await writeFile(join(root, '_app/immutable/entry/app.hash.js'), 'import"../../version.json.js";');
+  await assert.rejects(checkSvelteKitRuntimeId(root), /Unsafe SvelteKit module/);
+});
 
 test('Kit 3 checks nested pages too', async (t) => {
   const { root, html } = await fixture(t);

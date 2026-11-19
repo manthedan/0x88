@@ -70,7 +70,7 @@ up)
   DIST=${1:-$REPO/dist-client}
   LPORT=${2:-8781}
   MPORT=${3:-18781}
-  [ -d "$DIST" ] || { echo "no build at $DIST (BUILD_SCOPE=product npm run build:client)"; exit 1; }
+  [ -d "$DIST" ] || { echo "no build at $DIST (npm run build:client)"; exit 1; }
   require_owned_or_dead "$STATE/server.pid"
   require_owned_or_dead "$STATE/tunnel.pid"
   if ! alive "$STATE/server.pid"; then
@@ -100,6 +100,16 @@ run)
   shift
   MPORT=$(cat "$STATE/mini-port")
   alive "$STATE/tunnel.pid" || { echo "tunnel is down: run '$0 up' first"; exit 1; }
+  # BUILD_SCOPE=product builds omit lab routes; the soak needs a plain build. Cells may name their
+  # own base (run_matrix.mjs prefers it), so only the default tunnel is checked, and only without --cells.
+  # --report and --dry-run never open the page.
+  case " $* " in
+  *' --cells '* | *' --report '* | *' --dry-run '*) ;;
+  *)
+    code=$(ssh -o BatchMode=yes "$HOST" "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$MPORT/lab/mobile-soak/")
+    [ "$code" = 200 ] || { echo "served build has no /lab/mobile-soak/ (HTTP $code); 'up' a plain 'npm run build:client' dist"; exit 1; }
+    ;;
+  esac
   args=$(printf '%q ' "$@")
   ssh -o BatchMode=yes "$HOST" "cd ~/$WORKSPACE && export PATH=/opt/homebrew/bin:\$PATH && \
     echo \"mini load: \$(sysctl -n vm.loadavg)\" && \

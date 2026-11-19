@@ -69,6 +69,32 @@ test('lc0web pack loader fetches and verifies shard-backed tensor views', async 
   assert.deepEqual([...pack.tensors.get('b').bytes], [5, 6, 7, 8]);
 });
 
+test('lc0web pack loader aborts a stalled shard request on its owner signal', async () => {
+  const { manifest, shardBytes } = makeTinyPack();
+  const served = makeFetch(manifest, shardBytes);
+  let shardRequested = false;
+  const controller = new AbortController();
+  const loading = loadLc0WebModelPack('https://example.test/pack/model.lc0web.json', {
+    signal: controller.signal,
+    fetchFn: (url, init = {}) => {
+      if (!String(url).endsWith('.bin')) return served(url);
+      shardRequested = true;
+      // A stalled request settles only through its abort signal, like fetch().
+      return new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true }));
+    },
+  });
+  while (!shardRequested) await new Promise(setImmediate);
+  controller.abort();
+  const settled = await Promise.race([
+    loading.then(
+      () => 'loaded',
+      (error) => error.name,
+    ),
+    new Promise((resolve) => setTimeout(() => resolve('stalled'), 100)),
+  ]);
+  assert.equal(settled, 'AbortError');
+});
+
 test('lc0web pack loader can load only requested tensors', async () => {
   const { manifest, shardBytes } = makeTinyPack();
   const pack = await loadLc0WebModelPack('https://example.test/pack/model.lc0web.json', {

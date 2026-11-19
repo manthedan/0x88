@@ -5,6 +5,9 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 
 const root = resolve(process.argv[2] ?? 'dist-client');
 const port = Number(process.env.PORT ?? process.argv[3] ?? 5181);
+// Optional third argument (not ambient HOST, which shells set to the machine name). Unset keeps the
+// all-interfaces default; harnesses pass 127.0.0.1 to keep previews off the LAN.
+const host = process.argv[4] || undefined;
 
 const mime = new Map([
   ['.html', 'text/html; charset=utf-8'],
@@ -128,6 +131,6 @@ const server = createServer((req, res) => {
   createReadStream(file).pipe(res);
 });
 
-server.listen(port, () => {
-  console.log(`isolated static server: http://localhost:${port}/ -> ${root}`);
+server.listen(port, host, () => {
+  console.log(`isolated static server: http://${host ?? 'localhost'}:${port}/ -> ${root}`);
 });

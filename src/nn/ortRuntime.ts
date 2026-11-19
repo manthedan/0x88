@@ -3,7 +3,9 @@ import './ortConsoleFilter.ts';
 export * from 'onnxruntime-web/webgpu';
 
 import * as ort from 'onnxruntime-web/webgpu';
-import { isOnnxModelParseError } from '../lc0/onnxModelRecovery.ts';
+import { trackEngineRetirement } from '../lc0/engineRetirement.ts';
+import { untilAborted } from '../lc0/modelCache.ts';
+import { isOnnxModelParseError, OrtSessionFallbackError, ortErrorMessage } from '../lc0/onnxModelRecovery.ts';
 import { supportsWasmRelaxedSimdIntegerDot } from '../lc0/wasmFeatures.ts';
 import { foldOnnxDequantizeLinear } from './onnxDequantFold.ts';
 
@@ -522,8 +524,7 @@ function webgpuUsableForProviderSelection(): boolean {
   return webgpuAvailable() && probedWebGpuAdapterUsable !== false && probedWebGpuShaderF16 !== false;
 }
 
-export function resolvedOrtExecutionProviders(): string[] {
-  const requested = requestedOrtExecutionProvider();
+export function resolvedOrtExecutionProviders(requested = requestedOrtExecutionProvider()): string[] {
   if (requested === 'webgpu') return ['webgpu'];
   if (requested === 'webgpu,wasm') return webgpuUsableForProviderSelection() ? ['webgpu', 'wasm'] : ['wasm'];
   if (requested === 'auto') return webgpuUsableForProviderSelection() ? ['webgpu', 'wasm'] : ['wasm'];
@@ -1372,10 +1373,9 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
  * `['webgpu']` regardless so it still surfaces "WebGPU unavailable" rather than
  * silently degrading.
  */
-async function ensureWebGpuAdapterProbed(): Promise<void> {
+async function ensureWebGpuAdapterProbed(requested = requestedOrtExecutionProvider()): Promise<void> {
   if (probedWebGpuAdapterUsable !== null) return;
   if (!webgpuAvailable()) return;
-  const requested = requestedOrtExecutionProvider();
   if (requested === 'wasm' || requested === 'webgpu') return;
   try {
     const adapter = await webgpuNavigator()?.requestAdapter?.({ powerPreference: 'high-performance' });
@@ -1449,11 +1449,12 @@ export type OrtSessionPlacement = {
 /**
  * Where the next session on this thread will run, decided the same way
  * createOrtSession decides it. Lets a caller pick device-specific model bytes
- * before downloading them (src/lc0/lc0SmallModelSelection.ts).
+ * before downloading them (src/lc0/lc0SmallModelSelection.ts). `requested`
+ * answers for another thread's EP pin, e.g. a worker this page will start.
  */
-export async function resolveOrtSessionPlacement(): Promise<OrtSessionPlacement> {
-  await ensureWebGpuAdapterProbed();
-  const providers = resolvedOrtExecutionProviders();
+export async function resolveOrtSessionPlacement(requested = requestedOrtExecutionProvider()): Promise<OrtSessionPlacement> {
+  await ensureWebGpuAdapterProbed(requested);
+  const providers = resolvedOrtExecutionProviders(requested);
   if (!providers.includes('webgpu') || !webgpuAvailable()) return { providers };
   const adapterVendor = await webGpuAdapterVendor();
   return adapterVendor ? { providers, adapterVendor } : { providers };
@@ -1470,6 +1471,8 @@ export type OrtSessionAttemptPlan = {
 };
 
 export type CreateOrtSessionOptions = {
+  /** Cancel preparation waits and future native attempts; already-admitted creation is released before rejection. */
+  signal?: AbortSignal;
   /**
    * Model for the WebGPU -> WASM fallback attempt, loaded only if that attempt
    * runs. Set when the primary model is a WebGPU-specific rewrite that is slower
@@ -1541,7 +1544,8 @@ export function createOrtSession(modelPath: OrtModelInput, options: CreateOrtSes
 async function createOrtSessionFromSource(takeModel: () => OrtModelInput, options: CreateOrtSessionOptions): Promise<ort.InferenceSession> {
   // Must precede resolvedOrtExecutionProviders(): both it and the artifact
   // selector read the probe result, and the locks below freeze that choice.
-  await ensureWebGpuAdapterProbed();
+  await untilAborted(ensureWebGpuAdapterProbed(), options.signal);
+  options.signal?.throwIfAborted();
   const resolved = resolvedOrtExecutionProviders();
   if (options.webgpuOnly && !resolved.includes('webgpu')) throw new Error('createOrtSession: webgpuOnly requested but WebGPU is not a resolved provider');
   const providers = options.webgpuOnly ? ['webgpu'] : resolved;
@@ -1554,6 +1558,7 @@ async function createOrtSessionFromSource(takeModel: () => OrtModelInput, option
   const wasmFallback = !options.webgpuOnly && shouldFallbackToWasmAfterOrtFailure(requestedOrtExecutionProvider(), providers);
   const attempts = planOrtSessionAttempts(prepared, providers, wasmFallback, options);
   prepared = undefined;
+  let firstMessage: string | undefined;
   let lastMessage: string | null = null;
   for (let i = 0; i < attempts.length; i++) {
     const attempt = attempts[i];
@@ -1561,14 +1566,19 @@ async function createOrtSessionFromSource(takeModel: () => OrtModelInput, option
     try {
       let source: OrtModelSource | undefined = attempt.input;
       attempt.input = undefined as never; // Consumed records must not pin an input through later attempts.
-      let input: OrtModelInput | undefined = typeof source === 'function' ? await source() : source;
+      let input: OrtModelInput | undefined = typeof source === 'function' ? await untilAborted(source(), options.signal) : source;
       source = undefined;
+      options.signal?.throwIfAborted();
       const extra = attempt.providers.includes('webgpu') ? options.webgpuSessionOptions : undefined;
       const creating = ort.InferenceSession.create(input as never, { ...sessionOptions(attempt.providers), ...extra });
       input = undefined; // ORT owns its ingestion lifetime; do not keep an extra JS root until it returns.
       const session = await creating;
       const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
       createdOrtSessions += 1;
+      if (options.signal?.aborted) {
+        await trackEngineRetirement(releaseOrtSession(session));
+        options.signal.throwIfAborted();
+      }
       recordSessionAttempt(attempt.providers, true, t1 - t0);
       lastOrtExecutionProviders = attempt.providers;
       lastOrtRuntimeFallback =
@@ -1576,13 +1586,16 @@ async function createOrtSessionFromSource(takeModel: () => OrtModelInput, option
       logOrtSessionReady(attempt.providers, t1 - t0, attempt.note(lastMessage));
       return session;
     } catch (err) {
+      options.signal?.throwIfAborted();
       const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
-      lastMessage = err instanceof Error ? err.message : String(err);
+      lastMessage = ortErrorMessage(err);
       recordSessionAttempt(attempt.providers, false, t1 - t0, lastMessage);
       const rejectParse = typeof options.rejectModelParseErrors === 'function' ? options.rejectModelParseErrors() : options.rejectModelParseErrors;
-      if (rejectParse && isOnnxModelParseError(err)) throw err;
       const next = attempts[i + 1];
-      if (!next) throw err;
+      if (!next || (rejectParse && isOnnxModelParseError(err))) {
+        throw firstMessage === undefined ? err : new OrtSessionFallbackError(firstMessage, err);
+      }
+      firstMessage ??= lastMessage;
       if (next.kind !== 'wasm-fallback') {
         discardDequantFold(lastMessage);
         console.warn(`Centipawn: ORT session failed on the dequantize-folded model; retrying with the original bytes. ${lastMessage}`);

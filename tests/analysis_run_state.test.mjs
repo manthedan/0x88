@@ -492,7 +492,7 @@ test('smoke hooks keep existing fields, expose frozen diagnostics and tear down 
   const from = source.indexOf('  const schedulingStateHook = '),
     to = source.indexOf('  const pvResize = ', from);
   assert.ok(from >= 0 && to > from);
-  const cleanup = [...source.matchAll(/^    if \(smokeGlobal\.__analysis.*$/gm)].map(([line]) => line).join('\n');
+  const cleanup = [...source.matchAll(/^\s+if \(smokeGlobal\.__analysis.*$/gm)].map(([line]) => line).join('\n');
   assert.equal(cleanup.split('\n').length, 4);
   const code = ts.transpile(
     `
@@ -501,7 +501,7 @@ test('smoke hooks keep existing fields, expose frozen diagnostics and tear down 
     const selectedLc0Runtime = () => 'onnx', workerRuntime = 'onnx';
     const hiddenTab = { hidden: false, suspended: [] }, tree = { current: { fen: 'current FEN' } };
     const analysisWorkerProgressMessages = 2, analysisUiProgressSamples = 1;
-    const document = { getElementById: () => ({ textContent: 'ready' }) };
+    const maybeEl = () => ({ textContent: 'ready' });
     const hook = () => {}, applyHiddenTab = () => {};
     ${source.slice(from, to)}
     return () => { ${cleanup} };

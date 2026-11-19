@@ -1,7 +1,10 @@
 import type { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
-import { CachedEvaluator, type Evaluator } from '../nn/evaluator.ts';
+import { CachedEvaluator } from '../nn/evaluator.ts';
+import { disposeEvaluator } from '../nn/runtimeFallbackEvaluator.ts';
 import { squareformerModelSettings } from '../nn/runtimeRegistry.ts';
+import { loadRetirableResource } from './arenaResourceLoad.ts';
 import { CENTIPAWN_NET_HISTORY_POSITIONS } from './engineCatalog.ts';
+import { trackEngineRetirement } from './engineRetirement.ts';
 
 type Loader = typeof createBrowserSquareformerRuntimeEvaluator;
 type Request = {
@@ -13,16 +16,17 @@ type Request = {
 
 /** Shared loading and ownership: a retired load cannot delete or replace a newer entry. */
 export function createCentipawnEvaluatorCache(load: Loader) {
-  const entries = new Map<string, { promise: Promise<CachedEvaluator>; value?: CachedEvaluator }>();
-  const destroy = (cached: CachedEvaluator) => {
+  const entries = new Map<string, { promise: Promise<CachedEvaluator>; value?: CachedEvaluator; abort: AbortController }>();
+  const destroy = async (cached: CachedEvaluator) => {
     cached.clear();
-    const inner = cached.inner as Evaluator & { destroy?: () => void };
-    inner.destroy?.();
+    await disposeEvaluator(cached.inner);
   };
   const remove = (key: string) => {
     const entry = entries.get(key);
     entries.delete(key);
-    if (entry?.value) destroy(entry.value);
+    if (!entry) return;
+    entry.abort.abort();
+    trackEngineRetirement(entry.value ? destroy(entry.value) : entry.promise.then(destroy, () => undefined));
   };
   return {
     has(key: string): boolean {
@@ -31,10 +35,20 @@ export function createCentipawnEvaluatorCache(load: Loader) {
     get(key: string, request: Request, isActive: () => boolean): Promise<CachedEvaluator> {
       const existing = entries.get(key);
       if (existing) return existing.promise;
-      const entry: { promise: Promise<CachedEvaluator>; value?: CachedEvaluator } = {
+      const abort = new AbortController();
+      const external = request.options?.signal;
+      if (external?.aborted) abort.abort(external.reason);
+      else external?.addEventListener('abort', () => abort.abort(external.reason), { once: true, signal: abort.signal });
+      const entry: { promise: Promise<CachedEvaluator>; value?: CachedEvaluator; abort: AbortController } = {
+        abort,
         promise: Promise.resolve()
-          .then(async () => {
-            const loaded = await load(request.spec, request.options);
+          .then(() =>
+            loadRetirableResource(async () => {
+              const loaded = await load(request.spec, { ...request.options, signal: abort.signal });
+              return { ...loaded, dispose: () => disposeEvaluator(loaded.evaluator) };
+            }, abort.signal),
+          )
+          .then(async (loaded) => {
             console.info(`[lc0-${request.options?.audit?.surface}] loaded Centipawn evaluator`, {
               requestedRuntime: loaded.requestedRuntime,
               resolvedRuntime: loaded.resolvedRuntime,
@@ -50,7 +64,7 @@ export function createCentipawnEvaluatorCache(load: Loader) {
               maxHistoryPositions: squareformerModelSettings(loaded.modelId).nativeHistory ? undefined : CENTIPAWN_NET_HISTORY_POSITIONS,
             });
             if (entries.get(key) !== entry || !isActive()) {
-              destroy(cached);
+              await trackEngineRetirement(destroy(cached));
               const error = new Error('Centipawn evaluator was disposed before it finished loading');
               error.name = 'AbortError';
               throw error;
@@ -59,11 +73,13 @@ export function createCentipawnEvaluatorCache(load: Loader) {
             return cached;
           })
           .catch((error) => {
+            abort.abort();
             if (entries.get(key) === entry) entries.delete(key);
             throw error;
           }),
       };
       entries.set(key, entry);
+      void entry.promise.catch(() => undefined);
       return entry.promise;
     },
     retain(keys: ReadonlySet<string>): void {

@@ -7,6 +7,25 @@ import { executableAssetSources } from './scripts/csp_asset_origins.mjs';
 const outDir = process.env.NETLIFY_R2_RELEASE_DIST || 'dist-client';
 const assetsDir = process.env.NETLIFY_R2_PUBLIC_ASSETS || 'public';
 
+// BUILD_SCOPE=product (build:netlify, the R2 release scripts, perf:routes) prerenders only the
+// product pages; the lab and harness routes are never emitted, so production has no URL for them.
+// Dev and plain `npm run build:client` keep the default ['*'] and serve every route.
+export const PRODUCT_ROUTES = ['/', '/app/play/', '/app/analysis/', '/app/arena/', '/docs/'];
+export const LAB_ROUTE_ID = /^\/(?:lab|single-engine)(?:\/|$)/;
+
+export function prerenderConfig(scope = process.env.BUILD_SCOPE) {
+  if (scope !== 'product') return undefined;
+  return {
+    entries: PRODUCT_ROUTES,
+    // No crawling, so a product page linking to a lab page cannot pull it into the build.
+    crawl: false,
+    // Anything unseen besides the lab routes is a product page missing from PRODUCT_ROUTES.
+    handleUnseenRoutes: ({ routes, message }) => {
+      if (routes.some((id) => !LAB_ROUTE_ID.test(id))) throw new Error(message);
+    },
+  };
+}
+
 export function createCspDirectives(env) {
   return {
     'default-src': ['self'],
@@ -70,4 +89,5 @@ export default {
   files: {
     assets: assetsDir,
   },
+  prerender: prerenderConfig(),
 };

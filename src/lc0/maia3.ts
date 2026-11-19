@@ -5,6 +5,7 @@ import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { type OrtSessionDiagnostics, ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
+import { terminateEngineWorker } from './engineRetirement.ts';
 import { MAIA3_ORT_DEFAULTS } from './maia3RuntimeConfig.ts';
 import { clearLc0ModelCacheEntry, type Lc0ModelLoadInfo, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
 import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
@@ -46,15 +47,36 @@ export interface Maia3Evaluation {
   selfElo: number;
   oppoElo: number;
   legalPriors: Maia3MovePolicyEntry[];
-  /**
-   * Raw `logits_value` in MODEL ORDER, which is [Loss, Draw, Win] for the
-   * side to move (upstream maia-platform-frontend processOutputsMaia3).
-   * NOTE: this is the reverse of the [W, D, L] convention used by the LC0
-   * evaluators in this repo — use maia3WinProbability for a safe scalar.
-   */
-  valueLogits: number[];
-  /** Softmax over valueLogits; same [Loss, Draw, Win] side-to-move order. */
-  valueProbabilities: number[];
+  /** Raw `logits_value`, decoded by decodeMaia3Value. Side to move. */
+  valueLogits: Maia3Wdl;
+  /** Softmax over the value logits. Side to move. */
+  valueProbabilities: Maia3Wdl;
+}
+
+/**
+ * Maia3 value head, side-to-move perspective, as named fields. The model emits
+ * `logits_value` as [Loss, Draw, Win] (upstream maia-platform-frontend
+ * processOutputsMaia3), the reverse of the [W, D, L] order the LC0 evaluators
+ * here use. Named fields mean no caller can index the raw array as W,D,L;
+ * decodeMaia3Value is the only place that knows the model order.
+ */
+export interface Maia3Wdl {
+  win: number;
+  draw: number;
+  loss: number;
+}
+
+/** Decode one model-order [Loss, Draw, Win] `logits_value` row. A malformed row decodes to NaN fields. */
+export function decodeMaia3Value(row: ArrayLike<number>): { logits: Maia3Wdl; probabilities: Maia3Wdl } {
+  const values = Array.from(row);
+  if (values.length !== 3 || !values.every(Number.isFinite)) {
+    // NaN rather than softmax's uniform fallback, so a broken output is not read as an uncertain position.
+    const missing = { win: Number.NaN, draw: Number.NaN, loss: Number.NaN };
+    return { logits: missing, probabilities: { ...missing } };
+  }
+  const [loss, draw, win] = values;
+  const [pLoss, pDraw, pWin] = softmax([loss, draw, win]);
+  return { logits: { win, draw, loss }, probabilities: { win: pWin, draw: pDraw, loss: pLoss } };
 }
 
 /**
@@ -64,7 +86,7 @@ export interface Maia3Evaluation {
  * for the side to move, flipped for black.
  */
 export function maia3WinProbability(evaluation: Maia3Evaluation): number {
-  const [loss, draw, win] = evaluation.valueProbabilities;
+  const { win, draw, loss } = evaluation.valueProbabilities;
   if (!Number.isFinite(win) || !Number.isFinite(draw) || !Number.isFinite(loss)) return 0.5;
   const sideToMoveScore = win + 0.5 * draw;
   const blackToMove = evaluation.fen.split(' ')[1] === 'b';
@@ -331,6 +353,15 @@ export class Maia3BrowserEvaluator {
     const create = async (loaded: Lc0ModelLoadResult) => {
       options.signal?.throwIfAborted();
       const worker = new Worker(new URL('./maia3Worker.ts', import.meta.url), { type: 'module', name: 'maia3-evaluator' });
+      // Publish the close once, synchronously when an abort starts it: an owner's
+      // retirement snapshot taken right after abort() must already include it.
+      let closing: Promise<void> | undefined;
+      const close = () => {
+        if (closing) return closing;
+        closing = disposeOrtWorker(worker);
+        options.onInitCleanup?.(closing);
+        return closing;
+      };
       try {
         const names = await Maia3BrowserEvaluator.postInit(
           worker,
@@ -339,6 +370,7 @@ export class Maia3BrowserEvaluator {
           options.signal,
           options.wasmThreads,
           loaded.sha256Valid === true ? { url: loaded.logicalUrl ?? loaded.url, metadataTrusted: isMetadataTrustedModel(loaded) } : undefined,
+          close,
         );
         options.signal?.throwIfAborted();
         const evaluator = new Maia3BrowserEvaluator(worker, loaded, selfElo, oppoElo, names, options.onFailure);
@@ -347,10 +379,9 @@ export class Maia3BrowserEvaluator {
         evaluator.abortCleanup = () => options.signal?.removeEventListener('abort', abort);
         return evaluator;
       } catch (error) {
-        const closing = disposeOrtWorker(worker);
-        options.onInitCleanup?.(closing);
-        if (options.signal?.aborted) void closing.catch(() => undefined);
-        else await closing;
+        const closed = close();
+        if (options.signal?.aborted) void closed.catch(() => undefined);
+        else await closed;
         throw error;
       }
     };
@@ -358,8 +389,9 @@ export class Maia3BrowserEvaluator {
       return await create(modelLoad);
     } catch (error) {
       options.signal?.throwIfAborted();
-      const failed = (error as { modelLoad?: Lc0ModelLoadInfo } | null)?.modelLoad ?? modelLoad;
-      if (!isOnnxModelParseError(error) || !isMetadataTrustedModel(failed)) throw error;
+      const workerFailure = error as { modelLoad?: Lc0ModelLoadInfo; modelParseError?: boolean } | null;
+      const failed = workerFailure?.modelLoad ?? modelLoad;
+      if (!(workerFailure?.modelParseError ?? isOnnxModelParseError(error)) || !isMetadataTrustedModel(failed)) throw error;
       await modelDeps.clear(failed.url, MAIA3_MODEL_CACHE_NAME);
       options.signal?.throwIfAborted();
       const reloaded = { ...(await load(failed.logicalUrl ?? modelLoad.logicalUrl ?? failed.url, true)), revalidated: true };
@@ -388,6 +420,7 @@ export class Maia3BrowserEvaluator {
     signal?: AbortSignal,
     wasmThreads?: number,
     reloadModel?: { url: string; metadataTrusted: boolean },
+    close: () => Promise<void> = () => disposeOrtWorker(worker),
   ): Promise<{ inputNames: string[]; outputNames: string[]; backend: string; ortRuntime?: OrtSessionDiagnostics }> {
     return new Promise((resolve, reject) => {
       const id = 0;
@@ -399,7 +432,7 @@ export class Maia3BrowserEvaluator {
       };
       const onAbort = () => {
         cleanup();
-        void disposeOrtWorker(worker).catch(() => undefined);
+        void close().catch(() => undefined);
         reject(new DOMException('Maia3 cancelled', 'AbortError'));
       };
       const onError = (event: ErrorEvent) => {
@@ -420,6 +453,7 @@ export class Maia3BrowserEvaluator {
           backend?: string;
           ortRuntime?: OrtSessionDiagnostics;
           modelLoad?: Lc0ModelLoadInfo;
+          modelParseError?: boolean;
         };
         if (data.type === 'deviceLost' || data.id !== id) return;
         if (data.type === 'ready') {
@@ -427,7 +461,12 @@ export class Maia3BrowserEvaluator {
           resolve({ inputNames: data.inputNames ?? [], outputNames: data.outputNames ?? [], backend: data.backend ?? 'unknown', ortRuntime: data.ortRuntime });
         } else if (data.type === 'error') {
           cleanup();
-          reject(Object.assign(new Error(data.message ?? 'Maia3 worker initialization failed'), data.modelLoad ? { modelLoad: data.modelLoad } : {}));
+          reject(
+            Object.assign(new Error(data.message ?? 'Maia3 worker initialization failed'), {
+              modelLoad: data.modelLoad,
+              modelParseError: data.modelParseError,
+            }),
+          );
         }
       };
       worker.addEventListener('message', onMessage);
@@ -490,14 +529,14 @@ export class Maia3BrowserEvaluator {
       [tokens.buffer],
     );
     const logitsMove = new Float32Array(response.logitsMove);
-    const valueLogits = Array.from(new Float32Array(response.logitsValue));
+    const value = decodeMaia3Value(new Float32Array(response.logitsValue));
     return {
       fen: boardToFen(board),
       selfElo: clampElo(options.selfElo ?? this.selfElo),
       oppoElo: clampElo(options.oppoElo ?? this.oppoElo),
       legalPriors: legalPolicyFromLogits(board, logitsMove, normalizeTemperature(options.temperature)),
-      valueLogits,
-      valueProbabilities: softmax(valueLogits),
+      valueLogits: value.logits,
+      valueProbabilities: value.probabilities,
     };
   }
 
@@ -533,14 +572,14 @@ export class Maia3BrowserEvaluator {
     const logitsValue = new Float32Array(response.logitsValue);
     return conditions.map((condition, i) => {
       const moveSlice = logitsMove.subarray(i * MAIA3_POLICY_SIZE, (i + 1) * MAIA3_POLICY_SIZE);
-      const valueLogits = Array.from(logitsValue.subarray(i * 3, (i + 1) * 3));
+      const value = decodeMaia3Value(logitsValue.subarray(i * 3, (i + 1) * 3));
       return {
         fen,
         selfElo: clampElo(condition.selfElo),
         oppoElo: clampElo(condition.oppoElo),
         legalPriors: legalPolicyFromLogits(board, moveSlice as Float32Array, normalizeTemperature(options.temperature)),
-        valueLogits,
-        valueProbabilities: softmax(valueLogits),
+        valueLogits: value.logits,
+        valueProbabilities: value.probabilities,
       };
     });
   }
@@ -557,7 +596,7 @@ export class Maia3BrowserEvaluator {
     this.worker.removeEventListener('error', this.errorListener);
     this.worker.removeEventListener('messageerror', this.messageErrorListener);
     if (!alreadyTerminated && !this.disposing) {
-      if (crashed) this.worker.terminate();
+      if (crashed) terminateEngineWorker(this.worker);
       else {
         this.closing = disposeOrtWorker(this.worker);
         void this.closing.catch(() => undefined);

@@ -121,6 +121,38 @@ function fakeDeps(placement, { sessionFails = false, missing = [] } = {}) {
   };
 }
 
+test('canceling Small placement stops waiting before any model load or native allocation', async () => {
+  const placement = Promise.withResolvers(),
+    controller = new AbortController(),
+    fake = fakeDeps(APPLE_WEBGPU);
+  fake.deps.placement = () => placement.promise;
+  const creating = createLc0OnnxEvaluatorFromUrl(ORIGINAL, { deviceSelection: true, load: { signal: controller.signal } }, fake.deps);
+  const settled = creating.then(
+    () => 'created',
+    (error) => error.name,
+  );
+  controller.abort();
+  const result = await Promise.race([settled, new Promise((resolve) => setImmediate(() => resolve('still-waiting')))]);
+  placement.resolve(APPLE_WEBGPU);
+  await new Promise(setImmediate);
+  assert.equal(result, 'AbortError');
+  assert.equal(fake.loads.length, 0);
+  assert.equal(fake.sessions.length, 0);
+});
+
+test('Small carries its model owner signal into the native evaluator options', async () => {
+  const controller = new AbortController(),
+    fake = fakeDeps(APPLE_WEBGPU),
+    create = fake.deps.createEvaluator;
+  fake.deps.createEvaluator = (input, options) => {
+    assert.equal(options.signal, controller.signal);
+    return create(input, options);
+  };
+  const loaded = await createLc0OnnxEvaluatorFromUrl(ORIGINAL, { deviceSelection: true, load: { signal: controller.signal } }, fake.deps);
+  await loaded.evaluator.dispose();
+  assert.equal(fake.sessions.length, 1);
+});
+
 test('Apple + WebGPU loads and runs the split-K model under its own URL', async () => {
   const fake = fakeDeps(APPLE_WEBGPU);
   const result = await createLc0OnnxEvaluatorFromUrl(ORIGINAL, { deviceSelection: true }, fake.deps);

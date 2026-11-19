@@ -1,5 +1,6 @@
 import * as v from 'valibot';
 import { resolvePublicAssetUrl } from '../lc0/assetUrls.ts';
+import { isPinnedCentipawnOnnx } from './centipawnModel.ts';
 import type { Evaluator } from './evaluator.ts';
 import { type BrowserRuntimeAuditDetail, publishBrowserRuntimeAudit } from './runtimeAudit.ts';
 import { RuntimeFallbackEvaluator } from './runtimeFallbackEvaluator.ts';
@@ -46,8 +47,8 @@ export type BrowserRuntimeEvaluatorResult = {
   fallbackReason?: string;
 };
 
-async function loadJson(url: string): Promise<unknown> {
-  const res = await fetch(url);
+async function loadJson(url: string, signal?: AbortSignal): Promise<unknown> {
+  const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`${url}: ${res.status} ${res.statusText}`);
   return await res.json();
 }
@@ -67,6 +68,7 @@ async function createHybridEvaluator(
   manifestUrl: string | undefined,
   kernelBase: string | undefined,
   fixtureRoot: string | undefined,
+  signal: AbortSignal | undefined,
 ): Promise<Evaluator> {
   const gpu = navigator.gpu;
   if (!gpu) throw new Error('WebGPU is unavailable for custom WebGPU runtime');
@@ -74,8 +76,9 @@ async function createHybridEvaluator(
   if (!adapter) throw new Error('WebGPU adapter unavailable for custom WebGPU runtime');
   const device = await adapter.requestDevice();
   try {
+    signal?.throwIfAborted();
     // On success the evaluator owns the device and destroys it in destroy().
-    return await SquareformerTvmHybridEvaluator.create(device, meta, { manifestUrl, kernelBase, fixtureRoot });
+    return await SquareformerTvmHybridEvaluator.create(device, meta, { manifestUrl, kernelBase, fixtureRoot }, signal);
   } catch (error) {
     device.destroy();
     throw error;
@@ -91,14 +94,20 @@ export async function createBrowserSquareformerRuntimeEvaluator(
     kernelBase?: string | null;
     fixtureRoot?: string | null;
     fallback?: boolean;
+    signal?: AbortSignal;
     audit?: Partial<BrowserRuntimeAuditDetail>;
   } = {},
 ): Promise<BrowserRuntimeEvaluatorResult> {
   const params = options.params;
-  const meta = v.parse(SquareFormerMetaSchema, await loadJson(spec.meta));
-  const modelId = inferRuntimeModelId(spec);
+  const meta = v.parse(SquareFormerMetaSchema, await loadJson(spec.meta, options.signal));
+  options.signal?.throwIfAborted();
+  const modelId = isPinnedCentipawnOnnx(spec.onnx) ? S4FIX_V_EMA_MODEL_ID : inferRuntimeModelId(spec);
   const requestedRuntime = parseBrowserRuntimeSelector(options.runtime ?? spec.runtime ?? params?.get('runtime'));
-  const createOrtEvaluator = () => SquareFormerEvaluator.create(spec.onnx, meta, squareformerModelSettings(modelId));
+  const createOrtEvaluator = () =>
+    SquareFormerEvaluator.create(spec.onnx, meta, squareformerModelSettings(modelId), {
+      verifiedCentipawn: isPinnedCentipawnOnnx(spec.onnx),
+      signal: options.signal,
+    });
   const fallback = options.fallback ?? (params ? runtimeFallbackEnabled(params, true) : true);
   const tvmjsEntry = promotedTvmjsRuntimeForModel(modelId);
   const customEntry = promotedCustomRuntimeForModel(modelId);
@@ -143,13 +152,13 @@ export async function createBrowserSquareformerRuntimeEvaluator(
   if (shouldAttemptTvmjsRuntime(modelId, requestedRuntime)) {
     try {
       if (!manifestUrl) throw new Error(`No TVMJS manifest is registered for ${modelId}`);
-      const primary = await SquareformerTvmjsWebgpuEvaluator.create(manifestUrl, meta);
+      const primary = await SquareformerTvmjsWebgpuEvaluator.create(manifestUrl, meta, options.signal);
       const selectedManifestUrl = primary.manifestUrl ?? manifestUrl;
       const runtimeConfigId = new URL(selectedManifestUrl, location.href).pathname.endsWith('/f32/v3-subgroups/manifest.json')
         ? 'centipawn-tvmjs-webgpu-f32-v3-subgroups'
         : entry?.runtimeConfigId;
       const selectedAudit = { ...auditBase, manifestUrl: selectedManifestUrl, runtimeConfigId };
-      const evaluator = fallback ? new RuntimeFallbackEvaluator(primary, () => SquareFormerEvaluator.create(spec.onnx, meta), selectedAudit) : primary;
+      const evaluator = fallback ? new RuntimeFallbackEvaluator(primary, createOrtEvaluator, selectedAudit) : primary;
       const result = {
         evaluator,
         meta,
@@ -162,10 +171,12 @@ export async function createBrowserSquareformerRuntimeEvaluator(
       publishBrowserRuntimeAudit({ ...selectedAudit, resolvedRuntime: result.resolvedRuntime });
       return result;
     } catch (err) {
+      options.signal?.throwIfAborted();
+      if (err instanceof Error && err.name === 'AbortError') throw err;
       if (!fallback) throw err;
       const fallbackReason = err instanceof Error ? err.message : String(err);
       console.warn('TVMJS WebGPU runtime unavailable; falling back to ORT SquareFormer.', { label: spec.label ?? spec.id, modelId, fallbackReason });
-      const evaluator = await SquareFormerEvaluator.create(spec.onnx, meta);
+      const evaluator = await createOrtEvaluator();
       const result = {
         evaluator,
         meta,
@@ -183,10 +194,8 @@ export async function createBrowserSquareformerRuntimeEvaluator(
 
   if (customRequested) {
     try {
-      const primary = await createHybridEvaluator(meta, manifestUrl, kernelBase, fixtureRoot);
-      const evaluator = fallback
-        ? new RuntimeFallbackEvaluator(primary, () => SquareFormerEvaluator.create(spec.onnx, meta), auditBase, 'custom-webgpu-fallback-ort')
-        : primary;
+      const primary = await createHybridEvaluator(meta, manifestUrl, kernelBase, fixtureRoot, options.signal);
+      const evaluator = fallback ? new RuntimeFallbackEvaluator(primary, createOrtEvaluator, auditBase, 'custom-webgpu-fallback-ort') : primary;
       const result = {
         evaluator,
         meta,
@@ -199,10 +208,11 @@ export async function createBrowserSquareformerRuntimeEvaluator(
       publishBrowserRuntimeAudit({ ...auditBase, resolvedRuntime: result.resolvedRuntime });
       return result;
     } catch (err) {
+      options.signal?.throwIfAborted();
       if (!fallback) throw err;
       const fallbackReason = err instanceof Error ? err.message : String(err);
       console.warn('Custom WebGPU runtime unavailable; falling back to ORT SquareFormer.', { label: spec.label ?? spec.id, modelId, fallbackReason });
-      const evaluator = await SquareFormerEvaluator.create(spec.onnx, meta);
+      const evaluator = await createOrtEvaluator();
       const result = {
         evaluator,
         meta,
@@ -218,7 +228,7 @@ export async function createBrowserSquareformerRuntimeEvaluator(
     }
   }
 
-  const evaluator = await SquareFormerEvaluator.create(spec.onnx, meta);
+  const evaluator = await createOrtEvaluator();
   const result = {
     evaluator,
     meta,

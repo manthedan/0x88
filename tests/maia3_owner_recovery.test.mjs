@@ -28,8 +28,8 @@ test('Play Retry evicts a fatally failed Maia cache once, even with concurrent c
   const Maia = factory();
   const ensure = compile(
     `
-    let maia3Promise = null, maia3Status = null;
-    const ctxAsyncUiIsCurrent = () => false;
+    let maia3Promise = null, maia3Status = null, maia3Abort = null;
+    const ctxAsyncUiIsCurrent = () => false, trackEngineRetirement = () => {};
     ${extracted('../src/lc0/playBrowser.ts', 'async function ctxEnsureMaia3(', 'function ctxCpuEngineFor(')}
     return ctxEnsureMaia3;
   `,
@@ -50,11 +50,12 @@ test('Analysis Maia failure removes the failed owner, settles task ownership and
   const Maia = factory();
   const api = compile(
     `
-    let maia3PanelEvaluator = null, maia3PanelLoading = false, maia3PanelLoadGeneration = 0;
+    let maia3PanelEvaluator = null, maia3PanelLoading = false, maia3PanelLoadGeneration = 0, maia3PanelPending = null, maia3PanelAbort = null, maia3PanelBlockedByRun = null;
+    const awaitEngineRetirements = async () => {}, trackEngineRetirement = () => {};
     let maia3PanelTask = null, maia3PanelTimer = null, explorerMaia = null;
     const elements = new Map();
     const el = (id) => { if (!elements.has(id)) elements.set(id, {}); return elements.get(id); };
-    const mountAbort = new AbortController(), isStaleMount = () => false;
+    const mountAbort = new AbortController(), isStaleMount = () => false, isMemoryConstrainedDevice = () => false;
     const showModelProgress = () => {}, hideModelProgress = () => {}, renderExplorerComparison = () => {};
     const renderMaia3Panel = async () => {}, scheduleMaia3Panel = () => {};
     const maia3PanelStatus = (text) => { el('maia3PanelStatus').textContent = text; };

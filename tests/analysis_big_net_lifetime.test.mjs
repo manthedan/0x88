@@ -6,7 +6,7 @@ import { BIG_NET_SESSION_IDLE_TTL_MS, BigNetSessionPool } from '../src/lc0/bigNe
 
 // Execute the actual page disposal functions, not a duplicate policy helper.
 const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
-const unused = source.slice(source.indexOf('function disposeUnusedEngines()'), source.indexOf('function bestShapes()'));
+const unused = source.slice(source.indexOf('function disposeAnalysisCpuEngines()'), source.indexOf('function bestShapes()'));
 const runtime = source.slice(source.indexOf('function disposeRuntimeResources()'), source.indexOf('function disposePageResources()'));
 function controller(activeKeys = []) {
   const events = [],
@@ -48,6 +48,7 @@ function controller(activeKeys = []) {
     const noop=()=>{},cpu={retain:noop,disposeAll:noop};
     const recklessEngines=cpu,viridithasEngines=cpu,berserkEngines=cpu,plentyChessEngines=cpu,stormphraxEngines=cpu;
     const activeEngineRows=()=>[],reviewEngineRows=()=>[],disposeUnusedCentipawnEvaluators=noop,disposeStockfish=noop,renderRecklessRuntimeInfo=noop;
+    const trackEngineRetirement=noop;
     let analysisAbort={abort:noop},analysisRunCentipawnKeys=new Set(),reviewAbort=null,activeWorkerSearchId=null,searchWorker=null;
     const cancelAllAnalysisAssetPrefetches=noop,preparedCpuEngineKeys=new Set(),resetSearchWorker=noop,disposeCentipawnEvaluators=noop;
     let mainEvaluator={dispose:noop},searcher={},lc0ServedModelUrl='test';

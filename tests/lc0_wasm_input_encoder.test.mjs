@@ -165,3 +165,23 @@ test('SIMD WASM LC0 input encoder recognizes the start board like JS whatever th
     if (!moves.length) assertEncodedEqual(wasm.encodeFen(fen), encodeLc0Classical112(fen), `bare ${fen}`);
   }
 });
+
+test('createLc0WasmInputEncoder aborts a stalled module fetch on its owner signal', async (t) => {
+  // A stalled request settles only through its abort signal, like fetch().
+  t.mock.method(
+    globalThis,
+    'fetch',
+    (_url, init = {}) => new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(init.signal.reason), { once: true })),
+  );
+  const controller = new AbortController();
+  const loading = createLc0WasmInputEncoder(undefined, controller.signal);
+  controller.abort();
+  const settled = await Promise.race([
+    loading.then(
+      () => 'loaded',
+      (error) => error.name,
+    ),
+    new Promise((resolve) => setTimeout(() => resolve('stalled'), 100)),
+  ]);
+  assert.equal(settled, 'AbortError', 'Arena Stop must not wait on the hybrid runtime module download');
+});

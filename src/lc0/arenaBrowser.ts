@@ -9,6 +9,7 @@ import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
 import { uciLineToSan, uciToSan } from '../chess/san.ts';
+import { routeDom } from '../features/dom.ts';
 import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import type { Evaluator } from '../nn/evaluator.ts';
 import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
@@ -62,7 +63,7 @@ import {
 import { ARENA_BIG_NET_MEMORY_REASON, arenaBigNetPairingBlocked, arenaBigNetSeatBlocked } from './arenaMemoryGuard.ts';
 import { arenaMoveDelay, guardArenaUnload } from './arenaNavigation.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
-import { loadArenaResource } from './arenaResourceLoad.ts';
+import { loadRetirableResource } from './arenaResourceLoad.ts';
 import { arenaOpeningPairs, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { arenaSideTimeMs } from './arenaTiming.ts';
@@ -79,9 +80,16 @@ import {
   normalizeBerserkVariant,
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
-import { acquireBigNetSearcherAsync, type BigNetKey, disposeBigNetSearcherNow, peekBigNetSearcher, releaseBigNetSearcher } from './bigNetSessionPool.ts';
+import {
+  acquireBigNetSearcherAsync,
+  type BigNetKey,
+  disposeBigNetSearcherNow,
+  peekBigNetSearcher,
+  preparePhoneBigNet,
+  releaseBigNetSearcher,
+} from './bigNetSessionPool.ts';
 import { boardCheck } from './boardUx.ts';
-import { el, htmlEscape, inputEl, maybeEl, selectEl } from './browserDom.ts';
+import { createBrowserDom, htmlEscape } from './browserDom.ts';
 import {
   type BrowserLc0Runtime,
   boundedIntValue,
@@ -110,10 +118,11 @@ import {
 } from './bt4Engine.ts';
 import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
 import { type ChartSeries, hBarChartSvg, lineChartSvg } from './charts.ts';
-import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
+import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryClass.ts';
 import { DisposableVariantPool } from './disposableVariantPool.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import {
+  ARENA_SEAT_STORAGE_KEY,
   canonicalEngineFamily,
   centipawnEngineLabel,
   centipawnVariantOptions,
@@ -145,13 +154,16 @@ import {
   stormphraxCacheKey,
   viridithasCacheKey,
 } from './engineProvision.ts';
+import { awaitEngineRetirements, trackEngineRetirement } from './engineRetirement.ts';
 import { engineVariantMenuLabel } from './engineVariantLabels.ts';
 import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from './evalCompare.ts';
 import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
-import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
+import { requestLargeNetDownloadConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
+import { inspectLargeNetDownload } from './largeNetDownload.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
+import { LC0_MODEL_DOWNLOAD_NOT_APPROVED, untilAborted } from './modelCache.ts';
 import { rememberMoveFocus } from './moveListFocus.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, type Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import {
@@ -233,6 +245,7 @@ interface ArenaEngine {
   move(positions: BoardState[], signal: AbortSignal): Promise<string | null>;
   warmup?(signal: AbortSignal): Promise<void>;
   warmupStatus?: ArenaWarmupStatus;
+  bigNet?: true;
 }
 interface GameRecord {
   pgn: string;
@@ -335,6 +348,8 @@ interface EngineOutputSnapshot {
   visits?: number;
 }
 
+const pageDom = createBrowserDom();
+const { el, inputEl, maybeEl, selectEl } = routeDom<'arena'>(pageDom);
 const params = new URLSearchParams(location.search);
 const DEFAULT_MODEL_URL = resolvePublicAssetUrl('/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx');
 // v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
@@ -499,14 +514,72 @@ let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown'
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
 // A picker acceptance approves its next startup, not every future uncached run.
 const arenaDownloadApprovals = new Set<BigNetKey>();
+/** Big nets the current run may download. A Start check that found one cached approved no download. */
+const arenaRunDownloads = new Set<BigNetKey>();
 let arenaPickerConsentAbort: AbortController | null = null;
 function abortArenaPickerConsent(): void {
   arenaPickerConsentAbort?.abort();
   arenaPickerConsentAbort = null;
 }
-async function bigNetFor(variant: string, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
+async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
   const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
-  return { config: BIG_NETS[key], searcher: await acquireBigNetSearcherAsync(key, true, signal) };
+  // Storage can evict a model that was cached at Start (loading Lc0 Small into a
+  // full cache is enough), so a load not covered by a download approval asks again.
+  // Ask unless the warm session will be reused; preparePhoneBigNet retires one configured differently.
+  const evalCacheEntries = arenaCacheEntries();
+  const notApproved = () => new Error(`Lc0 ${BIG_NETS[key].name} is no longer cached and its download was not approved.`);
+  let cacheOnly = false;
+  if (isMemoryConstrainedDevice() && !arenaRunDownloads.has(key) && !peekBigNetSearcher(key)?.isInitializedFor({ evalCacheEntries })) {
+    const consent = await requestLargeNetDownloadConsent(BIG_NETS[key], signal);
+    signal.throwIfAborted();
+    if (!consent) throw notApproved();
+    if (consent === 'download') arenaRunDownloads.add(key);
+    cacheOnly = consent === 'cached';
+  }
+  const reclaim =
+    isMemoryConstrainedDevice() &&
+    preparePhoneBigNet(
+      key,
+      evalCacheEntries,
+      signal,
+      disposeArenaCpuEngines,
+      () => {
+        el('message').textContent = 'Freeing memory…';
+      },
+      true,
+    );
+  if (reclaim) await reclaim;
+  const searcher = await acquireBigNetSearcherAsync(key, true, signal);
+  // A Stop in the await's continuations would miss the listener below.
+  signal.throwIfAborted();
+  if (!searcher.isInitializedFor({ evalCacheEntries })) {
+    // init() does not watch the match signal, and a cold prefetch can stall:
+    // Stop retires a net that is still loading, as Analysis does.
+    signal.addEventListener(
+      'abort',
+      () => {
+        if (!searcher.loaded && peekBigNetSearcher(key) === searcher) disposeBigNetSearcherNow(key);
+      },
+      { once: true },
+    );
+  }
+  if (cacheOnly) {
+    // 'cached' approved no download, and the entry can be evicted or unreadable by now.
+    try {
+      await searcher.init({ evalCacheEntries, noDownload: true });
+    } catch (error) {
+      signal.throwIfAborted();
+      if (!(error instanceof Error && error.message.includes(LC0_MODEL_DOWNLOAD_NOT_APPROVED))) throw error;
+      // The cache key may still be there (unreadable body), so ask as for a download.
+      const uncached = (config: BigNetConfig, inspectSignal?: AbortSignal) =>
+        inspectLargeNetDownload(config, inspectSignal).then((state) => ({ ...state, cached: false }));
+      const consent = await requestLargeNetDownloadConsent(BIG_NETS[key], signal, true, undefined, uncached);
+      signal.throwIfAborted();
+      if (!consent) throw notApproved();
+      arenaRunDownloads.add(key);
+    }
+  }
+  return { config: BIG_NETS[key], searcher };
 }
 let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
 let runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
@@ -586,7 +659,6 @@ const seatRows: EngineRow[] = [
   { family: 'lc0', variant: 'small', strength: 100 },
   { family: 'sf', variant: 'lite', strength: 8 },
 ];
-const ARENA_SEAT_STORAGE_KEY = '0x88-arena-seats-v1';
 let bt4AvailabilityResolved = false;
 
 function persistedVariantOrDefault(family: EngineFamily, value: unknown): string {
@@ -639,7 +711,7 @@ function formatNodes(nodes: number): string {
 }
 
 function downloadProgressEl(): HTMLElement | null {
-  return document.getElementById('downloadProgress');
+  return maybeEl('downloadProgress');
 }
 
 function showDownloadProgress(label: string, loadedBytes?: number, totalBytes?: number, phase = 'Loading'): void {
@@ -761,12 +833,12 @@ function activeCentipawnEvaluatorKeys(): Set<string> {
   );
 }
 
-function centipawnEvaluator(variant: string): Promise<Evaluator> {
+function centipawnEvaluator(variant: string, signal?: AbortSignal): Promise<Evaluator> {
   const runtime = centipawnRuntimeForVariant(variant);
   const fallback = centipawnRuntimeFallbackForVariant(variant);
   const model = centipawnModel();
   const key = centipawnEvaluatorCacheKey(variant);
-  return centipawnCache.get(
+  const loading = centipawnCache.get(
     key,
     {
       spec: {
@@ -790,6 +862,7 @@ function centipawnEvaluator(variant: string): Promise<Evaluator> {
     },
     () => activeCentipawnEvaluatorKeys().has(key),
   );
+  return untilAborted(loading, signal); // Stop cancels this consumer, not the selected seat's shared owner.
 }
 
 function disposeUnusedCentipawnEvaluators(): void {
@@ -917,10 +990,10 @@ function installRuntimeAuditPanel(): void {
   arenaAuditHandler = (event: Event) => {
     const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
     if (detail.surface && detail.surface !== 'arena') return;
-    const warningTarget = document.getElementById('runtimeWarning');
+    const warningTarget = maybeEl('runtimeWarning');
     if (warningTarget && activeRuntimeAuditIdentities().has(browserRuntimeAuditIdentity(detail))) updateRuntimeFallbackWarning(warningTarget, detail);
     if (detail.family !== 'lc0') return;
-    const target = document.getElementById('runtimeAuditInfo');
+    const target = maybeEl('runtimeAuditInfo');
     if (!target) return;
     target.innerHTML = diagBlockHtml('LC0 audit', [htmlEscape(formatBrowserRuntimeAudit(detail))]);
   };
@@ -936,7 +1009,7 @@ function normalizeLc0InputBackend(value: string | null): 'js' | 'wgsl' | 'wasm' 
 }
 
 function lc0HybridInputBackend(): 'js' | 'wgsl' | 'wasm' {
-  const node = document.getElementById('lc0InputBackendSelect') as HTMLSelectElement | null;
+  const node = maybeEl('lc0InputBackendSelect') as HTMLSelectElement | null;
   return normalizeLc0InputBackend(node?.value ?? params.get('inputBackend') ?? params.get('lc0InputBackend'));
 }
 
@@ -945,7 +1018,7 @@ function normalizeLc0LegalPriorsBackend(value: string | null): 'js' | 'wasm' | '
 }
 
 function lc0HybridLegalPriorsBackend(): 'js' | 'wasm' | 'gpu' {
-  const node = document.getElementById('lc0LegalPriorsSelect') as HTMLSelectElement | null;
+  const node = maybeEl('lc0LegalPriorsSelect') as HTMLSelectElement | null;
   return normalizeLc0LegalPriorsBackend(
     node?.value ?? params.get('legalPriorsBackend') ?? params.get('lc0LegalPriorsBackend') ?? params.get('hybridLegalPriors'),
   );
@@ -962,7 +1035,7 @@ function normalizeLc0EncoderKernelVariant(value: string | null): Lc0WebEncoderKe
 }
 
 function lc0EncoderKernelVariant(): Lc0WebEncoderKernelVariant {
-  const node = document.getElementById('lc0EncoderKernelSelect') as HTMLSelectElement | null;
+  const node = maybeEl('lc0EncoderKernelSelect') as HTMLSelectElement | null;
   return normalizeLc0EncoderKernelVariant(node?.value ?? params.get('encoderKernel') ?? params.get('lc0EncoderKernel') ?? params.get('encoderKernelVariant'));
 }
 
@@ -976,12 +1049,12 @@ function lc0HybridConfigLabel(runtime = selectedLc0Runtime()): string {
 }
 
 function lc0BatchSize(): number {
-  const node = document.getElementById('lc0BatchSizeInput') as HTMLInputElement | null;
+  const node = maybeEl('lc0BatchSizeInput') as HTMLInputElement | null;
   return boundedIntValue(node?.value ?? params.get('lc0BatchSize') ?? params.get('batchSize') ?? params.get('batch'), 1, 1, 64);
 }
 
 function lc0BatchPipelineDepth(): number {
-  const node = document.getElementById('lc0BatchPipelineDepthInput') as HTMLInputElement | null;
+  const node = maybeEl('lc0BatchPipelineDepthInput') as HTMLInputElement | null;
   return boundedIntValue(node?.value ?? params.get('lc0BatchPipelineDepth') ?? params.get('batchPipelineDepth'), 1, 1, 16);
 }
 
@@ -1360,9 +1433,9 @@ function renderEngineOutputs(): void {
     // A newly completed result starts at its first move; ongoing searches retain the reader's place.
     if (previous && previous.fen === line.dataset.fen) line.scrollLeft = previous.scrollLeft;
   }
-  const raw = document.getElementById('engineRaw');
+  const raw = maybeEl('engineRaw');
   if (raw) raw.innerHTML = ids.map(engineRawHtml).join('');
-  const section = document.getElementById('engineOutputsSection');
+  const section = maybeEl('engineOutputsSection');
   if (section) section.hidden = !cards.length;
 }
 
@@ -1572,7 +1645,7 @@ function renderReviewBar(): void {
 /** Following the live game, the list stays scrolled to its newest row (even as panels above resize it). */
 function keepMovesAtLiveEnd(): void {
   if (reviewing) return;
-  const strip = document.getElementById('gameMoves');
+  const strip = maybeEl('gameMoves');
   if (strip) strip.scrollTop = strip.scrollHeight;
 }
 
@@ -1580,7 +1653,7 @@ function keepMovesAtLiveEnd(): void {
 function renderMoveStrip(): void {
   const strip = el('gameMoves');
   const restoreFocus = rememberMoveFocus(strip, 'data-idx');
-  const block = document.getElementById('movesBlock');
+  const block = maybeEl('movesBlock');
   const trail = reviewing && reviewTrail ? reviewTrail : liveTrail;
   if (!trail || trail.entries.length <= 1) {
     if (block) block.hidden = true;
@@ -1892,7 +1965,7 @@ function activeRuntimeAuditIdentities(): Set<string> {
 }
 
 function reconcileActiveRuntimeFallbackWarning(): void {
-  const warningTarget = document.getElementById('runtimeWarning');
+  const warningTarget = maybeEl('runtimeWarning');
   if (warningTarget) reconcileRuntimeFallbackWarning(warningTarget, activeRuntimeAuditIdentities());
 }
 
@@ -1991,7 +2064,7 @@ function arenaGamesPerOpening(): number {
 
 /** One-line description of the locked setup, shown in place of the forms while a match runs. */
 function renderSetupSummary(): void {
-  const node = document.getElementById('setupSummaryText');
+  const node = maybeEl('setupSummaryText');
   if (!node) return;
   const mode = arenaTournamentMode();
   const names = activeSeatRows().map((row) => {
@@ -2025,7 +2098,7 @@ function renderSetupSummary(): void {
 
 /** Setup vs running sidebar states (CSS keys off these data attributes on <main>). */
 function syncArenaPhase(): void {
-  const main = document.getElementById('main');
+  const main = maybeEl('main');
   if (!main) return;
   const wasRunning = main.dataset.phase === 'running';
   main.dataset.phase = running ? 'running' : 'setup';
@@ -2033,10 +2106,10 @@ function syncArenaPhase(): void {
   main.dataset.match = arenaMatchState;
   (el('setupPane') as HTMLFieldSetElement).disabled = running || startPending;
   if (!running) main.dataset.config = 'closed';
-  const editButton = document.getElementById('editSetup');
+  const editButton = maybeEl('editSetup');
   if (editButton) editButton.setAttribute('aria-expanded', String(main.dataset.config === 'open'));
   el('start').textContent = checkpoint ? 'Start new tournament' : arenaTournamentMode() === 'match' ? 'Start match' : 'Start tournament';
-  const title = document.getElementById('scoreboardTitle');
+  const title = maybeEl('scoreboardTitle');
   const displayedMode = checkpoint?.config.mode ?? arenaTournamentMode();
   if (title) title.textContent = displayedMode === 'match' ? 'Match' : displayedMode === 'gauntlet' ? 'Gauntlet' : 'Round robin';
   renderSetupSummary();
@@ -2978,12 +3051,33 @@ function disposeUnusedUciEngines(): void {
   stormphraxEngines.retain(rows.filter((row) => row.family === 'stormphrax').map((row) => stormphraxVariantForKey(row.variant)));
 }
 
+function reconcileArenaNeuralSessions(): void {
+  if (running) return;
+  const rows = activeSeatRows();
+  if (!rows.some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant)) && (lc0Cache || loadingLc0)) {
+    const canceledLoad = loadingLc0;
+    disposeLc0Resources();
+    if (canceledLoad) {
+      hideDownloadProgress();
+      refreshSeatControls();
+      setArenaStartDisabled(startPending);
+      if (!startPending) el('message').textContent = readyMessage();
+    }
+  }
+  for (const key of ARENA_BIG_NET_KEYS) {
+    if (rows.some((row) => row.family === 'lc0' && row.variant === key)) continue;
+    peekBigNetSearcher(key)?.cancel();
+    releaseBigNetSearcher(key, 0);
+  }
+}
+
 function buildEngines() {
   for (const row of seatRows) {
     const safeVariant = phoneSafeEngineVariant(row.family, row.variant);
     if (safeVariant !== row.variant) showPhoneLargeNetFallback();
     row.variant = safeVariant;
   }
+  reconcileArenaNeuralSessions();
   for (const row of activeSeatRows()) clampStrength(row);
   const activeIds = new Set(activeSeatRows().map(engineIdForRow));
   pruneUnusedLc0Searchers(activeIds);
@@ -3059,7 +3153,8 @@ function buildEngines() {
     async (positions, signal) => {
       const current = positions[positions.length - 1];
       const fen = boardToFen(current);
-      const evaluator = await centipawnEvaluator(row.variant);
+      const evaluator = await centipawnEvaluator(row.variant, signal);
+      signal.throwIfAborted();
       const timed = arenaBudgetMode() === 'movetime';
       const result = await chooseMove(current, evaluator, {
         visits: timed ? undefined : row.strength,
@@ -3185,7 +3280,16 @@ function buildEngines() {
     };
   const lc0SearchWarmup = (engineId: string) => async (signal: AbortSignal) => {
     const search = lc0SearcherFor(engineId);
-    await search.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
+    // The hybrid runtime downloads its pack inside this first evaluation, which
+    // the search signal cannot reach: Stop cancels that init; the next match retries.
+    const inner = lc0Cache?.inner as { abortPendingInit?: () => void } | undefined;
+    const stopInit = () => inner?.abortPendingInit?.();
+    signal.addEventListener('abort', stopInit, { once: true });
+    try {
+      await search.search({ positions: warmupPositions }, { visits: 1, signal, yieldEveryMs: 16 });
+    } finally {
+      signal.removeEventListener('abort', stopInit);
+    }
     search.resetTree();
     renderCacheInfo();
   };
@@ -3215,7 +3319,8 @@ function buildEngines() {
     }
   };
   const centipawnWarmup = (row: EngineRow) => async (signal: AbortSignal) => {
-    const evaluator = await centipawnEvaluator(row.variant);
+    const evaluator = await centipawnEvaluator(row.variant, signal);
+    signal.throwIfAborted();
     await chooseMove(warmupPositions[0], evaluator, {
       visits: 1,
       batchSize: 1,
@@ -3267,6 +3372,27 @@ function buildEngines() {
     await engine.newGame(signal);
     renderStormphraxRuntimeInfo();
   };
+  function bindCpuSeat<T>(
+    id: string,
+    name: string,
+    row: EngineRow,
+    get: (variant: string) => T,
+    move: (id: string, row: EngineRow, engine: T) => ArenaEngine['move'],
+    warmup: (engine: T) => NonNullable<ArenaEngine['warmup']>,
+  ): void {
+    if (isMemoryConstrainedDevice()) {
+      // A gauntlet may retire these workers between games; do not capture one.
+      engines.set(id, {
+        id,
+        name,
+        move: (...args) => move(id, row, get(row.variant))(...args),
+        warmup: (signal) => warmup(get(row.variant))(signal),
+      });
+    } else {
+      const engine = get(row.variant);
+      engines.set(id, { id, name, move: move(id, row, engine), warmup: warmup(engine) });
+    }
+  }
   for (const row of activeSeatRows()) {
     const id = engineIdForRow(row);
     if (engines.has(id)) continue;
@@ -3275,7 +3401,7 @@ function buildEngines() {
     const suffix = fixedBudget ? ` ${row.strength}${meta.unit}` : '';
     const name = `${rowLabel(row)}${suffix}`;
     if (row.family === 'lc0') {
-      if (isLc0BigNetVariant(row.variant)) engines.set(id, { id, name, move: lc0BigNetMove(id, row), warmup: lc0BigNetWarmup(row.variant) });
+      if (isLc0BigNetVariant(row.variant)) engines.set(id, { id, name, bigNet: true, move: lc0BigNetMove(id, row), warmup: lc0BigNetWarmup(row.variant) });
       else engines.set(id, { id, name, move: lc0Search(id, row), warmup: lc0SearchWarmup(id) });
     } else if (row.family === 'centipawn') {
       engines.set(id, { id, name, move: centipawnMove(id, row), warmup: centipawnWarmup(row) });
@@ -3294,14 +3420,11 @@ function buildEngines() {
         });
         continue;
       }
-      const engine = getRecklessFor(row.variant);
-      engines.set(id, { id, name, move: recklessMove(id, row, engine), warmup: recklessWarmup(engine) });
+      bindCpuSeat(id, name, row, getRecklessFor, recklessMove, recklessWarmup);
     } else if (row.family === 'viridithas') {
-      const engine = getViridithasFor(row.variant);
-      engines.set(id, { id, name, move: viridithasMove(id, row, engine), warmup: viridithasWarmup(engine) });
+      bindCpuSeat(id, name, row, getViridithasFor, viridithasMove, viridithasWarmup);
     } else if (row.family === 'berserk') {
-      const engine = getBerserkFor(row.variant);
-      engines.set(id, { id, name, move: berserkMove(id, row, engine), warmup: berserkWarmup(engine) });
+      bindCpuSeat(id, name, row, getBerserkFor, berserkMove, berserkWarmup);
     } else if (row.family === 'plentychess') {
       const variant = plentyChessVariantForKey(row.variant);
       const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
@@ -3315,8 +3438,7 @@ function buildEngines() {
         });
         continue;
       }
-      const engine = getPlentyChessFor(row.variant);
-      engines.set(id, { id, name, move: plentyChessMove(id, row, engine), warmup: plentyChessWarmup(engine) });
+      bindCpuSeat(id, name, row, getPlentyChessFor, plentyChessMove, plentyChessWarmup);
     } else {
       const variant = stormphraxVariantForKey(row.variant);
       const unsupportedReason = stormphraxVariantUnsupportedReason(variant);
@@ -3330,8 +3452,7 @@ function buildEngines() {
         });
         continue;
       }
-      const engine = getStormphraxFor(row.variant);
-      engines.set(id, { id, name, move: stormphraxMove(id, row, engine), warmup: stormphraxWarmup(engine) });
+      bindCpuSeat(id, name, row, getStormphraxFor, stormphraxMove, stormphraxWarmup);
     }
   }
   renderRecklessRuntimeInfo();
@@ -3562,6 +3683,8 @@ function hideEngineWarmupStatus(): void {
 }
 
 async function warmUpSelectedEngines(ids: string[], signal: AbortSignal, minimumVisibleMs = 400): Promise<void> {
+  await untilAborted(awaitEngineRetirements(), signal);
+  if (signal.aborted) return;
   const pending: ArenaEngine[] = [];
   const seen = new Set<string>();
   for (const id of ids) {
@@ -3571,6 +3694,10 @@ async function warmUpSelectedEngines(ids: string[], signal: AbortSignal, minimum
     pending.push(engine);
   }
   if (!pending.length) return;
+  // Warm the large net before (re)creating its CPU opponent.
+  if (pending.some((engine) => engine.bigNet) && isMemoryConstrainedDevice() && phoneReclaimSettings().retireCpu) {
+    pending.sort((a, b) => Number(!!b.bigNet) - Number(!!a.bigNet));
+  }
   el('message').textContent = 'Preparing engines…';
   const visibleSince = performance.now();
   try {
@@ -3996,7 +4123,7 @@ async function runIsolatedCpuTournament(
 }
 
 function renderCheckpointStatus(): void {
-  const host = document.getElementById('checkpointSection');
+  const host = maybeEl('checkpointSection');
   if (!host) return;
   // Routine storage status belongs with exports, not above the live scoresheet.
   host.hidden = running ? !checkpointProblem : !checkpoint && !checkpointProblem;
@@ -4079,6 +4206,35 @@ function applyCheckpointConfig(saved: ArenaCheckpoint): void {
     throw new Error('A saved engine version is unavailable. Completed results are still viewable and exportable.');
   refreshBudgetControls();
   refreshSeatControls();
+}
+
+/** Results, match status and PGN export of a saved run that is not playing. */
+function presentSavedCheckpoint(saved: ArenaCheckpoint): void {
+  showCheckpointResults(saved);
+  arenaMatchState = arenaRemainingIndices(saved).length ? 'stopped' : 'final';
+  el('message').textContent = arenaMatchState === 'final' ? 'Saved tournament results.' : 'A saved tournament is ready to resume.';
+  inputEl('pgnOut').value = '';
+  inputEl('pgnOut').hidden = true;
+  // Inspect results without loading engines or changing the saved configuration.
+  const last = saved.completed.at(-1);
+  if (last) {
+    const trail = finishedTrails[last.scheduleIndex];
+    liveTrail = trail;
+    historyBoards = trail.entries.map((entry) => parseFen(entry.fen));
+    board = historyBoards[historyBoards.length - 1];
+    lastUci = trail.entries.at(-1)?.uci ?? null;
+    const scheduled = saved.schedule[last.scheduleIndex];
+    setBoardSideEngines(null, resultsNames.get(scheduled.whiteId)!, null, resultsNames.get(scheduled.blackId)!);
+    enterReview(trail, trail.entries.length - 1);
+  } else {
+    // Nothing played yet: show this run's first opening, not the replaced run's last game
+    // or its charts (as Discard does).
+    liveTrail = null;
+    exitReview();
+    resetGameCharts();
+    el('chartsPanel').hidden = true;
+    setOpeningPreview(resultsSchedule[0].opening);
+  }
 }
 
 function showCheckpointResults(saved: ArenaCheckpoint): void {
@@ -4245,7 +4401,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     clearStartPending();
     return;
   }
-  const checkedBigNetVariants = new Set<string>();
+  const checkedBigNetVariants = new Set<BigNetKey>();
   for (const row of bigNetRows) {
     if (!isLc0BigNetVariant(row.variant) || checkedBigNetVariants.has(row.variant)) continue;
     checkedBigNetVariants.add(row.variant);
@@ -4258,15 +4414,6 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       refreshSeatControls();
       clearStartPending();
       return;
-    }
-    // URL/restored rosters and resumed checkpoints never imply download approval.
-    if (isMemoryConstrainedDevice() && !arenaDownloadApprovals.delete(row.variant)) {
-      const approved = await requestLargeNetConsent(config, matchAbort.signal);
-      if (startupCancelled()) return;
-      if (!approved) {
-        clearStartPending();
-        return;
-      }
     }
   }
   const engineA = participants[0].engine!;
@@ -4299,19 +4446,86 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
     return;
   }
 
+  // Lazy Small loading is still part of setup. Keep the old checkpoint and
+  // exportable games until the replacement evaluator is ready.
+  if (selectedSeatsNeedLc0Evaluator() && !lc0Cache) {
+    el('cancelSetupLoad').hidden = false;
+    try {
+      await loadLc0Evaluator(mountSignal, matchAbort.signal);
+    } finally {
+      if (abort === matchAbort && !isStaleMount(mountSignal)) el('cancelSetupLoad').hidden = true;
+    }
+    if (startupCancelled()) {
+      if (abort === matchAbort && !isStaleMount(mountSignal)) el('message').textContent = 'Tournament preparation stopped.';
+      return;
+    }
+    if (!lc0Cache) return; // The loader reported the failure; leave prior results intact.
+  }
+
+  // Ask after Small loads, which can evict a cached large net, and before the
+  // checkpoint is replaced, so declining keeps the previous tournament.
+  arenaRunDownloads.clear();
+  if (isMemoryConstrainedDevice()) {
+    for (const variant of checkedBigNetVariants) {
+      // URL/restored rosters and resumed checkpoints never imply download approval.
+      const consent = arenaDownloadApprovals.delete(variant) ? 'download' : await requestLargeNetDownloadConsent(BIG_NETS[variant], matchAbort.signal);
+      if (startupCancelled()) return;
+      if (!consent) {
+        clearStartPending();
+        return;
+      }
+      if (consent === 'download') arenaRunDownloads.add(variant);
+    }
+    // A 'cached' approval loads cache-only, and that load can still find the net evicted or
+    // unreadable and ask again. Load the first game's nets now (it would next anyway), so a
+    // decline there also keeps the previous tournament. Resumes keep their own checkpoint.
+    if (!resume && [...checkedBigNetVariants].some((variant) => !arenaRunDownloads.has(variant))) {
+      for (const pid of [schedule[0].whiteId, schedule[0].blackId]) {
+        const row = rowForEngineId(byPid.get(pid)!.engine!.id);
+        if (row?.family !== 'lc0' || !isLc0BigNetVariant(row.variant) || arenaRunDownloads.has(row.variant)) continue;
+        // Stop is hidden during setup; this button cancels a slow or stalled load.
+        el('cancelSetupLoad').hidden = false;
+        try {
+          await bigNetFor(row.variant, matchAbort.signal);
+        } catch (error) {
+          if (startupCancelled()) {
+            if (abort === matchAbort && !isStaleMount(mountSignal)) el('message').textContent = 'Tournament preparation stopped.';
+            return;
+          }
+          el('message').textContent = `Engine preparation failed: ${error instanceof Error ? error.message : String(error)}`;
+          clearStartPending();
+          return;
+        } finally {
+          if (abort === matchAbort && !isStaleMount(mountSignal)) el('cancelSetupLoad').hidden = true;
+        }
+        if (startupCancelled()) {
+          if (abort === matchAbort && !isStaleMount(mountSignal)) el('message').textContent = 'Tournament preparation stopped.';
+          return;
+        }
+      }
+    }
+  }
+
   const runCheckpoint = resume ? claimArenaCheckpoint(resume) : createArenaCheckpoint(captureCheckpointConfig(participants, compatibility), schedule);
   // Establish the slot before any games run. A stale tab must not overwrite it.
   try {
     await saveArenaCheckpoint(runCheckpoint, checkpointToken);
     if (abort !== matchAbort || isStaleMount(mountSignal)) return;
+    // The slot now holds this run even if startup is cancelled below, so the
+    // token and the checkpoint it names commit together and Resume/Discard match it.
     checkpointToken = { runId: runCheckpoint.runId, revision: runCheckpoint.revision };
+    checkpoint = runCheckpoint;
     checkpointProblem = '';
   } catch (error) {
     if (abort !== matchAbort || isStaleMount(mountSignal)) return;
     if (error instanceof ArenaCheckpointConflictError) throw error;
     checkpointProblem = `Not saved: ${error instanceof Error ? error.message : String(error)} Keep this tab open and export PGN before leaving.`;
   }
-  if (startupCancelled()) return;
+  if (startupCancelled()) {
+    // The save replaced the stored run, so show that run's results, not the replaced one's.
+    if (checkpoint === runCheckpoint && abort === matchAbort && !isStaleMount(mountSignal)) presentSavedCheckpoint(runCheckpoint);
+    return;
+  }
   checkpoint = runCheckpoint;
   const pendingIndices = arenaRemainingIndices(runCheckpoint);
   startPending = false;
@@ -4442,15 +4656,14 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
   };
   let enginesReady = false;
   try {
+    await untilAborted(awaitEngineRetirements(), matchAbort.signal);
+    if (isStaleMount(mountSignal)) return;
+    matchAbort.signal.throwIfAborted();
     if (isolatedCpuPool()) {
       enginesReady = true;
       el('message').textContent = 'Preparing private CPU workers…';
       await runIsolatedCpuTournament(schedule, pendingIndices, byPid, matchAbort.signal, completeGame);
     } else {
-      if (selectedSeatsNeedLc0Evaluator() && !lc0Cache) {
-        await loadLc0Evaluator(mountSignal, matchAbort.signal);
-        if (!lc0Cache) throw new Error('The saved Lc0 network could not be loaded.');
-      }
       resetLc0SearchTrees(seatIds);
       // A safe gauntlet can have several large nets in the field. On phones,
       // prepare only this game's seats, never the entire retained roster.
@@ -4459,7 +4672,8 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
         await warmUpSelectedEngines(seatIds, matchAbort.signal, minimumWarmupVisibleMs);
         enginesReady = true;
       }
-      if (isStaleMount(mountSignal) || matchAbort.signal.aborted) return;
+      if (isStaleMount(mountSignal)) return;
+      matchAbort.signal.throwIfAborted();
       for (const i of pendingIndices) {
         if (matchAbort.signal.aborted) break;
         const { whiteId, blackId, opening } = schedule[i];
@@ -4571,8 +4785,9 @@ function disposeLc0Resources(): void {
   lc0LoadAbort?.abort();
   lc0LoadAbort = null;
   loadingLc0 = false;
-  void lc0Cache?.dispose();
+  const retired = lc0Cache;
   lc0Cache = null;
+  if (retired) trackEngineRetirement(Promise.resolve(retired.dispose()));
   arenaLc0ServedModelUrl = '';
   lc0Searchers.clear();
   lastLc0SearchResults.clear();
@@ -4587,15 +4802,7 @@ function disposeLc0Resources(): void {
   activeEngineIds = [];
 }
 
-function disposeRuntimeResources(): void {
-  abortArenaPickerConsent();
-  arenaDownloadApprovals.clear();
-  abort?.abort();
-  abort = null;
-  arenaSearchProgress.clear();
-  hideDownloadProgress();
-  disposeLc0Resources();
-  centipawnCache.clear();
+function disposeArenaCpuEngines(): void {
   disposeStockfish();
   for (const engine of isolatedCpuEngines) engine.dispose();
   isolatedCpuEngines.clear();
@@ -4605,9 +4812,21 @@ function disposeRuntimeResources(): void {
   berserkEngines.disposeAll();
   plentyChessEngines.disposeAll();
   stormphraxEngines.disposeAll();
+}
+
+function disposeRuntimeResources(): void {
+  abortArenaPickerConsent();
+  arenaDownloadApprovals.clear();
+  abort?.abort();
+  abort = null;
+  arenaSearchProgress.clear();
+  hideDownloadProgress();
+  disposeLc0Resources();
+  centipawnCache.clear();
+  disposeArenaCpuEngines();
   for (const key of ARENA_BIG_NET_KEYS) {
     peekBigNetSearcher(key)?.cancel();
-    releaseBigNetSearcher(key);
+    releaseBigNetSearcher(key, 0);
   }
 }
 
@@ -4630,6 +4849,7 @@ async function createSelectedLc0Evaluator(signal: AbortSignal): Promise<Lc0OnnxE
   if (runtime === LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
     return Lc0WholeOnnxWebgpuEvaluator.create({
       manifestUrl: LC0_WHOLE_MODEL_MANIFEST_URL,
+      signal,
       batch: lc0WholeModelPhysicalBatch(),
       fetchTensorCache: lc0WholeModelTensorCache(),
       logger: (line) => console.info('[lc0 whole-model arena]', line),
@@ -4670,11 +4890,20 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
   const hybrid = lc0HybridConfigLabel(runtime);
   el('message').textContent = 'Loading the Lc0 network…';
   showDownloadProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
+  // Until lc0Cache owns the evaluator, cancellation publishes its release
+  // synchronously. Every Arena runtime's dispose() is idempotent.
+  let uninstalled: { dispose?: () => unknown } | undefined;
+  const retireUninstalled = () => {
+    if (uninstalled) trackEngineRetirement(Promise.resolve(uninstalled.dispose?.()));
+    uninstalled = undefined;
+  };
+  signal.addEventListener('abort', retireUninstalled, { once: true });
   try {
-    const evaluator = await loadArenaResource(() => createSelectedLc0Evaluator(signal), signal);
+    await untilAborted(awaitEngineRetirements(), signal);
+    const evaluator = await loadRetirableResource(async () => (uninstalled = await createSelectedLc0Evaluator(signal)), signal);
     const ortDiagnostics = runtime === 'onnx' ? await collectOrtRuntimeDiagnostics({ probeAdapter: false }) : undefined;
     if (isStaleMount(mountSignal) || signal.aborted) {
-      void evaluator.dispose?.();
+      retireUninstalled();
       return;
     }
     publishBrowserRuntimeAudit({
@@ -4703,13 +4932,17 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
             : 'hybrid runtime is pack-lazy until first evaluation succeeds',
       ].filter((part): part is string => !!part),
     });
+    signal.throwIfAborted();
     lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
+    uninstalled = undefined; // The cache owns retirement now.
+    void renderRuntimeBadge();
     lc0Searchers.clear();
     renderCacheInfo();
     hideDownloadProgress();
-    setArenaStartDisabled(false);
+    setArenaStartDisabled(startPending || running);
     el('message').textContent = readyMessage();
   } catch (error) {
+    retireUninstalled();
     if (isStaleMount(mountSignal) || signal.aborted) return;
     hideDownloadProgress();
     if (!selectedSeatsNeedLc0Evaluator()) {
@@ -4719,6 +4952,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(error as Error).message}`;
     }
   } finally {
+    signal.removeEventListener('abort', retireUninstalled);
     if (!isStaleMount(mountSignal) && lc0LoadAbort === loadAbort) {
       lc0LoadAbort = null;
       loadingLc0 = false;
@@ -4733,7 +4967,13 @@ async function reloadLc0Evaluator(): Promise<void> {
   disposeLc0Resources();
   reconcileActiveRuntimeFallbackWarning();
   renderCacheInfo();
-  await loadLc0Evaluator();
+  hideDownloadProgress();
+  refreshSeatControls();
+  void renderRuntimeBadge();
+  if (!running && !startPending) {
+    el('start').toggleAttribute('disabled', false);
+    el('message').textContent = readyMessage();
+  }
 }
 
 function setBenchResult(result: unknown): void {
@@ -5052,10 +5292,12 @@ function wireEvents() {
       }
     })();
   });
-  el('stop').addEventListener('click', () => {
+  const stopMatch = () => {
     abort?.abort();
     el('message').textContent = 'Stopping…';
-  });
+  };
+  el('stop').addEventListener('click', stopMatch);
+  el('cancelSetupLoad').addEventListener('click', stopMatch);
   el('exportPgn').addEventListener('click', exportPgn);
   // History review: charts, move strip, and finished-game log rows jump the
   // board to a past position; Live (or Escape) returns to the running game.
@@ -5107,7 +5349,7 @@ function wireEvents() {
     if (trail) enterReview(trail, trail.entries.length - 1);
   });
   el('editSetup').addEventListener('click', () => {
-    const main = document.getElementById('main');
+    const main = maybeEl('main');
     if (!main) return;
     main.dataset.config = main.dataset.config === 'open' ? 'closed' : 'open';
     syncArenaPhase();
@@ -5169,7 +5411,8 @@ function wireEvents() {
         const request = new AbortController();
         arenaPickerConsentAbort = request;
         const signal = AbortSignal.any([mountAbort.signal, request.signal]);
-        if (!(await requestLargeNetConsent(config, signal))) return;
+        const consent = await requestLargeNetDownloadConsent(config, signal);
+        if (!consent) return;
         if (signal.aborted || arenaPickerConsentAbort !== request || seatRows[seat] !== row || running || startPending) return;
         if (!bigNetSelectableSync(config)) {
           el('message').textContent = bigNetUnavailableText(config);
@@ -5178,7 +5421,8 @@ function wireEvents() {
           return;
         }
         target.value = selectedVariant;
-        if (isMemoryConstrainedDevice()) arenaDownloadApprovals.add(config.key);
+        // A cache hit is rechecked at Start: storage may evict the model before then.
+        if (isMemoryConstrainedDevice() && consent === 'download') arenaDownloadApprovals.add(config.key);
       }
       row.variant = target.value;
     } else if (target.classList.contains('seat-strength')) {
@@ -5188,16 +5432,11 @@ function wireEvents() {
     normalizeSeatRowForDeploy(seat);
     reconcileActiveRuntimeFallbackWarning();
     persistArenaSeatRows();
-    for (const key of ARENA_BIG_NET_KEYS) {
-      if (activeSeatRows().some((r) => r.family === 'lc0' && r.variant === key)) continue;
-      peekBigNetSearcher(key)?.cancel();
-      releaseBigNetSearcher(key);
-    }
     buildEngines();
     populateSeats();
     if (target.classList.contains('seat-var')) el('arenaSeatList').querySelector<HTMLElement>(`.seat-var[data-seat="${seat}"]`)?.focus();
-    if (selectedSeatsNeedLc0Evaluator() && !lc0Cache && !loadingLc0) void loadLc0Evaluator();
-    else if (!loadingLc0) setArenaStartDisabled(false);
+    // Seat selection does not allocate a neural session. Start owns the lazy load.
+    if (!loadingLc0) setArenaStartDisabled(false);
   });
   el('arenaSeatList').addEventListener('input', (event) => {
     if (running || startPending) return;
@@ -5393,21 +5632,7 @@ async function init(mountSignal: AbortSignal) {
     checkpoint = saved;
     checkpointToken = saved ? { runId: saved.runId, revision: saved.revision } : null;
     if (saved) {
-      showCheckpointResults(saved);
-      arenaMatchState = arenaRemainingIndices(saved).length ? 'stopped' : 'final';
-      el('message').textContent = arenaMatchState === 'final' ? 'Saved tournament results.' : 'A saved tournament is ready to resume.';
-      // Inspect results without loading engines or changing the saved configuration.
-      const last = saved.completed.at(-1);
-      if (last) {
-        const trail = finishedTrails[last.scheduleIndex];
-        liveTrail = trail;
-        historyBoards = trail.entries.map((entry) => parseFen(entry.fen));
-        board = historyBoards[historyBoards.length - 1];
-        lastUci = trail.entries.at(-1)?.uci ?? null;
-        const scheduled = saved.schedule[last.scheduleIndex];
-        setBoardSideEngines(null, resultsNames.get(scheduled.whiteId)!, null, resultsNames.get(scheduled.blackId)!);
-        enterReview(trail, trail.entries.length - 1);
-      }
+      presentSavedCheckpoint(saved);
       setArenaStartDisabled(false);
       syncArenaPhase();
     }
@@ -5419,7 +5644,12 @@ async function init(mountSignal: AbortSignal) {
       : `Local saving is unavailable: ${error instanceof Error ? error.message : String(error)}. Export PGN before leaving.`;
     renderCheckpointStatus();
   }
-  if (!checkpoint) await loadLc0Evaluator(mountSignal);
+  // startMatch / the fixed-suite autorun load Small only when actually needed.
+  if (!checkpoint && !checkpointUnreadable) {
+    setArenaStartDisabled(false);
+    el('message').textContent = readyMessage();
+    refreshSeatControls();
+  }
   void renderRuntimeBadge();
   void runFixedSuiteBenchAutorun();
   void runArenaBenchAutorun();
@@ -5496,6 +5726,7 @@ export function mountArenaBrowser(): () => void {
     return () => undefined;
   }
   lastArenaMountHref = href;
+  const releaseDom = pageDom.mount(document.getElementById('main'));
   resetArenaPageState();
   resetArenaUnload();
   const controller = new AbortController();
@@ -5527,20 +5758,24 @@ export function mountArenaBrowser(): () => void {
     el('pairing').textContent = 'Arena initialization failed.';
   });
   return () => {
-    controller.abort();
-    if (mountAbort !== controller) return;
-    disposeRuntimeResources();
-    if (arenaKeydownHandler) document.removeEventListener('keydown', arenaKeydownHandler);
-    arenaKeydownHandler = null;
-    if (arenaAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, arenaAuditHandler);
-    arenaAuditHandler = null;
-    if (arenaPagehideHandler) window.removeEventListener('pagehide', arenaPagehideHandler);
-    arenaPagehideHandler = null;
-    if (arenaClockTimer) clearInterval(arenaClockTimer);
-    arenaClockTimer = null;
-    arenaChartResizeObserver?.disconnect();
-    arenaChartResizeObserver = null;
-    (ground as { destroy?: () => void } | null)?.destroy?.();
-    ground = null;
+    try {
+      controller.abort();
+      if (mountAbort !== controller) return;
+      disposeRuntimeResources();
+      if (arenaKeydownHandler) document.removeEventListener('keydown', arenaKeydownHandler);
+      arenaKeydownHandler = null;
+      if (arenaAuditHandler) window.removeEventListener(BROWSER_RUNTIME_AUDIT_EVENT, arenaAuditHandler);
+      arenaAuditHandler = null;
+      if (arenaPagehideHandler) window.removeEventListener('pagehide', arenaPagehideHandler);
+      arenaPagehideHandler = null;
+      if (arenaClockTimer) clearInterval(arenaClockTimer);
+      arenaClockTimer = null;
+      arenaChartResizeObserver?.disconnect();
+      arenaChartResizeObserver = null;
+      (ground as { destroy?: () => void } | null)?.destroy?.();
+      ground = null;
+    } finally {
+      releaseDom();
+    }
   };
 }

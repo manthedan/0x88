@@ -61,7 +61,7 @@ test('large-net setup confirmation reads metadata without allocating an engine s
   // Whitespace-tolerant: the formatter may wrap this condition across lines.
   assert.match(
     guard,
-    /!phoneBigNetBlocked\(config\.key\)\s*&&\s*bigNetSelectableSync\(config\)\s*&&\s*allowBt4Prompt\s*&&\s*\(?\s*await requestLargeNetConsent/,
+    /!phoneBigNetBlocked\(config\.key\)\s*&&\s*bigNetSelectableSync\(config\)\s*&&\s*allowBt4Prompt\s*&&\s*\(?\s*await requestAnalysisBigNetConsent/,
   );
   assert.match(guard, /if \(!allowed\) next.variant = 'small'/);
   assert.doesNotMatch(guard, /bigNetFor\(|acquireBigNetSearcher\(/);
