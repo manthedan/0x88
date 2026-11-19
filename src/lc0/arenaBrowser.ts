@@ -60,6 +60,7 @@ import {
   playCpuArenaGame,
   settleCpuArenaSearch,
 } from './arenaCpuGame.ts';
+import { diagBlockHtml } from './arenaDiagnostics.ts';
 import { ARENA_BIG_NET_MEMORY_REASON, arenaBigNetPairingBlocked, arenaBigNetSeatBlocked } from './arenaMemoryGuard.ts';
 import { arenaMoveDelay, guardArenaUnload } from './arenaNavigation.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
@@ -975,7 +976,7 @@ function installRuntimeAuditPanel(): void {
     if (detail.family !== 'lc0') return;
     const target = maybeEl('runtimeAuditInfo');
     if (!target) return;
-    target.innerHTML = diagBlockHtml('LC0 audit', [htmlEscape(formatBrowserRuntimeAudit(detail))]);
+    target.innerHTML = diagBlockHtml('LC0 audit', [formatBrowserRuntimeAudit(detail)]);
   };
   window.addEventListener(BROWSER_RUNTIME_AUDIT_EVENT, arenaAuditHandler);
 }
@@ -2164,11 +2165,6 @@ function stockfishThreadsGranted(leaseThreads: number): number {
   return Math.max(1, cap > 0 ? Math.min(cap, leaseThreads) : leaseThreads);
 }
 
-function diagBlockHtml(label: string, valueLines: string[]): string {
-  const lines = valueLines.length ? valueLines : ['—'];
-  return lines.map((line, i) => `<span class="diag-label">${i === 0 ? htmlEscape(label) : ''}</span><span class="diag-value">${line}</span>`).join('');
-}
-
 function cacheMetricsText(metrics: Lc0EvaluationCacheMetrics | undefined): string {
   if (!metrics) return 'NN cache unavailable';
   return `NN cache ${metrics.entries}/${metrics.maxEntries} entries · ${metrics.hits} hit${metrics.hits === 1 ? '' : 's'} · ${metrics.misses} miss${metrics.misses === 1 ? '' : 'es'}`;
@@ -2340,7 +2336,7 @@ function engineSearchDiagnosticsText(ids = diagnosticEngineIds()): string {
 
 function diagnosticsHtml(label: string, text: string): string {
   const value = text.replace(/^[^:]+:\s*/, '');
-  return diagBlockHtml(label, value.split(' | ').map(htmlEscape));
+  return diagBlockHtml(label, value.split(' | '));
 }
 
 function renderEngineDiagnosticsInfo(): void {
@@ -2695,7 +2691,7 @@ function renderRecklessRuntimeInfo(): void {
     const loadText = formatRecklessBrowserApiLoadStatus(status?.browserApiLoad);
     return `${variant.label} · ${mode} · ${assetText}${loadText ? ` · ${loadText}` : ''}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
   });
-  el('recklessRuntimeInfo').innerHTML = diagBlockHtml('Reckless', [...new Set(parts)].map(htmlEscape));
+  el('recklessRuntimeInfo').innerHTML = diagBlockHtml('Reckless', [...new Set(parts)]);
 }
 
 function refreshRecklessVariantUi(): void {
@@ -2738,7 +2734,7 @@ function renderViridithasRuntimeInfo(): void {
     const assetText = asset === 'ok' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${mode} · ${assetText}${status?.persistentDisabled ? ' · persistent disabled after fallback' : ''}`;
   });
-  el('viridithasRuntimeInfo').innerHTML = diagBlockHtml('Viridithas', [...new Set(parts)].map(htmlEscape));
+  el('viridithasRuntimeInfo').innerHTML = diagBlockHtml('Viridithas', [...new Set(parts)]);
 }
 
 function refreshViridithasVariantUi(): void {
@@ -2779,7 +2775,7 @@ function renderBerserkRuntimeInfo(): void {
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
   });
-  el('berserkRuntimeInfo').innerHTML = diagBlockHtml('Berserk', [...new Set(parts)].map(htmlEscape));
+  el('berserkRuntimeInfo').innerHTML = diagBlockHtml('Berserk', [...new Set(parts)]);
 }
 
 function refreshBerserkVariantUi(): void {
@@ -2821,7 +2817,7 @@ function renderPlentyChessRuntimeInfo(): void {
     const assetText = unsupportedReason ? unsupportedReason : asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
   });
-  el('plentychessRuntimeInfo').innerHTML = diagBlockHtml('PlentyChess', [...new Set(parts)].map(htmlEscape));
+  el('plentychessRuntimeInfo').innerHTML = diagBlockHtml('PlentyChess', [...new Set(parts)]);
 }
 
 function refreshPlentyChessVariantUi(): void {
@@ -2871,7 +2867,7 @@ function renderStormphraxRuntimeInfo(): void {
     const assetText = unsupportedReason ?? (asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset');
     return `${variant.label} · ${engine?.runtimeLabel() ?? 'Emscripten worker idle'} · ${assetText}`;
   });
-  el('stormphraxRuntimeInfo').innerHTML = diagBlockHtml('Stormphrax', [...new Set(parts)].map(htmlEscape));
+  el('stormphraxRuntimeInfo').innerHTML = diagBlockHtml('Stormphrax', [...new Set(parts)]);
 }
 
 function refreshStormphraxVariantUi(): void {
