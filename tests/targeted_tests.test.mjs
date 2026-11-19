@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { buildImportGraph, selectTargetedTests } from '../scripts/lib/targeted_tests.mjs';
@@ -77,24 +77,81 @@ test('a known non-source mapping still selects its test', () => {
   assert.ok(decision.tests.includes('tests/production_browser_smoke.test.mjs'));
 });
 
-test('Git deletions still select mapped tests without failing on an unmapped deletion', (t) => {
+function gitFixture(t, files) {
   const cwd = mkdtempSync(join(tmpdir(), 'targeted-test-deletions-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
-  const git = (...args) => execFileSync('git', args, { cwd });
+  const git = (...args) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', ...args], { cwd });
   git('init', '-q');
-  mkdirSync(join(cwd, 'src'));
-  mkdirSync(join(cwd, 'tests'));
-  const removed = ['src/obsolete.ts', 'tests/obsolete.test.mjs', 'src/covered.ts'];
-  const retained = 'tests/covered.test.mjs';
-  for (const file of [...removed, retained]) writeFileSync(join(cwd, file), '');
-  git('add', ...removed, retained);
-  git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'fixture');
-  for (const file of removed) rmSync(join(cwd, file));
+  for (const [file, contents] of Object.entries(files)) {
+    const target = join(cwd, file);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, contents);
+  }
+  git('add', ...Object.keys(files));
+  git('commit', '-qm', 'fixture');
+  return { cwd, git };
+}
+
+test('Git deletions still select mapped tests without failing on an unmapped deletion', (t) => {
+  const { cwd } = gitFixture(t, {
+    'src/obsolete.ts': '',
+    'tests/obsolete.test.mjs': '',
+    'src/covered.ts': '',
+    'tests/covered.test.mjs': '',
+  });
+  for (const file of ['src/obsolete.ts', 'tests/obsolete.test.mjs', 'src/covered.ts']) rmSync(join(cwd, file));
 
   const result = runCli(['--base', 'HEAD', '--dry-run'], cwd);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /tests\/covered\.test\.mjs/);
   assert.doesNotMatch(result.stdout, /tests\/obsolete\.test\.mjs/);
+});
+
+test('a source deletion in the base diff selects surviving tests that import it', (t) => {
+  const { cwd, git } = gitFixture(t, {
+    'src/lc0/searchWorkerCore.ts': '',
+    'tests/search_worker_init_abort.test.mjs': "import '../src/lc0/searchWorkerCore.ts';",
+  });
+  git('rm', 'src/lc0/searchWorkerCore.ts');
+  git('commit', '-qm', 'delete worker core');
+
+  const result = runCli(['--base', 'HEAD^', '--on-unmatched', 'full', '--dry-run'], cwd);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /tests\/search_worker_init_abort\.test\.mjs/);
+});
+
+test('a deleted source with a surviving importer but no matching test triggers the full fallback', (t) => {
+  const { cwd } = gitFixture(t, {
+    'src/obsolete.ts': '',
+    'src/importer.ts': "import './obsolete';",
+  });
+  rmSync(join(cwd, 'src/obsolete.ts'));
+
+  const result = runCli(['--base', 'HEAD', '--on-unmatched', 'full', '--dry-run'], cwd);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^npm test$/m);
+});
+
+test('a staged addition missing from disk still fails closed when unmatched', (t) => {
+  const { cwd, git } = gitFixture(t, { 'src/retained.ts': '' });
+  const added = 'src/new_module.ts';
+  writeFileSync(join(cwd, added), '');
+  git('add', added);
+  rmSync(join(cwd, added));
+
+  const result = runCli(['--staged', '--dry-run'], cwd);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Refusing a zero-test pass/);
+  assert.ok(result.stderr.includes(added));
+});
+
+test('an unmatched staged deletion is ignored even if the file is still on disk', (t) => {
+  const { cwd, git } = gitFixture(t, { 'src/obsolete.ts': '' });
+  git('rm', '--cached', 'src/obsolete.ts');
+
+  const result = runCli(['--staged', '--dry-run'], cwd);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Ignored: src\/obsolete\.ts/);
 });
 
 test('CLI refuses a zero-test pass for puct no longer, and refuses an unknown source file', () => {

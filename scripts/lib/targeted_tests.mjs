@@ -124,10 +124,10 @@ function addEdge(reverse, importer, imported) {
  * Walks static imports from tests, eval scripts, and source, plus path literals
  * tests and eval scripts pass to child processes (`eval/puct_core_tests.mjs`).
  */
-export function buildImportGraph(root = process.cwd()) {
+export function buildImportGraph(root = process.cwd(), deletedFiles = new Set()) {
   const started = performance.now();
-  const files = walkFiles(root);
-  const fileSet = new Set(files);
+  const files = walkFiles(root).filter((file) => !deletedFiles.has(file));
+  const fileSet = new Set([...files, ...deletedFiles]);
   const reverse = new Map();
   for (const file of files) {
     if (!PARSE_EXT.has(path.posix.extname(file))) continue;
@@ -226,7 +226,7 @@ export function normalizeChangedPath(file, cwd = process.cwd()) {
  * status `skip` — no tests and no uncovered source; a zero-test result is explicit, not a pass of product code.
  * status `fail` — executable source matched nothing. Callers must exit non-zero or run the full suite.
  */
-export function selectTargetedTests(changedFiles, graph, { ignoreMissingSources = false } = {}) {
+export function selectTargetedTests(changedFiles, graph, { deletedFiles = new Set() } = {}) {
   const tests = new Set();
   const covered = [];
   const uncovered = [];
@@ -242,7 +242,7 @@ export function selectTargetedTests(changedFiles, graph, { ignoreMissingSources 
     if (matched.size) {
       covered.push(file);
       for (const test of matched) tests.add(test);
-    } else if (isExecutableSource(file) && (!ignoreMissingSources || graph.files.has(file))) uncovered.push(file);
+    } else if (isExecutableSource(file) && (!deletedFiles.has(file) || graph.reverse.has(file))) uncovered.push(file);
     else ignored.push(file);
   }
   let status = 'run';

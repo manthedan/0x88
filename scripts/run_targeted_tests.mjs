@@ -14,10 +14,10 @@ filename and family mappings (search/PUCT, engine adapters, wasm, cloudflare).
 
 An executable source change that matches nothing fails closed. It does not
 exit 0. Pass tests explicitly, or use --on-unmatched full to run npm test.
-Unmapped Git deletions and non-executable paths do not block selection.
+Unreferenced, unmapped Git deletions and non-executable paths do not block selection.
 
 Options:
-  --base REF            Include git diff --name-only REF...HEAD (default: origin/main)
+  --base REF            Include changes from git diff REF...HEAD (default: origin/main)
   --staged              Only infer from staged files
   --files LIST          Comma-separated changed paths to infer from, instead of git
   --tests LIST          Comma-separated test files (skips inference)
@@ -46,25 +46,25 @@ function parseArgs(argv) {
   return args;
 }
 
-function gitLines(args) {
-  const result = spawnSync('git', args, { encoding: 'utf8' });
-  if (result.status !== 0) return [];
-  return result.stdout
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
+function gitFields(command, ...args) {
+  const result = spawnSync('git', [command, '-z', ...args], { encoding: 'utf8' });
+  return result.status === 0 ? result.stdout.split('\0').slice(0, -1) : [];
 }
 
-function changedFiles(args) {
-  if (args.files.length) return args.files;
-  if (args.staged) return gitLines(['diff', '--cached', '--name-only']);
-  const files = new Set([
-    ...gitLines(['diff', '--name-only']),
-    ...gitLines(['diff', '--cached', '--name-only']),
-    ...gitLines(['ls-files', '--others', '--exclude-standard']),
-  ]);
-  if (args.base) for (const file of gitLines(['diff', '--name-only', `${args.base}...HEAD`])) files.add(file);
-  return [...files];
+function changedPaths(args) {
+  if (args.files.length) return new Map(args.files.map((file) => [file, null]));
+  const changes = new Map();
+  const addDiff = (...refs) => {
+    const fields = gitFields('diff', '--name-status', '--no-renames', ...refs);
+    for (let i = 0; i < fields.length; i += 2) changes.set(fields[i + 1], fields[i]);
+  };
+  if (!args.staged) {
+    for (const file of gitFields('ls-files', '--others', '--exclude-standard')) changes.set(file, '?');
+    if (args.base) addDiff(`${args.base}...HEAD`);
+  }
+  addDiff('--cached');
+  if (!args.staged) addDiff();
+  return changes;
 }
 
 function run(command, commandArgs) {
@@ -88,8 +88,10 @@ function main() {
     run(planned.command, planned.args);
     return;
   }
-  const graph = buildImportGraph(process.cwd());
-  const decision = selectTargetedTests(changedFiles(args), graph, { ignoreMissingSources: !args.files.length });
+  const changes = changedPaths(args);
+  const deletedFiles = new Set([...changes].filter(([, status]) => status === 'D').map(([file]) => file));
+  const graph = buildImportGraph(process.cwd(), deletedFiles);
+  const decision = selectTargetedTests(changes.keys(), graph, { deletedFiles });
   const fallback = decision.status === 'fail' && args.onUnmatched === 'full';
   if (decision.status === 'fail' && !fallback) {
     console.error(formatUnmatched(decision));
