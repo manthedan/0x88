@@ -4,7 +4,7 @@ import PhoneLargeNetPreference from '#lib/components/PhoneLargeNetPreference.sve
 import RestoreNotice from '#lib/components/RestoreNotice.svelte';
 import SiteHeader from '#lib/components/SiteHeader.svelte';
 import { routeController } from '#lib/routeController.ts';
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 import { page } from '$app/state';
 
 const title = '0x88 Chess — play chess vs an engine in your browser';
