@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { linkNodeModules } from '../lib/link_node_modules.mjs';
 import { linkAssets, localAssets } from './assets.mjs';
 import { compareRuns, HELP, parseArgs, plan, previewEnvironment } from './gate.mjs';
 import {
@@ -90,7 +91,7 @@ function build(source, out, arm) {
   // Same lockfile: use the worktree's installed dependencies read-only. A dependency refactor gets
   // its own install; never run npm install/ci in the shared checkout/node_modules.
   const sameLock = readFileSync(join(dir, 'package-lock.json')).equals(readFileSync(join(root, 'package-lock.json')));
-  if (sameLock) symlinkSync(realpathSync(join(root, 'node_modules')), join(dir, 'node_modules'), 'dir');
+  if (sameLock) linkNodeModules(join(root, 'node_modules'), join(dir, 'node_modules'));
   else command('npm', ['ci', '--ignore-scripts'], dir);
   const links = localAssets(root, dir);
   command('env', ['BUILD_SCOPE=product', 'npm', 'run', 'build:client'], dir);
