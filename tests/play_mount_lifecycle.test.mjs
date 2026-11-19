@@ -435,6 +435,9 @@ test('Play reloads only when a remount changes the dev overrides this document l
   assert.equal(plain(at('')), false);
   assert.equal(plain(at('?model=/m.onnx')), false);
   assert.equal(plain(at('')), false);
+  const repeated = createOverrideGate();
+  assert.equal(repeated(at('?ep=wasm&ep=webgpu')), false);
+  assert.equal(repeated(at('?ep=webgpu&ep=wasm')), true, 'the first repeated value wins, so its order counts');
 });
 
 test('Play checks its overrides before it creates any engine', () => {

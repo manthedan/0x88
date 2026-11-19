@@ -10,10 +10,11 @@
 const PER_MOUNT_PARAMS = new Set(['model']);
 
 function overrideSignature(url: URL): string {
+  // Stable sort by name: repeated values keep URL order, since ORT reads the first `ep`.
   return [...url.searchParams]
     .filter(([name]) => !PER_MOUNT_PARAMS.has(name))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(value)}`)
-    .sort()
     .join('&');
 }
 
