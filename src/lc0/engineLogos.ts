@@ -49,7 +49,6 @@ export function engineLogoHtml(family: EngineLogoFamily | undefined, className =
   const resolved = family ?? 'generic';
   const url = engineLogoUrl(resolved);
   if (url && availableEngineLogos.has(resolved)) return `<img class="${className}" src="${url}" alt="">`;
-  // Generic logo doesn't need probing -- it's always available
   if (resolved === 'generic') return `<img class="${className}" src="/engine-logos/generic.svg" alt="">`;
   if (resolved === 'centipawn') return `<img class="${className}" src="/engine-logos/centipawn.svg" alt="">`;
   return `<span class="${className} engine-logo-placeholder"></span>`;

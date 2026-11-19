@@ -104,9 +104,7 @@ export function resolvePublicAssetUrl(pathOrUrl: string): string {
   try {
     const url = new URL(pathOrUrl);
     if (url.protocol === 'https:' || url.protocol === 'http:') return url.href;
-  } catch {
-    // Relative/same-origin path handled below.
-  }
+  } catch {}
   const isModelAsset = pathOrUrl.startsWith('/models/');
   const base = configuredAssetBase(isModelAsset);
   if (!base || !R2_RESOLVED_PREFIXES.some((prefix) => pathOrUrl.startsWith(prefix))) return pathOrUrl;

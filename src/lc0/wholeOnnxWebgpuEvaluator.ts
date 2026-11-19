@@ -303,9 +303,7 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
       // wasm and GPU memory.
       try {
         ownedRuntime?.dispose();
-      } catch {
-        /* best effort */
-      }
+      } catch {}
       device.destroy();
       throw error;
     }
@@ -346,19 +344,13 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
       if (this.readbackDrainFailed) return;
       try {
         this.runtime.endScope();
-      } catch {
-        /* already unwound */
-      }
+      } catch {}
       try {
         await this.runtime.dispose();
-      } catch {
-        /* best effort */
-      }
+      } catch {}
       try {
         this.device?.destroy?.();
-      } catch {
-        /* best effort */
-      }
+      } catch {}
     };
     this.closePromise = Promise.allSettled([...this.inFlight]).then(release);
     return this.closePromise;
@@ -553,7 +545,6 @@ export class Lc0WholeOnnxWebgpuEvaluator implements Lc0EvaluationProvider {
             else submitted.push(null);
           }
         } finally {
-          // A later submission can throw after earlier batches queued copies.
           syncMs = await this.drainBatches(submitted);
           drained = true;
         }

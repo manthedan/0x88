@@ -554,7 +554,6 @@ onMount(() => {
     .more-options select{width:100%}
   .setup-pane .more-options .field{margin-top:4px}
 
-  /* Engine panels: one per engine, same structure for every engine */
   .engines-block{padding:12px 14px; border-top:1px solid var(--rule)}
   .block-heading{display:flex; align-items:baseline; gap:8px; margin:0 0 8px; font:650 13px var(--sans); letter-spacing:0; text-transform:none; color:var(--ink)}
   .block-hint{color:var(--muted); font-weight:500; font-size:12px}
@@ -597,7 +596,6 @@ onMount(() => {
   .eng-raw{display:grid; gap:8px; margin-top:4px; color:var(--text); font:11.5px/1.5 var(--mono); overflow-wrap:anywhere}
   .eng-raw :global(strong){display:block; color:var(--ink); font:600 12px var(--sans)}
 
-  /* Move table (number | White | Black), as on Play */
   .arena-sidebar > .moves-block{display:flex; flex-direction:column; border-top:1px solid var(--rule)}
   .moves-heading{padding:10px 14px 0}
   .move-columns{display:grid; grid-template-columns:44px 1fr 1fr; color:var(--muted); font:500 12px/24px var(--sans); border-bottom:1px solid var(--rule)}
@@ -621,7 +619,6 @@ onMount(() => {
   .move-nav svg{width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round}
   .move-nav .live-button{width:auto; margin-left:auto; padding:0 12px; color:var(--on-accent); font:650 13px var(--sans)}
 
-  /* Log, PGN, runtime */
   .results-block, .runtime-block{border-top:1px solid var(--rule)}
   .arena-workspace:global([data-phase=running]) .runtime-block{display:none}
   .arena-workspace:global([data-match=none]) .results-block,
@@ -664,7 +661,6 @@ onMount(() => {
   .chart-legend{display:flex; flex-wrap:wrap; gap:10px; color:var(--text); font-size:12px}
   .chart-legend :global(.swatch){display:inline-block; width:9px; height:9px; margin-right:4px; border-radius:2px; vertical-align:-1px}
 
-  /* Dev-only advanced settings (?dev) */
   .setup-pane :global(.advanced-settings){margin:0 14px 12px}
   .setup-pane .row{margin-top:8px}
   .setup-pane :global(.advanced-runtime){flex:1 1 100%; border:1px solid var(--rule); border-radius:7px; background:var(--card); padding:8px 10px}

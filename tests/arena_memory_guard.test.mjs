@@ -144,8 +144,8 @@ test('safe gauntlet warmup uses only each game on phones; desktop still warms th
       },
     };
     const warmup = extract(
-      '      // A safe gauntlet',
-      '        // Reset trees per game',
+      '      const constrained = isMemoryConstrainedDevice();\n      if (!constrained) {',
+      '        resetLc0SearchTrees(seatIds);\n        for (const key of ARENA_BIG_NET_KEYS)',
       (text) => `async function run() { let enginesReady = false;\n${text}\n} }`,
     );
     const run = new Function('deps', `const { ${Object.keys(deps).join(', ')} } = deps;\n${warmup}\nreturn run;`)(deps);

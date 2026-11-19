@@ -35,7 +35,6 @@ export interface ArrowLayout {
   x2: number;
   y2: number;
   tip: [number, number];
-  /** Unit direction from origin to target. */
   ux: number;
   uy: number;
 }

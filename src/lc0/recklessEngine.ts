@@ -6,7 +6,6 @@ import { parseBestMove, parseStockfishInfo, type StockfishInfoLine } from './sto
 import { fenAfterUciMoves } from './uciGameHistory.ts';
 
 export interface RecklessOptions {
-  /** Fixed search depth. Lower = faster. */
   depth?: number;
   /** Alternative to depth: fixed think time in ms. */
   movetimeMs?: number;
@@ -310,7 +309,6 @@ export class RecklessEngine implements BrowserUciEngine {
     const worker = new Worker(new URL('./recklessWasiWorker.ts', import.meta.url), { type: 'module', name: 'reckless-wasi-persistent' });
     const sharedInput = createSharedInput();
     worker.onmessage = (event: MessageEvent) => {
-      // A replaced worker's late line/exit must not resolve or tear down the new one.
       if (this.worker !== worker) return;
       this.handlePersistentMessage(event.data as { type: string; stream?: 'stdout' | 'stderr'; line?: string; exitCode?: number; error?: string });
     };
@@ -402,12 +400,6 @@ export class RecklessEngine implements BrowserUciEngine {
     if (!wasBrowserApi) this.browserApiLoadStatus = null;
   }
 
-  /**
-   * Run `fn` after every earlier request. A request cancelled while it waits
-   * for its turn rejects with AbortError at once instead of waiting for another
-   * caller's work. Releasing its gate early is safe: the queue tail still
-   * chains through `previous`, so later requests keep their order.
-   */
   private runExclusive<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     return this.queue.run(async () => {
       // Work queued before dispose() must not recreate (and leak) a worker.

@@ -44,7 +44,6 @@ export type Action = {
   name: string;
   /** Selector that must be visible and enabled for the action to be eligible (inside the open dialog, if any). */
   when: string;
-  /** Extra browser expression that must be truthy. */
   whenExpr?: string;
   steps: readonly Step[];
   /** Relative selection weight; default 1. */
@@ -189,7 +188,6 @@ export const FEATURES = [
     invariants: OWNED,
   },
 
-  // ---- Play ----
   {
     id: 'play.board',
     routes: ['play'],
@@ -342,7 +340,6 @@ export const FEATURES = [
     invariants: OWNED,
   },
 
-  // ---- Analysis ----
   {
     id: 'analysis.board',
     routes: ['analysis'],
@@ -681,7 +678,6 @@ export const FEATURES = [
     invariants: OWNED,
   },
 
-  // ---- Arena ----
   {
     id: 'arena.board',
     routes: ['arena'],

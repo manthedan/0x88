@@ -17,7 +17,6 @@ export function terminateEngineWorker(worker: Worker | null | undefined): void {
   lastWorkerRetirement = performance.now();
 }
 
-/** Recheck the deadline in case another worker terminated during the wait. */
 export async function awaitWorkerReclaim(gapMs: number, signal: AbortSignal, onWait: () => void): Promise<void> {
   let announced = false;
   while (true) {

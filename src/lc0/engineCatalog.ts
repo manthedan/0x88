@@ -68,7 +68,6 @@ export interface EngineFamilyDefinition extends EngineFamilyCatalogEntry {
     default: string;
     /** Static options live here; families with runtime-probed variants supply their options in their typed variant module. */
     options?: readonly EngineVariantOption[];
-    /** Production variants are an explicit allowlist. */
     v0Allowed: readonly string[];
     v0Fallback: string;
     label?: (variant: string, surface: EngineSurface) => string;

@@ -29,7 +29,6 @@ export function writeAnalysisHandoff(pgn: string, now = Date.now()): void {
 
 export type PlayHandoffResult = { status: 'none' } | { status: 'invalid' } | { status: 'ready'; position: PlayPosition };
 
-/** Encode/decode are pure so malformed, expired and illegal transfers are testable. */
 export function encodePlayHandoff(position: PlayPosition, now = Date.now()): string {
   const raw = JSON.stringify({ version: 1, position, at: now });
   if (decodePlayHandoff(raw, now).status !== 'ready') throw new Error('This position cannot be played from');

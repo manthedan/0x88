@@ -291,8 +291,6 @@ export interface Edge {
   visits: number;
   valueSum: number; // from the child side-to-move perspective
   virtualVisits: number;
-  // Future edge-local model/search signals. These are intentionally optional so
-  // classic PUCT stays unchanged while AV/risk/uncertainty policies can plug in.
   actionValuePrior?: number;
   rankScore?: number;
   regret?: number;
@@ -1071,8 +1069,6 @@ function rootEarlyStopReason(
   kldState: KldEarlyStopState,
   bestState: BestStableEarlyStopState,
 ): SearchStats['stopReason'] | undefined {
-  // Early-stop telemetry should only report a real early exit, not completion
-  // exactly at the scheduled visit cap.
   if (rootVisitCount(root) >= visitTarget) return undefined;
   if (options.earlyStop === 'root-dominance' && rootVisitDominanceStop(root, visitTarget)) return 'root-dominance';
   if (rootBestStableEarlyStop(root, context, options, bestState)) return 'best-stable';
@@ -1336,8 +1332,6 @@ function extractPrincipalVariation(
   return pv;
 }
 
-// MultiPV: one principal variation per top visited root move, each line starting
-// with its root move and then following the usual best-visited continuation.
 function extractMultiPv(
   root: Node,
   context: SearchPolicyContext,
@@ -1406,7 +1400,6 @@ async function expand(node: Node, evaluator: Evaluator, context: SearchPolicyCon
   const moves = legalMoves(node.board);
   if (!moves.length) {
     node.expanded = true;
-    // No legal moves: checkmate is loss for the side to move, stalemate is draw.
     node.terminalValue = inCheck(node.board) ? -1 : contemptDrawValue(context, node.board.turn);
     node.edges = [];
     if (stats) {

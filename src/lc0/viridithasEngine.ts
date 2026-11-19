@@ -283,8 +283,6 @@ export class ViridithasEngine implements BrowserUciEngine {
       } else if (command.startsWith('setoption name MultiPV value ')) {
         if (command === this.persistentMultipvCommand) continue;
         this.persistentMultipvCommand = command;
-      } else if (command === 'ucinewgame') {
-        // Hash contents changed but option state did not.
       }
       out.push(command);
     }

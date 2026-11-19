@@ -3,7 +3,6 @@ export type NavItem = {
   label: string;
 };
 
-/** The three workspaces, in the order shared header and footer links present them. */
 const workspaces: NavItem[] = [
   {
     href: '/app/analysis/',

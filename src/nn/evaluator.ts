@@ -74,7 +74,6 @@ export interface CachedEvaluatorOptions {
   includeHistory?: boolean;
   /** Include legal move action IDs in the key. Keep true for move-token models. */
   includeLegalMoves?: boolean;
-  /** Human/debug label. */
   label?: string;
   /**
    * Newest history positions the wrapped net reads. Longer histories (search
@@ -132,7 +131,6 @@ export interface BrokeredEvaluatorOptions {
   maxBatchSize?: number;
   /** Milliseconds to wait for more concurrent requests before flushing. 0 flushes on next microtask. */
   maxWaitMs?: number;
-  /** Human/debug label. */
   label?: string;
 }
 

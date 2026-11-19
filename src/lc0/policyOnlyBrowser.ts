@@ -1018,7 +1018,6 @@ function clampFloat(value: string | null, min: number, max: number, fallback: nu
   return Math.min(max, Math.max(min, parsed));
 }
 
-// Runtime-adjustable settings: seeded from query params, then driven by the UI.
 let playerSide: 'white' | 'black' = params.get('side') === 'black' ? 'black' : 'white';
 let searchVisits = clampInt(params.get('visits') ?? '32', 1, 100000, 32);
 let searchBatchSize = clampInt(params.get('batch') ?? params.get('batchSize') ?? '1', 1, 512, 1);
@@ -1071,7 +1070,6 @@ let activeWorkerSearchId: number | null = null;
 let workerSearchCancellationRequested = false;
 let battleRunning = false;
 let battleGames = Math.max(1, Math.floor(Number(params.get('battleGames') ?? '1') || 1));
-// Delay between plies so the game is watchable on the board.
 let battleDelayMs = Math.max(0, Math.floor(Number(params.get('battleDelay') ?? '350') || 350));
 let battleAbort: AbortController | null = null;
 type BattleOpponent = 'policy' | 'stockfish';
@@ -1295,7 +1293,6 @@ function renderSearchResult(result: RenderableSearchResult) {
       return `<li class="${i === 0 ? 'best' : ''}"><span>${i + 1}</span><b>${htmlEscape(entry.uci)}</b><meter min="0" max="100" value="${width}"></meter><code>${entry.visits} · ${(entry.prior * 100).toFixed(1)}%</code></li>`;
     })
     .join('');
-  // Draw the chosen move (green) and other MultiPV candidates (blue) on the board.
   setBoardShapes(searchShapes(result.move, result.multiPv));
 }
 
@@ -1326,7 +1323,6 @@ function renderEvaluation() {
           return `<li class="${i === 0 ? 'best' : ''}"><span>${i + 1}</span><b>${htmlEscape(entry.uci)}</b><meter min="0" max="100" value="${width}"></meter><code>${(entry.prior * 100).toFixed(2)}%</code></li>`;
         })
         .join('');
-      // Reflect the policy pick on the board so analysis is visible there.
       setBoardShapes(bestMoveShapes(choice.move));
     })
     .catch((error) => {
@@ -3961,7 +3957,6 @@ function beginSearch() {
   searching = true;
   activeWorkerSearchId = null;
   workerSearchCancellationRequested = false;
-  // Worker searches are cancelled by message id; main-thread searches by signal.
   mainSearchAbort = useSearchWorker ? null : new AbortController();
 }
 
@@ -3977,8 +3972,6 @@ function endSearch() {
 async function executeSearchResult(): Promise<RenderableSearchResult> {
   if (useSearchWorker) return await searchWithWorker();
   const started = performance.now();
-  // yieldEveryMs lets the main-thread search relinquish the event loop so the
-  // Stop button stays responsive and the page never feels frozen.
   const search = await searcher!.search(
     currentEvaluationInput(),
     currentSearchOptions({
@@ -4016,8 +4009,6 @@ async function searchRootPosition() {
   } finally {
     endSearch();
     setBusy(false);
-    // Keep the search arrows when a result is shown; otherwise refresh the
-    // evaluation (which restores the plain best-move arrow).
     if (rendered) renderStatic();
     else renderEvaluation();
   }
@@ -4027,7 +4018,6 @@ function stopSearch() {
   if (battleRunning) {
     el('message').textContent = 'Stopping game…';
     battleAbort?.abort();
-    // Also abort the in-flight per-move worker search so it stops immediately.
     if (activeWorkerSearchId !== null) {
       workerSearchCancellationRequested = true;
       if (searchWorkerReady) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
@@ -4361,8 +4351,6 @@ async function resetBattleSearchTree(): Promise<void> {
   }
 }
 
-// LC0 search move, run in the worker when available so the board keeps
-// animating; falls back to a cancellable main-thread search otherwise.
 async function battleSearchMove(positions: BoardState[]): Promise<string | null> {
   if (searchWorkerReady) {
     const response = await postWorkerRequest<{ type: 'searchResult'; result: RenderableSearchResult }>(
@@ -4387,7 +4375,6 @@ function getStockfish(): StockfishEngine {
   return stockfish;
 }
 
-// Stockfish only needs the current FEN, not LC0 history.
 async function battleStockfishMove(positions: BoardState[]): Promise<string | null> {
   const current = positions[positions.length - 1];
   return getStockfish().bestMove(boardToFen(current), battleAbort?.signal);
@@ -4398,8 +4385,6 @@ function opponentProvider(): { provider: MoveProvider; label: string } {
   return { provider: battlePolicyMove, label: 'LC0 policy' };
 }
 
-// Play one full game on the visible board, animating each ply, so the engines'
-// moves are watchable. Reuses the page board/history/move-list state.
 async function playGameOnBoard(white: MoveProvider, black: MoveProvider, signal: AbortSignal): Promise<{ result: GameResultCode; reason: string }> {
   loadPosition(parseFen(START_FEN));
   await resetBattleSearchTree();
@@ -4492,7 +4477,6 @@ async function startBattle() {
   }
 }
 
-// Load a fresh root position with no real prior boards, matching a ?fen= load.
 function loadPosition(next: BoardState) {
   board = next;
   historyBoards = [board];
@@ -4872,8 +4856,6 @@ function wireEvents(): void {
     void searchRootPosition();
   });
   el('stopSearch').addEventListener('click', stopSearch);
-  // "Analyze position" runs a search on the current board. Loading a different
-  // position is the explicit job of the FEN box + Load FEN.
   el('analyze').addEventListener('click', () => {
     void searchRootPosition();
   });

@@ -513,8 +513,6 @@ export class StockfishEngine implements BrowserUciEngine {
           this.worker?.postMessage('stop');
           abortTimer = setTimeout(() => this.failActive(abortError()), STOCKFISH_ABORT_DRAIN_TIMEOUT_MS);
         };
-        // Clean up the abort listener whether the move completes or is aborted, so
-        // listeners don't accumulate on the battle-lifetime signal (one per ply).
         this.resolveMove = (uci) => {
           cleanup();
           this.rejectMove = null;

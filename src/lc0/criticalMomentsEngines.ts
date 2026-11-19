@@ -63,7 +63,6 @@ export function createCriticalEngines(
     if (!worker) return Promise.reject(new Error('Lc0 worker unavailable.'));
     const id = ++sequence;
     return new Promise<T>((resolve, reject) => {
-      // Each entry is resolved with the worker reply for the request type T posted under that id.
       pending.set(id, { resolve: resolve as (value: unknown) => void, reject, progress });
       worker!.postMessage({ ...message, id });
     });

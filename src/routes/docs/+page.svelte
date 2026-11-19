@@ -109,7 +109,6 @@ const outline: Located[] = toc.flatMap((group) => [
 ]);
 const byId = new Map(outline.map((entry) => [entry.link.id, entry]));
 
-// ---- scroll-spy -----------------------------------------------------------
 let activeId = outline[0].link.id;
 $: activeTopId = byId.get(activeId)?.top.id ?? '';
 $: activeLabel = byId.get(activeId)?.link.label ?? 'Contents';
@@ -147,7 +146,6 @@ function keepActiveVisible(): void {
   else if (item.bottom > box.bottom - 8) scroller.scrollTop += item.bottom - box.bottom + 8;
 }
 
-// ---- mobile contents sheet --------------------------------------------------
 let narrow = false;
 let tocOpen = false;
 $: if (tocOpen) void tick().then(keepActiveVisible);
@@ -160,7 +158,6 @@ function closeSheet(): void {
   tocOpen = false;
 }
 
-// ---- search -----------------------------------------------------------------
 type SearchEntry = { id: string; title: string; group: string; parent: string; text: string; titleLc: string; textLc: string };
 type SearchHit = { entry: SearchEntry; score: number; pre: string; match: string; post: string };
 let index: SearchEntry[] = [];
@@ -193,7 +190,6 @@ function blockText(el: HTMLElement): string {
   }
   const container = el.parentElement?.closest(CONTAINERS);
   if (container) return cleanText(container);
-  // A bare h3: gather its following siblings up to the next heading.
   const parts: string[] = [];
   let next = el.nextElementSibling;
   while (next && !/^H[23]$/.test(next.tagName)) {
@@ -331,7 +327,6 @@ function onWindowClick(event: MouseEvent): void {
   closeSheet();
 }
 
-// ---- live browser check -----------------------------------------------------
 let caps: BrowserCapabilityReport | null = null;
 let capsFailed = false;
 
@@ -380,7 +375,6 @@ onMount(() => {
   <p class="intro-help">Fix <a href="#trouble-webgpu">WebGPU problems</a> or <a href="#trouble-downloads">slow downloads</a>, or <a href="#trouble-cache">clear downloaded models</a>.</p>
 </header>
 
-<!-- ===== Contents: left rail on desktop, sticky bar + sheet on phones ===== -->
 <aside class="toc" class:open={tocOpen} aria-label="Documentation contents" bind:this={rail}>
   <div class="toc-toolbar">
     <button class="toc-toggle" type="button" aria-expanded={tocOpen} aria-controls="toc-panel" bind:this={tocToggle} on:click={() => (tocOpen = !tocOpen)}>
@@ -474,7 +468,6 @@ onMount(() => {
 
 <div class="doc-content">
 
-<!-- ===== GET STARTED: THE WORKSPACES ===== -->
 <section id="pages">
   <h2>Get started <a class="anchor-link" href="#pages" aria-label="Link to this section">#</a></h2>
   <p class="lead">All workspaces run locally. Engines download on first use and are reused.</p>
@@ -950,10 +943,8 @@ onMount(() => {
   {@render sectionNav('engines')}
 </section>
 
-<!-- ===== UNDER THE HOOD ===== -->
 <section id="under-the-hood">
   <h2>Under the hood <a class="anchor-link" href="#under-the-hood" aria-label="Link to this section">#</a></h2>
-<!-- ===== NEURAL BROWSER RUNTIMES ===== -->
 <div class="runtime-block">
   <h3 id="neural-runtimes">Neural browser runtimes <a class="anchor-link" href="#neural-runtimes" aria-label="Link to this section">#</a></h3>
   <p class="lead">Lc0 and Maia3 are loaded as browser models rather than compiled UCI executables. 0x88 supplies input encoding, inference, and legal-move mapping. Its own PUCT implementation searches the Lc0 and Leela Queen Odds outputs, while Maia3 is used directly as a rating-conditioned move policy.</p>
@@ -1120,7 +1111,6 @@ onMount(() => {
   {@render sectionNav('under-the-hood')}
 </section>
 
-<!-- ===== LICENSES ===== -->
 <section id="licenses">
   <h2>Licenses &amp; corresponding source <a class="anchor-link" href="#licenses" aria-label="Link to this section">#</a></h2>
   <p class="lead">Most engines on this site use GPL or AGPL licenses. This section identifies each redistributed artifact, its upstream project, and its corresponding-source archive.</p>
@@ -1207,7 +1197,6 @@ onMount(() => {
   </blockquote>
   </div>
 
-<!-- ===== REMOVAL ===== -->
 <div class="removal-block">
   <h3 id="removal">Removal requests <a class="anchor-link" href="#removal" aria-label="Link to this section">#</a></h3>
   <p class="lead">The engines and models above belong to their respective projects. 0x88 packages them for browser use.</p>
@@ -1219,10 +1208,10 @@ onMount(() => {
   {@render sectionNav('licenses')}
 </section>
 
-</div><!-- /doc-content -->
+</div>
 
-</div><!-- /wrap -->
-</div><!-- /doc-body -->
+</div>
+</div>
 
 </main>
 <footer class="site-footer">
@@ -1238,7 +1227,6 @@ onMount(() => {
 <style>
   .visually-hidden{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0}
 
-  /* ---- layout: contents rail | intro + content ---- */
   .doc-body{font-size:16px; --docs-secondary:color-mix(in srgb, var(--text) 80%, var(--ink) 20%)}
   .doc-body .doc-grid{
     padding:36px 28px 64px;
@@ -1257,7 +1245,6 @@ onMount(() => {
   .doc-content :global(table){display:block; overflow-x:auto}
   .doc-content{overflow-wrap:break-word}
 
-  /* ---- contents rail ---- */
   .toc{
     grid-area:toc;
     position:sticky; top:calc(var(--hdr, 64px) + 20px);
@@ -1319,7 +1306,6 @@ onMount(() => {
     .toc-group > ul{min-height:0; overflow-y:auto}
   }
 
-  /* ---- search results ---- */
   .results-count,.no-results{margin:0 0 8px; padding:0 4px; color:var(--text-soft); font-size:12.5px}
   .no-results{color:var(--text); line-height:1.5}
   .results ul{gap:2px}
@@ -1334,7 +1320,6 @@ onMount(() => {
   .hit-snippet{font-size:12.5px; line-height:1.45; color:var(--text)}
   .hit-snippet mark{background:var(--accent-soft); color:var(--accent-soft-text); font-weight:650; border-radius:2px; padding:0 1px}
 
-  /* ---- content ---- */
   .doc-content section{padding:0 0 52px}
   .doc-content section:last-child{padding-bottom:0}
   .doc-content :global([id]){scroll-margin-top:calc(var(--hdr, 64px) + 20px)}
@@ -1384,7 +1369,6 @@ onMount(() => {
   .analysis-topic h3{margin:0 0 14px}
   .analysis-topic li + li{margin-top:8px}
 
-  /* ---- workspace cards ---- */
   .page-block{
     background:var(--panel); border:1px solid color-mix(in srgb, var(--ink) 16%, var(--panel));
     border-radius:var(--radius); padding:24px; margin-bottom:24px;
@@ -1422,7 +1406,6 @@ onMount(() => {
   .section-nav a:hover{color:var(--ink)}
   .section-nav .next-section{margin-left:auto}
 
-  /* ---- troubleshooting ---- */
   .trouble{padding:4px 0 8px}
   .trouble + .trouble{border-top:1px solid var(--rule); margin-top:12px}
   .trouble h3{margin-top:22px}
@@ -1442,7 +1425,6 @@ onMount(() => {
   .dc-state[data-tone=warn]{color:var(--warn); background:var(--warn-soft); border-color:color-mix(in srgb, var(--warn) 35%, var(--rule))}
   .doc-content .dc-pending{margin:0; color:var(--text); font-size:14px}
 
-  /* ---- tables ---- */
   .doc-table{width:100%; border-collapse:collapse; font-size:13.5px; margin:8px 0 18px}
   .doc-table th,.doc-table td{padding:9px 10px; border-bottom:1px solid var(--rule); text-align:left; vertical-align:top; color:var(--ink-soft)}
   .doc-table thead th{
@@ -1456,7 +1438,6 @@ onMount(() => {
   .engine-table .sub{display:block; font-weight:400; font-size:12px; color:var(--text-soft)}
   .table-note{font-size:14px}
 
-  /* ---- engine entries ---- */
   .engine-entry{padding:8px 0 32px; border-bottom:1px solid var(--rule-soft)}
   .engine-entry:last-of-type{border-bottom:none}
   .engine-meta{
@@ -1499,7 +1480,6 @@ onMount(() => {
   .engine-entry details .details-body{padding:0 16px 14px}
   .engine-entry details .details-body p:last-child{margin-bottom:0}
 
-  /* ---- callouts ---- */
   .callout{
     border-radius:var(--radius); padding:20px 24px;
     margin:20px 0; border:1px solid var(--rule);
@@ -1545,7 +1525,6 @@ onMount(() => {
   }
   .doc-content blockquote p{margin:0; color:var(--text)}
 
-  /* ---- phones and narrow tablets: sticky contents bar + sheet ---- */
   @media(max-width:860px){
     .doc-body .doc-grid{
       grid-template-columns:minmax(0,1fr);

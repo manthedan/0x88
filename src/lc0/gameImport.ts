@@ -123,7 +123,6 @@ export async function fetchChessComPgn(username: string, opts: ImportOptions, fe
   if (!archives?.length) return '';
   const max = clampMax(opts.max);
   const pgns: string[] = [];
-  // Newest archive (month) first until we have enough games.
   for (let i = archives.length - 1; i >= 0 && pgns.length < max; i--) {
     const games = await withRequestSignal('Chess.com', opts, signal, async (requestSignal) => {
       const monthResponse = await fetchImpl(archives[i], { signal: requestSignal });

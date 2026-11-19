@@ -21,7 +21,6 @@ export interface ScheduledGame<TOpening> {
   opening: TOpening;
   /** Suite slot, not the name/FEN: duplicate openings remain distinct. */
   openingIndex: number;
-  /** Stable key identifying the pairing this game belongs to. */
   pairingKey: string;
 }
 

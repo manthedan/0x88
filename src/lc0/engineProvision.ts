@@ -1,13 +1,3 @@
-// Shared CPU-engine construction for the play / arena / analysis pages.
-//
-// Each page keeps its own variant-selection policy (URL params, custom
-// variants, async asset fallback) and its own engine cache, but the
-// CONSTRUCTION — default options, constructor wiring, and the cache-key
-// derivation those caches rely on — is single-sourced here. Before this
-// module the three pages carried parallel copies that had already drifted
-// (arena's reckless cache key included the backend, analysis's did not, so
-// two backends of the same variant collided in the analysis cache).
-
 import { BerserkEngine } from './berserkEngine.ts';
 import { type BerserkVariant, berserkVariantByKey, defaultBerserkVariantKey, resolveDefaultBerserkVariantAssetFallback } from './berserkVariants.ts';
 import type { BrowserUciEngine } from './browserUciEngine.ts';

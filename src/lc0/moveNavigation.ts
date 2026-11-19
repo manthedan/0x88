@@ -27,7 +27,6 @@ export function normalizeViewPly(viewPly: number | null, totalPlies: number): nu
   return ply >= totalPlies ? null : ply;
 }
 
-/** The ply the board should show for a (possibly live) view ply. */
 export function displayedPly(viewPly: number | null, totalPlies: number): number {
   const normalized = normalizeViewPly(viewPly, totalPlies);
   return normalized === null ? Math.max(0, Math.floor(totalPlies)) : normalized;
@@ -53,7 +52,6 @@ export function navigateViewPly(viewPly: number | null, totalPlies: number, acti
   }
 }
 
-/** Which navigation buttons can act from the current view. */
 export function moveNavAvailability(viewPly: number | null, totalPlies: number): Record<MoveNavAction, boolean> {
   const current = displayedPly(viewPly, totalPlies);
   const total = Math.max(0, Math.floor(totalPlies));
@@ -90,7 +88,6 @@ export interface MoveNavKeyEvent {
 /** Elements whose own keyboard handling must win over board navigation. */
 const KEYBOARD_OWNER_SELECTOR = 'input,textarea,select,[contenteditable]:not([contenteditable="false"]),.promotion-overlay';
 
-/** True when the key event's target is a form control or other keyboard owner. */
 export function isKeyboardOwnerTarget(target: unknown): boolean {
   if (!target || typeof target !== 'object') return false;
   const node = target as { isContentEditable?: boolean; closest?: (selector: string) => unknown };

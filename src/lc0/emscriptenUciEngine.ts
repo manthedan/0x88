@@ -23,7 +23,6 @@ const utf8Bytes = (text: string): number => new TextEncoder().encode(text).lengt
  * prints its replies; the per-engine files only supply names and URLs.
  */
 export interface EmscriptenUciOptions {
-  /** Fixed search depth. */
   depth?: number;
   /** Alternative to depth: fixed think time in ms. */
   movetimeMs?: number;
@@ -36,7 +35,6 @@ export interface EmscriptenUciOptions {
 export interface EmscriptenUciEngineConfig {
   /** `BrowserUciEngine.name`, e.g. `stormphrax-emscripten`. */
   name: string;
-  /** Engine name used in error messages. */
   label: string;
   /** Global defined by the MODULARIZE'd glue (its EXPORT_NAME). */
   factoryGlobal: string;
@@ -85,9 +83,6 @@ export function emscriptenUciWorkerScript(config: Pick<EmscriptenUciEngineConfig
   if (!/^[A-Za-z_$][\w$]*$/.test(config.factoryGlobal)) throw new Error(`Invalid Emscripten factory global: ${config.factoryGlobal}`);
   const factory = config.factoryGlobal;
   const label = JSON.stringify(config.label);
-  // A missing artifact indicates an incomplete checkout or deploy. When the
-  // engine has a rebuild hint, carry it into the worker so the failure
-  // identifies the affected URLs instead of a bare "NetworkError importing script".
   return String.raw`
 ${engineArtifactWorkerScript()}
 const resolveEmscriptenAssetUrl = ${resolveEmscriptenAssetUrl.toString()};

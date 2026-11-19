@@ -56,7 +56,6 @@ export interface PromotionOverlayOptions {
   /** The element the Chessground board was mounted into. */
   boardContainer: HTMLElement;
   orientation: 'white' | 'black';
-  /** Side that is promoting. */
   color: Color;
   /** All matching promotion moves for the drag (same from/to, 4 pieces). */
   choices: Move[];
@@ -95,7 +94,6 @@ export function showPromotionOverlay(options: PromotionOverlayOptions): void {
   overlay.className = 'promotion-overlay';
   const { col, startRow, rowStep } = promotionTilePlacement(squareName(options.choices[0].to), options.orientation);
 
-  // Stable piece order: queen first, then rook/bishop/knight.
   const order = ['q', 'r', 'b', 'n'];
   const sorted = [...options.choices].sort((a, b) => order.indexOf(a.promotion ?? 'q') - order.indexOf(b.promotion ?? 'q'));
   const tiles: HTMLButtonElement[] = [];
@@ -143,7 +141,6 @@ export function showPromotionOverlay(options: PromotionOverlayOptions): void {
     options.onCancel();
   });
   host.appendChild(overlay);
-  // Autofocus the queen tile so keyboard users can pick immediately.
   requestAnimationFrame(() => tiles[0]?.focus());
 }
 

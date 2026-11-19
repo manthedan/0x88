@@ -451,7 +451,6 @@ export function parsePgnGame(text: string, options: { strict?: boolean; mainline
       }
       continue;
     }
-    // move
     if (!options.strict && ended && !stack.length) {
       stop(token.value, 'after-result');
       continue;

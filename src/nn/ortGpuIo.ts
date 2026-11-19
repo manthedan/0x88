@@ -210,7 +210,6 @@ export class OrtGpuIoBinding {
       this.feeds = { [input.name]: wrap(this.inputBuffer, input) };
       this.fetches = outputMode === 'session' ? null : Object.fromEntries(this.layout.slots.map((slot, i) => [slot.name, wrap(this.outputBuffers[i], slot)]));
     } catch (error) {
-      // Keep the construction error while rolling back every caller-owned resource.
       for (const tensor of wrapped) {
         try {
           tensor.dispose();
@@ -245,7 +244,6 @@ export class OrtGpuIoBinding {
   private async runNow(data: ArrayBufferView & { BYTES_PER_ELEMENT: number; byteLength: number }): Promise<OrtGpuIoOutputs> {
     if (this.disposed) throw new Error('OrtGpuIoBinding has been disposed');
     if (data.byteLength !== this.inputBytes) throw new Error(`OrtGpuIoBinding: input is ${data.byteLength} bytes, expected ${this.inputBytes}`);
-    // float16: the raw f16 bits (Uint16Array, or a Float16Array view of them).
     const bytesPerElement = BYTES_PER_ELEMENT[this.input.type];
     if (data.BYTES_PER_ELEMENT !== bytesPerElement || (this.input.type === 'float32' && !(data instanceof Float32Array)))
       throw new Error(

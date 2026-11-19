@@ -51,9 +51,6 @@ export const BERSERK_ARTIFACT_BUILD_HINT = 'Berserk artifact missing — build i
 const assetStatuses = new Map<string, BerserkAssetStatus>();
 const assetChecks = new Map<string, Promise<BerserkAssetStatus>>();
 
-// Berserk artifact paths a public deployment serves. Code stays per-variant;
-// the preload package does not, because every SIMD tier emits byte-identical
-// bytes and only the canonical one is published.
 const DEPLOYED_BERSERK_PATHS = new Set([
   '/berserk/berserk-emscripten.js',
   '/berserk/berserk-emscripten.wasm',

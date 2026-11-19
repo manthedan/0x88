@@ -23,7 +23,6 @@ export interface LineChartOptions {
   height?: number;
   yMin?: number;
   yMax?: number;
-  /** Tick label formatter for the y axis. */
   formatY?: (value: number) => string;
   /** Optional horizontal reference line (e.g. 0.5 for the eval midline). */
   midline?: number;
@@ -101,7 +100,6 @@ export function lineChartSvg(series: readonly ChartSeries[], options: LineChartO
 
   const parts: string[] = [];
   parts.push(`<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg" role="img">`);
-  // y ticks: min / mid / max
   for (const tick of [yMin, (yMin + yMax) / 2, yMax]) {
     const y = py(tick);
     parts.push(`<line x1="${pad.left}" y1="${round2(y)}" x2="${width - pad.right}" y2="${round2(y)}" stroke="var(--rule,#00000018)" stroke-width="1"/>`);
@@ -113,7 +111,6 @@ export function lineChartSvg(series: readonly ChartSeries[], options: LineChartO
       `<line x1="${pad.left}" y1="${round2(y)}" x2="${width - pad.right}" y2="${round2(y)}" stroke="var(--rule,#00000033)" stroke-dasharray="3 3" stroke-width="1"/>`,
     );
   }
-  // x extents
   parts.push(`<text x="${pad.left}" y="${height - 3}" fill="var(--muted,#777)" ${FONT}>${round2(xMin)}</text>`);
   parts.push(`<text x="${width - pad.right}" y="${height - 3}" text-anchor="end" fill="var(--muted,#777)" ${FONT}>${round2(xMax)}</text>`);
   for (const entry of drawn) {

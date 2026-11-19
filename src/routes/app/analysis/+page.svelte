@@ -432,7 +432,6 @@ onMount(() => {
   :global(.analysis-workspace .keyboard-square:focus-visible){outline:3px solid #fff; outline-offset:-4px; box-shadow:inset 0 0 0 6px #225ca0; background:#fff2}
   .analysis-workspace .section-block>summary{font:650 13px/1.3 var(--sans); letter-spacing:0; text-transform:none; color:var(--ink)}
   .analysis-workspace .section-block>summary::before{font-size:12px}
-  /* Tools stay secondary to the wide move-navigation buttons. */
   .board-tools{display:flex; align-items:stretch; gap:6px; flex:0 0 auto}
   .board-tools:global([hidden]){display:none}
   .board-tool-disclosure{display:contents}
@@ -744,11 +743,9 @@ onMount(() => {
   :global(.wdlbar .w){background:#f4f1e8}
   :global(.wdlbar .d){background:#b9b3a4}
   :global(.wdlbar .b){background:#3a3a3a}
-  /* ── Right column, Lichess-shaped: header → engine strip → top lines → tabs → move list (fills the rest). ── */
   .analysis-overview{display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-height:52px; padding:6px 10px 6px 14px; background:var(--panel-inset); border-bottom:1px solid var(--rule)}
   #autosaveNotice:empty{display:none}
   .position-status{display:flex; align-items:center; justify-content:space-between; gap:8px; flex:1 0 max-content; min-width:0; max-inline-size:100%}
-  /* Quiet, neutral run state: text + glyph, no pill competing with the primary action. */
   .analysis-status{display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--muted); font:500 12.5px/1.3 var(--sans); white-space:nowrap}
   .analysis-status::before{display:inline-block; margin-right:5px; vertical-align:middle}
   .position-status .run-action{flex:0 0 auto}
@@ -762,7 +759,6 @@ onMount(() => {
   .manage-engines{background:transparent; color:var(--ink); border-color:var(--border-input)}
   .engine-count{display:inline-grid; place-items:center; min-width:20px; height:20px; padding:0 5px; border-radius:10px; background:var(--panel-2); font:700 12px/1 var(--sans); font-variant-numeric:tabular-nums}
   .manage-engines:hover:not(:disabled){background:var(--panel); color:var(--ink)}
-  /* Analyze / Stop is the one filled primary in every state. */
   .run-action{min-width:0; font-weight:650}
   .run-action svg{fill:currentColor; stroke:none}
   #analyze:disabled{opacity:.55}
@@ -779,7 +775,6 @@ onMount(() => {
      cannot widen Stop and wrap the engine controls. */
   .analysis-overview #stop:disabled, .analysis-overview:has(#stop:not(:disabled)) #analyze{display:none}
 
-  /* Engine strip */
   .engine-strip{display:flex; flex-direction:column; min-width:0}
   .engine-summaries{flex:0 1 auto; min-height:0; overflow:auto; overscroll-behavior:contain; scrollbar-width:thin}
   .analysis-workspace .analysis-content>:is(.history-panel, .comparison-panel, .human-panel, .review-panel){min-height:208px}
@@ -818,7 +813,6 @@ onMount(() => {
   :global(.engine-summary-meter.indeterminate){width:100%; opacity:.55; animation:analysis-pulse 1.4s ease-in-out infinite}
   @keyframes -global-analysis-pulse{50%{opacity:.15}}
   :global(.engine-avatar){display:inline-grid; place-items:center; width:22px; height:22px; flex:0 0 22px; border-radius:5px; background:var(--engine-chip-color); color:#fff; font:700 10px/1 var(--mono); font-variant-numeric:slashed-zero; letter-spacing:-.4px; box-shadow:inset 0 0 0 1px #ffffff26}
-  /* The engine entry point belongs at the header, not between results and the game. */
   .analysis-overview .add-engine-inline{flex:0 0 auto; gap:5px; border:1px solid var(--accent); background:var(--accent-soft); color:var(--ink); text-align:left}
   #addEngineHint{display:none}
   .add-engine-inline:hover:not(:disabled){border-color:var(--accent); background:var(--accent-soft); color:var(--ink)}
@@ -998,7 +992,6 @@ onMount(() => {
   .opening-name{flex:0 0 auto; margin:0; padding:7px 12px; border-bottom:1px solid var(--rule); color:var(--muted); font:13px/1.4 var(--sans)}
   .opening-name[hidden]{display:none}
   .opening-name :global(strong){margin-right:6px; color:var(--ink); font:600 12px var(--mono)}
-  /* Full-width row states, with paired SAN columns kept close enough to scan. */
   .history-panel :global(.movelist){flex:1 1 auto; min-height:0; max-height:none}
   :global(.movelist){font:14px/1.4 var(--sans); overflow:auto; scroll-snap-type:y proximity; background:var(--panel); scroll-padding:8px; overscroll-behavior:contain; scrollbar-width:thin; padding:0}
   :global(.move-pair){display:grid; grid-template-columns:36px repeat(2,minmax(0,130px)); align-items:stretch; scroll-snap-align:start}
@@ -1102,7 +1095,6 @@ onMount(() => {
   @media (max-width:600px){
     .analysis-workspace{padding:6px 4px 32px; gap:8px}
     .board-panel{padding:0; border:0; background:transparent}
-    /* The full-width board no longer pays for marker/counter gutters. */
     .board-readout{min-height:44px; padding:0; gap:4px}
     .eval-turn{display:none}
     .eval-chip{min-width:0; max-width:200px; gap:5px; padding:0 5px; min-height:28px}
