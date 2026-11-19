@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { T3_NET } from '../src/lc0/bt4Engine.ts';
 import { lc0SplitKUrl, selectLc0OrtModelUrl } from '../src/lc0/lc0SmallModelSelection.ts';
@@ -62,6 +63,55 @@ test('search worker uses transferred split-K bytes even when its probe would sel
   assert.equal(create.mock.calls[0].arguments[0], model);
   assert.equal(reply.type, 'error');
   assert.match(reply.error, /stop after session input/);
+});
+
+test('a WASM-only worker releases transferred split-K bytes before loading the original', () => {
+  const source = `
+import assert from 'node:assert/strict';
+import { DEFAULT_LC0_ORT_EVALUATOR_DEPS, lc0SplitKUrl } from ${JSON.stringify(new URL('../src/lc0/lc0SmallModelSelection.ts', import.meta.url).href)};
+import { startSearchWorker } from ${JSON.stringify(new URL('../src/lc0/searchWorkerCore.ts', import.meta.url).href)};
+import { InferenceSession } from ${JSON.stringify(new URL('../src/nn/ortRuntime.ts', import.meta.url).href)};
+
+Object.defineProperty(globalThis, 'navigator', { value: { gpu: { requestAdapter: async () => null } } });
+const reply = Promise.withResolvers();
+let handle;
+globalThis.self = { addEventListener: (_type, listener) => { handle = listener; }, postMessage: reply.resolve };
+const originalUrl = ${JSON.stringify(T3_NET.modelUrl)};
+const splitKUrl = lc0SplitKUrl(originalUrl);
+assert.ok(splitKUrl);
+const loadResult = (url, text) => ({
+  model: new TextEncoder().encode(text).buffer,
+  url, mode: 'memory', cacheStatus: 'unavailable', verification: 'hashed', sha256Valid: true,
+  elapsedMs: 0, telemetry: { source: 'network', totalMs: 0 },
+});
+let transferred;
+function handOffSplitK() {
+  const load = loadResult(splitKUrl, 'split-K');
+  transferred = new WeakRef(load.model);
+  handle({ data: {
+    type: 'init', id: 1, modelUrl: originalUrl, ep: 'auto', deviceModelSelection: true,
+    cacheModel: true, ortIoMode: 'cpu', dequantFold: false, prefetchedModel: { url: splitKUrl, load },
+  } });
+}
+DEFAULT_LC0_ORT_EVALUATOR_DEPS.load = async (url) => {
+  assert.equal(url, originalUrl);
+  for (let i = 0; i < 5; i++) { await new Promise(setImmediate); global.gc(); }
+  assert.equal(transferred.deref(), undefined, 'split-K buffer is still pinned when loading the original');
+  return loadResult(url, 'original');
+};
+InferenceSession.create = async (model, options) => {
+  assert.deepEqual(options.executionProviders, ['wasm']);
+  assert.equal(new TextDecoder().decode(model), 'original', 'WASM must use the original bytes');
+  return { async release() {} };
+};
+startSearchWorker();
+handOffSplitK();
+const message = await reply.promise;
+assert.equal(message.type, 'ready', message.error);
+assert.equal(message.servedModelUrl, originalUrl);
+`;
+  const child = spawnSync(process.execPath, ['--expose-gc', '--input-type=module', '-e', source], { encoding: 'utf8', timeout: 15000 });
+  assert.equal(child.status, 0, `${child.error ?? ''}\n${child.stdout}\n${child.stderr}`);
 });
 
 // Arena's cache-hit consent: the worker's loader must refuse network bytes, not download them.

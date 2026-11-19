@@ -164,9 +164,13 @@ export async function createLc0OnnxEvaluatorFromUrl(
 ): Promise<Lc0OrtEvaluatorFromUrl> {
   const loadOptions = options.load ?? {};
   loadOptions.signal?.throwIfAborted();
-  const selectedUrl =
-    options.selectedModelUrl ??
-    (options.deviceSelection ? selectLc0OrtModelUrl(requestedUrl, await untilAborted(deps.placement(), loadOptions.signal)) : requestedUrl);
+  let selectedUrl = options.selectedModelUrl ?? requestedUrl;
+  if (selectedUrl !== requestedUrl) {
+    const { providers } = await untilAborted(deps.placement(), loadOptions.signal);
+    if (providers[0] !== 'webgpu') selectedUrl = requestedUrl;
+  } else if (options.selectedModelUrl === undefined && options.deviceSelection) {
+    selectedUrl = selectLc0OrtModelUrl(requestedUrl, await untilAborted(deps.placement(), loadOptions.signal));
+  }
   loadOptions.signal?.throwIfAborted();
   let fallbackReason: string | undefined;
   let modelLoad: LoadedModel | undefined;
