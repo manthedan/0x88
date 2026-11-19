@@ -25,15 +25,17 @@ The Lc0 model tests skip when their networks are missing;
 `npm run test:stage-lc0-assets` fetches the hash-pinned parity set into
 `../models/lc0-bestnets/` so they run.
 
-Working in an extra `git worktree`? It has no `node_modules` and none of the
-gitignored model links. `node scripts/worktree_setup.mjs <worktree-path>` links
-both from the main checkout (plus `<worktree>/../models`, where the model links
-point), then checks every model in the lc0 and Maia3 manifests resolves at the
-right size. Rerunning it is safe; `--check` only verifies. A branch that
-changes `package-lock.json` needs its own install: run `rm node_modules`
-first (it removes only the symlink), then `npm ci`. Running `npm ci` through the
-symlink deletes the main checkout's packages. A linked install gets its own Vite cache (`.vite-cache/`) so the two
-checkouts' dev servers do not clobber each other's optimized deps.
+Working in an extra `git worktree`? Run
+`node scripts/worktree_setup.mjs <worktree-path>` to link dependencies and
+models from the main checkout. Generated SvelteKit types and Vite caches stay
+local. The script also checks that the lc0 and Maia3 model files resolve at the
+right size. Rerunning it is safe; `--check` only verifies.
+
+If your `package-lock.json` differs from main's, run
+`rm -rf -- node_modules && npm ci` **from the worktree root**. The removal works
+for both the old whole-directory symlink and the new directory of links without
+deleting the main checkout's packages. Don't run `npm ci` against a shared
+`node_modules` without removing it first.
 
 `npm run hooks:install` installs an opt-in git pre-push hook. It is not
 installed by `npm install`.

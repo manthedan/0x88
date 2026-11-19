@@ -5,9 +5,9 @@
 //   node scripts/worktree_setup.mjs <worktree-path> --check    verify only
 //
 // A new worktree lacks three untracked things:
-//   1. node_modules: symlinked to the main checkout's install (relative link) when package-lock.json is
-//      identical; a branch that changes dependencies needs its own `npm ci`. An installed node_modules
-//      directory is left alone. vite.config.ts gives a linked install its own cache dir (.vite-cache).
+//   1. node_modules: links to the main checkout's dependencies when package-lock.json is identical,
+//      with local SvelteKit types and Vite caches. A branch that changes dependencies needs its own
+//      `npm ci`. An installed node_modules directory is left alone.
 //   2. ../models: model sources live beside the repo (lc0_prepare_model_assets.mjs, the parity tests and
 //      the public/models symlinks all resolve `<repo>/../models`). For a worktree in .claude/worktrees/<name>
 //      that is .claude/worktrees/models, linked to the main checkout's ../models.
@@ -18,8 +18,9 @@
 // symlinked directory that leads out of the worktree. Verification stats every model and every lc0web pack
 // (metadata + shards) in public/models/{lc0,maia3}/manifest.json: exists, byte size matches; no hashing.
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync, symlinkSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync, symlinkSync, unlinkSync } from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
+import { linkNodeModules, needsNodeModuleLinks } from './lib/link_node_modules.mjs';
 
 const realOrNull = (path) => {
   try {
@@ -28,6 +29,8 @@ const realOrNull = (path) => {
     return null;
   }
 };
+
+const lstatIfExists = (path) => lstatSync(path, { throwIfNoEntry: false });
 
 const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
@@ -108,21 +111,41 @@ const readOrNull = (path) => {
   }
 };
 
-/** node_modules is shared only while both checkouts pin the same dependency tree. */
 function nodeModulesPlan(main, worktree) {
-  let stat = null;
-  try {
-    stat = lstatSync(join(worktree, 'node_modules'));
-  } catch {}
-  if (stat && !stat.isSymbolicLink()) return 'own';
+  const dir = join(worktree, 'node_modules');
+  const stat = lstatIfExists(dir);
+  if (stat && !stat.isSymbolicLink() && !(stat.isDirectory() && needsNodeModuleLinks(join(main, 'node_modules'), dir))) return 'own';
   const sameLock = readOrNull(join(main, 'package-lock.json')) === readOrNull(join(worktree, 'package-lock.json'));
   return sameLock ? 'share' : 'lock-differs';
 }
 
+function setupNodeModules(main, worktree, log) {
+  if (nodeModulesPlan(main, worktree) !== 'share') return;
+  const source = join(main, 'node_modules');
+  const dest = join(worktree, 'node_modules');
+  const stat = lstatIfExists(dest);
+  if (stat?.isSymbolicLink()) {
+    const actual = realOrNull(dest);
+    if (!actual || actual !== realOrNull(source)) return;
+    unlinkSync(dest);
+  }
+  const action = stat?.isDirectory() ? 'reconcile' : 'create';
+  log.created.push(...linkNodeModules(source, dest, action).created);
+}
+
 function verify(main, worktree, log) {
-  if (nodeModulesPlan(main, worktree) === 'lock-differs') {
-    log.problems.push(`package-lock.json differs from the main checkout, so its install cannot be shared: rm -f node_modules && npm ci (in ${worktree})`);
-  } else if (!existsSync(join(worktree, 'node_modules/.bin/vite'))) log.problems.push('node_modules/.bin/vite missing');
+  const dir = join(worktree, 'node_modules');
+  const plan = nodeModulesPlan(main, worktree);
+  const stat = lstatIfExists(dir);
+  if (plan === 'lock-differs') {
+    log.problems.push(`package-lock.json differs from the main checkout, so its install cannot be shared: remove node_modules and run npm ci (in ${worktree})`);
+  } else if (!existsSync(join(dir, '.bin/vite'))) log.problems.push('node_modules/.bin/vite missing');
+  if (plan === 'share' && stat?.isDirectory()) log.problems.push(...linkNodeModules(join(main, 'node_modules'), dir, 'check').problems);
+  if (stat?.isSymbolicLink()) log.problems.push(`node_modules is a whole-directory symlink to ${readlinkSync(dir)}; migrate it or install locally`);
+  const app = join(dir, '$app');
+  const appReal = realOrNull(app);
+  if (appReal && !within(appReal, worktree)) log.problems.push(`node_modules/$app resolves outside the worktree to ${appReal}`);
+  else if (!appReal && lstatIfExists(app)?.isSymbolicLink()) log.problems.push(`node_modules/$app is a dangling symlink to ${readlinkSync(app)}`);
   if (!realOrNull(join(worktree, '..', 'models'))) log.problems.push(`${resolve(worktree, '..', 'models')} does not resolve`);
   for (const dir of ['public/models/lc0', 'public/models/maia3']) {
     const manifest = JSON.parse(readFileSync(join(worktree, dir, 'manifest.json'), 'utf8'));
@@ -156,9 +179,7 @@ function main(argv) {
   }
   const log = { created: [], problems: [], verified: 0 };
   if (!argv.includes('--check')) {
-    const nodeModules = join(main, 'node_modules');
-    if (nodeModulesPlan(main, worktree) === 'share')
-      ensureLink(join(worktree, 'node_modules'), relative(worktree, nodeModules), realpathSync(nodeModules), worktree, log);
+    setupNodeModules(main, worktree, log);
     const models = realOrNull(join(main, '..', 'models'));
     // The one deliberate write outside the worktree: the sibling `models` link every model path goes through.
     if (models) ensureLink(join(worktree, '..', 'models'), models, models, realpathSync(dirname(worktree)), log);
