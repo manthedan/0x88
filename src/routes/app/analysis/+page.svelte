@@ -771,10 +771,12 @@ onMount(() => {
   .analysis-overview:global([data-status=done]) #analyze{background:transparent; color:var(--muted); border:1px solid transparent; font-weight:500; padding-inline:4px}
   .analysis-overview:global([data-status=done]) #analyze:hover:not(:disabled){background:var(--panel-2); border-color:var(--accent)}
   .analysis-overview:global([data-status=done]) #analyze svg{display:none}
-  .stop-action{position:relative; overflow:hidden; isolation:isolate; --progress:0%}
+  .stop-action{position:relative; overflow:hidden; isolation:isolate; --progress:0%; min-width:max-content}
   .stop-action::before{content:''; position:absolute; inset:0 auto 0 0; width:var(--progress); background:#0000002e; z-index:-1; transition:width .2s}
   /* Keep the slot the same width for an empty label, “searching”, and 0–100%. */
-  .stop-progress{flex:0 0 5em; font:600 12px var(--sans); font-variant-numeric:tabular-nums; text-align:end; opacity:.85}
+  .stop-progress{flex:0 0 auto; min-width:4ch; font:600 12px var(--sans); font-variant-numeric:tabular-nums; text-align:end; opacity:.85}
+  /* An empty slot must not reserve width: WebKit sizes the button from content, so a fixed basis overflowed and clipped the icon and label. */
+  .stop-progress:empty{display:none}
   .analysis-overview #stop:disabled, .analysis-overview:has(#stop:not(:disabled)) #analyze{display:none}
 
   /* Engine strip */
