@@ -74,7 +74,7 @@ for (const replacement of [
       isLc0BigNetVariant: (key) => key === 'bt4' || key === 't3',
       phoneBigNetBlocked: () => false,
       phoneLargeNetsBlocked: () => false,
-      bigNetSelectableSync: () => true,
+      bigNetSelectable: () => true,
       requestAnalysisBigNetConsent: (config, signal) => {
         prompts.push({ key: config.key, signal });
         return probe.promise;
@@ -234,6 +234,7 @@ for (const phase of [
       isMemoryConstrainedDevice: () => true,
       BIG_NETS,
       checkBigNetAsset: () => wait('model', 'present'),
+      bigNetSelectable: () => true,
       whileArenaMounted: (fn) => fn,
       arenaGamesPerOpening: () => 1,
       TournamentStandings: class {},
@@ -628,7 +629,7 @@ test('Analysis records only cache-hit row approvals as cache-only', async () => 
   const ask = new Function(
     'requestLargeNetDownloadConsent',
     'engines',
-    `${extract(source.analysis, 'async function requestAnalysisBigNetConsent(', 'async function refreshBt4Availability(')}\nreturn requestAnalysisBigNetConsent;`,
+    `${extract(source.analysis, 'async function requestAnalysisBigNetConsent(', 'async function refreshBigNetAvailability(')}\nreturn requestAnalysisBigNetConsent;`,
   )(async () => answer, engines);
   const cacheOnly = async () => (await engines.bigNetFor('bt4')).cacheOnly;
   const prompt = {

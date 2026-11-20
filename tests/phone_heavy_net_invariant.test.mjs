@@ -293,6 +293,7 @@ function analysisOwner(native) {
       showModelProgress: nop,
       hideModelProgress: nop,
       renderExplorerComparison: nop,
+      renderBigNetWarning: nop,
       scheduleMaia3Panel: nop,
       renderMaia3Panel: nop,
       LatestOnlyTask: class {
@@ -321,6 +322,7 @@ function arenaOwner(disposeArenaCpuEngines = nop) {
     {
       row,
       ARENA_BIG_NET_KEYS: keys,
+      renderBigNetWarning: nop,
       arenaRunDownloads: new Set(),
       requestLargeNetDownloadConsent: async () => 'cached',
       disposeArenaCpuEngines,

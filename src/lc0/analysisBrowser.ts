@@ -182,11 +182,14 @@ import {
   BIG_NETS,
   type BigNetConfig,
   bigNetAssetStatusSync,
+  bigNetCpuWarning,
   bigNetOptionState,
+  bigNetSelectable,
   bt4SupportedSync,
   checkBigNetAsset,
   phoneBlockedBigNetModelUrl,
   probeBt4Support,
+  renderBigNetCpuWarning,
 } from './bt4Engine.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import {
@@ -1285,10 +1288,6 @@ function currentEngineProfile(name: string): EngineAnalysisProfile {
 function profileHasBt4(rows: EngineRow[]): boolean {
   return rows.some((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant));
 }
-function bigNetSelectableSync(config: BigNetConfig): boolean {
-  // WebGPU no longer gates selection: 'auto' falls back to wasm-CPU (slow).
-  return bigNetAssetStatusSync(config) === 'present';
-}
 function bigNetUnavailableText(config: BigNetConfig): string {
   if (bigNetAssetStatusSync(config) === 'missing')
     return `Lc0 ${config.name} model asset is missing at ${config.modelUrl}. Run node scripts/lc0_prepare_model_assets.mjs in this package.`;
@@ -1305,7 +1304,7 @@ async function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean, sig
       const config = BIG_NETS[next.variant];
       const allowed =
         !phoneBigNetBlocked(config.key) &&
-        bigNetSelectableSync(config) &&
+        bigNetSelectable(config) &&
         allowBt4Prompt &&
         (await requestAnalysisBigNetConsent(config, signal ?? mountAbort.signal));
       if (signal?.aborted) return [];
@@ -1592,7 +1591,7 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
       if (!isLc0BigNetVariant(option.value)) return option;
       const config = BIG_NETS[option.value];
       if (bigNetAssetStatusSync(config) === 'unknown') void checkBigNetAsset(config, whileAnalysisMounted(renderEngineList));
-      const state = bigNetOptionState(config);
+      const state = bigNetOptionState(config, peekBigNetSearcher(config.key)?.backend);
       return { ...option, label: `${option.label}${state.suffix}`, disabled: option.disabled || state.disabled };
     });
   if (family === 'sf') return stockfishVariantOptions();
@@ -1775,6 +1774,7 @@ function renderEngineList(): void {
     .join('');
   renderEngineSetupSummary();
   renderReviewEngineChoices();
+  renderBigNetWarning();
   reconcileActiveRuntimeFallbackWarning();
 }
 
@@ -1797,7 +1797,7 @@ async function requestAnalysisBigNetConsent(config: BigNetConfig, signal: AbortS
   return consent !== false;
 }
 
-async function refreshBt4Availability(mountSignal = mountAbort.signal): Promise<void> {
+async function refreshBigNetAvailability(mountSignal = mountAbort.signal): Promise<void> {
   await Promise.all([
     probeBt4Support(),
     checkBigNetAsset(BIG_NETS.bt4, whileAnalysisMounted(renderRecklessRuntimeInfo)),
@@ -1806,11 +1806,20 @@ async function refreshBt4Availability(mountSignal = mountAbort.signal): Promise<
   if (isStaleMount(mountSignal)) return;
   const previousRows = JSON.stringify(engineRows);
   for (const row of engineRows) {
-    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectableSync(BIG_NETS[row.variant])) row.variant = 'small';
+    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectable(BIG_NETS[row.variant])) row.variant = 'small';
   }
   if (JSON.stringify(engineRows) !== previousRows) invalidateAnalysisSettings();
   renderEngineList();
   renderRecklessRuntimeInfo();
+}
+
+function renderBigNetWarning(): void {
+  renderBigNetCpuWarning(
+    el('bigNetCpuWarning'),
+    activeEngineRows().flatMap((row) =>
+      row.family === 'lc0' && isLc0BigNetVariant(row.variant) ? [bigNetCpuWarning(BIG_NETS[row.variant], peekBigNetSearcher(row.variant)?.backend)] : [],
+    ),
+  );
 }
 
 function renderRecklessRuntimeInfo(): void {
@@ -4173,6 +4182,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       if (controller.signal.aborted || mountAbort.signal.aborted) return;
     }
     if (!analysisCanPrepare(analysisRunState, owner)) return;
+    renderBigNetWarning();
     engines.snapshotBigNetServedModels(rows);
     const snapshot = captureAnalysisRun({
       fen: tree.current.fen,
@@ -5475,7 +5485,7 @@ function wireEvents() {
         const signal = AbortSignal.any([mountAbort.signal, request.signal]);
         if (!(await requestAnalysisBigNetConsent(config, signal))) return;
         if (signal.aborted || pickerConsentAbort !== request || engineRows[i] !== previousRow) return;
-        if (!bigNetSelectableSync(config)) {
+        if (!bigNetSelectable(config)) {
           el('message').textContent = bigNetUnavailableText(config);
           renderEngineList();
           el('engineList').querySelector<HTMLElement>(`.row-var[data-i="${i}"]`)?.focus();
@@ -6182,7 +6192,7 @@ async function init(mountSignal: AbortSignal) {
   wireEvents();
   void loadOpeningNames(mountSignal);
   void refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
-  void refreshBt4Availability();
+  void refreshBigNetAvailability();
   if (!isV0DeployProfile()) void refreshCentipawnHybridManifestStatus();
   const smallLc0 = activeEngineRows().some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant));
   // Read Auto-analyze only now: it may have been turned off during the startup asset checks.

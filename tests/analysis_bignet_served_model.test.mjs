@@ -302,7 +302,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     let maia3PanelBlockedByRun = null;
     const shouldAutoAnalyzePosition = () => true, mainlineNodes = () => [];
     const awaitEngineRetirements = async () => {}, hasEngineRetirements = () => false;
-    const reconcileActiveRuntimeFallbackWarning = () => {}, renderRecklessRuntimeInfo = () => {};
+    const reconcileActiveRuntimeFallbackWarning = () => {}, renderRecklessRuntimeInfo = () => {}, renderBigNetWarning = () => {};
     let centipawnHybridManifestStatus = 'unknown';
     // The TVMJS manifest fallback only runs for the legacy research override;
     // the shipped s4fix model is ORT-only and skips the manifest probe.

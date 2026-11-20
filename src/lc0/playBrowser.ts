@@ -29,6 +29,7 @@ import { createRootDom, htmlEscape, type RootDom } from './browserDom.ts';
 import {
   BIG_NETS,
   bigNetAssetStatusSync,
+  bigNetCpuWarning,
   bigNetMemoryCaution,
   bigNetOptionState,
   bt4SupportedSync,
@@ -36,6 +37,7 @@ import {
   LQO_NET,
   phoneBlockedBigNetModelUrl,
   probeBt4Support,
+  renderBigNetCpuWarning,
   T3_NET,
 } from './bt4Engine.ts';
 import { writeClipboard } from './clipboard.ts';
@@ -365,12 +367,10 @@ function ctxStrengthCaption(ctx: PlayContext): string {
     return sf.skill >= 20 ? `full strength · depth ${sf.depth}` : `UCI skill ${sf.skill} · depth ${sf.depth}`;
   }
   const value = ctxStrengthFor(option, level);
-  const cpuNote =
-    option.family === 'lc0' && option.variant !== 'small' && !bt4SupportedSync() ? ' · CPU fallback (no WebGPU): expect several seconds per move' : '';
-  if (option.variant === 'lqo') return `≈ ${value} visits per move · specialized queen-odds search${cpuNote}`;
+  if (option.variant === 'lqo') return `≈ ${value} visits per move · specialized queen-odds search`;
   const isNeuralSearch = option.family === 'lc0' || option.family === 'centipawn';
   const base = isNeuralSearch ? `≈ ${value} visits per move` : `search depth ${value}`;
-  return isNeuralSearch ? `${base} — strong even on Fastest; pick a Maia for a human-level opponent${cpuNote}` : base;
+  return isNeuralSearch ? `${base} — strong even on Fastest; pick a Maia for a human-level opponent` : base;
 }
 
 function ctxRenderLevelOptions(ctx: PlayContext): void {
@@ -1227,7 +1227,8 @@ function ctxEngineOptionState(option: PlayEngineOption): { disabled: boolean; su
     return reason ? { disabled: true, suffix: ` (${reason})` } : { disabled: false, suffix: '' };
   }
   if (option.family !== 'lc0' || option.variant === 'small') return { disabled: false, suffix: '' };
-  return bigNetOptionState(BIG_NETS[option.variant as BigNetKey]);
+  const key = option.variant as BigNetKey;
+  return bigNetOptionState(BIG_NETS[key], peekBigNetSearcher(key)?.backend);
 }
 
 function ctxEngineOptionHtml(option: PlayEngineOption): string {
@@ -1288,8 +1289,8 @@ function ctxRenderEngineCaution(ctx: PlayContext): void {
     const config = BIG_NETS[option.variant as BigNetKey];
     const memory = bigNetMemoryCaution(config);
     const odds = option.variant === 'lqo' ? ' The bot starts without its queen and uses the LeelaQueenOdds v2 network. ' : ' ';
-    const cpu = bt4SupportedSync() ? '' : ' No WebGPU here: runs on the CPU (wasm) fallback with reduced visit budgets — expect several seconds per move.';
-    caution.textContent = `First move downloads the ~${config.approxMb}MB net.${odds}${memory ?? ''}${cpu}`.trimEnd();
+    const cpu = bigNetCpuWarning(config, peekBigNetSearcher(config.key)?.backend);
+    caution.textContent = `First move downloads the ~${config.approxMb}MB net.${odds}${memory ?? ''} ${cpu}`.trimEnd();
     caution.hidden = false;
   } else if (option.family === 'centipawn') {
     caution.textContent = 'First use downloads the 6.2MB Centipawn model and ONNX Runtime Web.';
@@ -1431,12 +1432,18 @@ function ctxRenderChrome(ctx: PlayContext, shownPly: number): void {
   main.dataset.opponentState = ctx.opponent.tag;
   main.dataset.opponent = ctx.opponent.active.engineId;
   main.dataset.pendingOpponent = ctx.opponent.pending?.engineId ?? '';
-  const hasNotice = !ctx.dom.buttonEl('retryEngine').hidden || !ctx.dom.el('runtimeWarning').hidden || !ctx.dom.el('dlProgress').hidden;
+  const option = ctxSelectedEngine(ctx);
+  const key = option.variant as BigNetKey;
+  const bigNetWarning = ctx.dom.el('bigNetCpuWarning');
+  renderBigNetCpuWarning(bigNetWarning, [
+    option.family === 'lc0' && option.variant !== 'small' ? bigNetCpuWarning(BIG_NETS[key], peekBigNetSearcher(key)?.backend) : '',
+  ]);
+  const hasNotice =
+    !bigNetWarning.hidden || !ctx.dom.buttonEl('retryEngine').hidden || !ctx.dom.el('runtimeWarning').hidden || !ctx.dom.el('dlProgress').hidden;
   main.dataset.quiet = String(
     !hasNotice && ctx.engineReady && !ctx.preparingEngine && !ctx.thinkingShown && !ctx.pendingPromotion && ctx.viewPly === null && !boardCheck(ctx.board),
   );
   main.dataset.config = ctx.configOpen && phase !== 'setup' ? 'open' : 'closed';
-  const option = ctxSelectedEngine(ctx);
   const opponent = ctxOpponentName(option);
   const topColor: Color = ctx.orientation === 'white' ? 'b' : 'w';
   ctxRenderStrip(ctx, 'topStrip', topColor, shownPly, phase);
@@ -2123,6 +2130,7 @@ function hasPlayBrowserDom(root: HTMLElement): boolean {
     'engineCaution',
     'engineNote',
     'runtimeWarning',
+    'bigNetCpuWarning',
     'retryEngine',
     'dlProgress',
     'progressAnnouncement',

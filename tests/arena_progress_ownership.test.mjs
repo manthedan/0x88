@@ -41,7 +41,7 @@ for (const operation of ['warmup', 'move']) {
       assert.ok(start >= 0 && end > start);
       const factory = new Function(
         'deps',
-        `const { bigNetFor, warmupPositions, showDownloadProgress, hideDownloadProgress, arenaCacheEntries, engines, arenaBudgetMode, arenaMovetimeMs, setArenaVisitProgress, recordBt4SearchOutput, clearArenaSearchProgress } = deps;\n${stripTypeScriptTypes(source.slice(start, end))}\nreturn ${name};`,
+        `const { bigNetFor, warmupPositions, showDownloadProgress, hideDownloadProgress, arenaCacheEntries, engines, arenaBudgetMode, arenaMovetimeMs, setArenaVisitProgress, recordBt4SearchOutput, clearArenaSearchProgress, renderBigNetWarning } = deps;\n${stripTypeScriptTypes(source.slice(start, end))}\nreturn ${name};`,
       )({
         bigNetFor: () => ({ config: LQO_NET, searcher }),
         warmupPositions: [parseFen(START_FEN)],
@@ -53,6 +53,7 @@ for (const operation of ['warmup', 'move']) {
         arenaMovetimeMs: () => 1000,
         setArenaVisitProgress: () => {},
         recordBt4SearchOutput: () => {},
+        renderBigNetWarning: () => {},
         clearArenaSearchProgress: () => {},
       });
       const controller = new AbortController();
@@ -127,6 +128,7 @@ for (const operation of ['warmup', 'move']) {
       setArenaVisitProgress: () => {},
       recordBt4SearchOutput: () => {},
       clearArenaSearchProgress: () => {},
+      renderBigNetWarning: () => {},
     };
     const slice = (from, to) => stripTypeScriptTypes(source.slice(source.indexOf(from), source.indexOf(to, source.indexOf(from))));
     const name = operation === 'warmup' ? 'lc0BigNetWarmup' : 'lc0BigNetMove';

@@ -131,7 +131,7 @@ function arenaPicker(requestConsent, overrides = {}) {
     arenaTournamentMode: () => 'match',
     requestLargeNetDownloadConsent: requestConsent,
     isMemoryConstrainedDevice: () => true,
-    bigNetSelectableSync: () => true,
+    bigNetSelectable: () => true,
     defaultVariant: () => 'lite',
     strengthMeta: () => ({ def: 8 }),
     normalizeSeatRowForDeploy() {},
@@ -179,7 +179,7 @@ for (const action of ['cpu', 'startup', 'remove', 'add', 'mode']) {
         consent = signal;
         return permission.promise;
       },
-      { bigNetSelectableSync: () => assert.fail('an obsolete picker must never validate or commit its model') },
+      { bigNetSelectable: () => assert.fail('an obsolete picker must never validate or commit its model') },
     );
     const old = pick('bt4');
     assert.equal(consent.aborted, false);

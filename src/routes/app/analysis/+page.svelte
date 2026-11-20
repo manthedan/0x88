@@ -145,7 +145,10 @@ onMount(() => {
     <button id="restorePreviousAnalysis" type="button" hidden>Restore previous analysis</button>
     <p id="autosaveNotice" class="small" role="status" aria-live="polite"></p>
     <div id="pgnImportNotice" role="status" aria-live="polite"></div>
-    <div id="runtimeWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
+    <div class="runtime-warnings">
+      <div id="runtimeWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
+      <div id="bigNetCpuWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
+    </div>
     <div id="downloadProgress" class="model-load-progress" hidden></div>
     <div id="analysisSearchProgress" class="search-progress-grid" hidden></div>
     <div id="analysisContent" class="analysis-content" data-view="moves">
@@ -1075,7 +1078,7 @@ onMount(() => {
     :global(.analysis-content[data-view=review]) .add-engine-inline{display:flex}
     .app-sidebar #message{grid-column:1 / -1; grid-row:calc(4 + var(--restore-row))}
     .app-sidebar #pgnImportNotice{grid-column:1 / -1; grid-row:calc(5 + var(--restore-row))}
-    .app-sidebar #runtimeWarning{grid-column:1 / -1; grid-row:calc(6 + var(--restore-row))}
+    .app-sidebar .runtime-warnings{grid-column:1 / -1; grid-row:calc(6 + var(--restore-row))}
     .app-sidebar #downloadProgress{grid-column:1 / -1; grid-row:calc(7 + var(--restore-row))}
     .app-sidebar #restorePreviousAnalysis{grid-column:1 / -1; grid-row:calc(8 + var(--restore-row)); justify-self:start; margin:4px 12px}
     .app-sidebar #autosaveNotice{grid-column:1 / -1; grid-row:calc(9 + var(--restore-row)); margin:4px 12px}

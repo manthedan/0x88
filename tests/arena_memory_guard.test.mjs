@@ -180,6 +180,6 @@ test('Arena diagnostic rendering never acquires or replaces a resident net', () 
     'deps',
     `const { ${Object.keys(deps).join(', ')} } = deps;\n${extract('function engineRuntimeDiagnosticsText()', '\nfunction lc0TreeTelemetrySummary(')}\n${extract('function engineSearchDiagnosticsText(', '\nfunction diagnosticsHtml(')}\nreturn [engineRuntimeDiagnosticsText(), engineSearchDiagnosticsText()];`,
   )(deps);
-  assert.match(diagnostics[0], /lazy WebGPU worker/);
+  assert.match(diagnostics[0], /lazy worker/);
   assert.match(diagnostics[1], /search waiting/);
 });

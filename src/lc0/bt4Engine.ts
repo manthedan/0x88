@@ -2,7 +2,6 @@ import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscri
 // Lc0 big-net (BT4-it332, t3-512 distill) browser integration.
 //
 // Big nets are large and attention-heavy, so they are handled with care:
-//   - WebGPU-gated: callers must check `probeBt4Support()` before exposing them.
 //   - Lazy: the dedicated search worker is only created/initialized on first use
 //     (the first init fetches the model, cached afterwards by the Cache API).
 //   - Off the main thread: search runs entirely inside searchWorker.ts so heavy
@@ -285,20 +284,30 @@ export async function checkBt4Asset(onStatus?: () => void): Promise<Bt4AssetStat
   return checkBigNetAsset(BT4_NET, onStatus);
 }
 
-/**
- * Selector-option decoration for a big net from the cached probes — shared by
- * the play and analysis engine pickers so their wording and disabled states
- * cannot drift (they previously implemented this in parallel, which is how
- * analysis ended up hiding big nets entirely without WebGPU).
- */
-export function bigNetOptionState(config: BigNetConfig): { disabled: boolean; suffix: string } {
-  // Keep the option actionable so choosing it can open consent, not load a net.
+export function bigNetSelectable(config: BigNetConfig): boolean {
+  return bigNetAssetStatusSync(config) === 'present';
+}
+
+export function bigNetCpuWarning(config: BigNetConfig, backend?: string): string {
+  if (!bigNetSelectable(config) || phoneBigNetBlocked(config.key)) return '';
+  const cpu = backend ? /^(?:[^>]+->)?wasm(?:\[|$)/.test(backend) : supportedCached === false;
+  if (!cpu) return '';
+  if (config.key === 'lqo') return 'Lc0 Queen Odds: CPU fallback — expect several seconds per move.';
+  return `Lc0 ${config.name}: CPU fallback — slow (about ${config.key === 't3' ? '1.1' : '1.5'} s/eval).`;
+}
+
+export function renderBigNetCpuWarning(target: HTMLElement, warnings: Iterable<string>): void {
+  const text = [...new Set(warnings)].filter(Boolean).join(' ');
+  if (target.textContent !== text) target.textContent = text;
+  target.hidden = !text;
+}
+
+export function bigNetOptionState(config: BigNetConfig, backend?: string): { disabled: boolean; suffix: string } {
   if (phoneBigNetBlocked(config.key)) return { disabled: false, suffix: PHONE_LARGE_NET_SUFFIX };
-  const asset = bigNetAssetStatusSync(config);
-  if (asset === 'unknown') return { disabled: true, suffix: ' (checking net)' };
-  if (asset === 'missing') return { disabled: true, suffix: ' (net not hosted here)' };
-  if (!bt4SupportedSync()) return { disabled: false, suffix: ' (CPU fallback — slow)' };
-  return { disabled: false, suffix: '' };
+  if (!bigNetSelectable(config)) {
+    return { disabled: true, suffix: bigNetAssetStatusSync(config) === 'unknown' ? ' (checking net)' : ' (net not hosted here)' };
+  }
+  return { disabled: false, suffix: bigNetCpuWarning(config, backend) ? ' (CPU fallback — slow)' : '' };
 }
 
 /** A memory caution string when the device reports limited RAM, else null. */
@@ -313,7 +322,7 @@ export function bigNetMemoryCaution(config: BigNetConfig = BT4_NET): string | nu
 /** Human-readable one-time warning shown before the first big-net load. */
 export function bigNetLoadWarning(config: BigNetConfig = BT4_NET): string {
   const caution = bigNetMemoryCaution(config);
-  return `Lc0 ${config.name} is a large net (~${config.approxMb}MB download, cached after first load) and needs WebGPU. Arena uses the ${config.exportNote} with search tree reuse and leaf batching.${caution ? ` ${caution}` : ''}`;
+  return `Lc0 ${config.name} is a large net (~${config.approxMb}MB download, cached after first load). Arena uses the ${config.exportNote} with search tree reuse and leaf batching.${caution ? ` ${caution}` : ''}`;
 }
 
 export function bt4MemoryCaution(): string | null {
