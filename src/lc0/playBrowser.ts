@@ -47,6 +47,7 @@ import { enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engine
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { LC0_SMALL_BATCH1_QDQ8_PATH, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
+import { LQO_BLACK_MISSING_QUEEN_FEN, LQO_WHITE_MISSING_QUEEN_FEN } from './lqoStartingPositions.ts';
 import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle, maia3ModelFallbackUrls } from './maia3.ts';
 import type { MountScope } from './mountScope.ts';
 import { rememberMoveFocus } from './moveListFocus.ts';
@@ -138,7 +139,7 @@ const wakeLocks = createWakeLockManager(() => navigator.wakeLock?.request('scree
 /** Start FEN for the current game; odds opponents remove their own queen. */
 function startFenFor(option: PlayEngineOption, human: Color): string {
   if (option.variant !== 'lqo') return START_FEN;
-  return human === 'w' ? 'rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' : 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1';
+  return human === 'w' ? LQO_BLACK_MISSING_QUEEN_FEN : LQO_WHITE_MISSING_QUEEN_FEN;
 }
 
 // ---------------------------------------------------------------------------

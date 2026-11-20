@@ -11,18 +11,12 @@ import { moveToActionId, moveToUci } from '../src/chess/moveCodec.ts';
 import { legalMoves } from '../src/chess/movegen.ts';
 import { installBatchingStrengthPage } from '../src/lc0/batchingStrengthBrowser.ts';
 import { BATCHING_STRENGTH_MATCHES } from '../src/lc0/batchingStrengthMatch.ts';
-import {
-  LQO_BLACK_MISSING_QUEEN_FEN,
-  LQO_WHITE_MISSING_QUEEN_FEN,
-  lqoQueenOddsOpenings,
-  scheduleGame,
-  smallNetOpenings,
-  validateStrengthOpenings,
-} from '../src/lc0/batchingStrengthOpenings.ts';
+import { lqoQueenOddsOpenings, scheduleGame, smallNetOpenings, validateStrengthOpenings } from '../src/lc0/batchingStrengthOpenings.ts';
 import { strengthRandom, strengthSeed } from '../src/lc0/batchingStrengthRandom.ts';
 import { candidatePoints, distinctOpeningElo, equalVisitGate, pentanomialElo, queenSidePoints, uciLineToPgn } from '../src/lc0/batchingStrengthScore.ts';
 import { swapColorsUci } from '../src/lc0/bt4Engine.ts';
 import { enginePlayLevels } from '../src/lc0/engineCatalog.ts';
+import { LQO_BLACK_MISSING_QUEEN_FEN, LQO_WHITE_MISSING_QUEEN_FEN } from '../src/lc0/lqoStartingPositions.ts';
 import { resolveOrtPhysicalBatchSize } from '../src/lc0/ortPhysicalBatch.ts';
 import { searchRoot } from '../src/search/puct.ts';
 

@@ -28,12 +28,13 @@ import { strengthSeed } from './batchingStrengthRandom.ts';
 import { BATCHING_STRENGTH_GENERATOR_VERSION, type ScoredGame, uciLineToPgn } from './batchingStrengthScore.ts';
 import { swapColorsInput, swapColorsUci } from './bt4Engine.ts';
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
+import { LQO_BLACK_MISSING_QUEEN_FEN } from './lqoStartingPositions.ts';
 import type { Lc0EvaluatorInput } from './onnxEvaluator.ts';
 
 const PROBE_FENS = [
   'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
   'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1',
-  'rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+  LQO_BLACK_MISSING_QUEEN_FEN,
   'rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2',
 ];
 

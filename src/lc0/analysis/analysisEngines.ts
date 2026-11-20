@@ -10,7 +10,14 @@ import type { BrowserUciAnalysisOptions, BrowserUciEngine } from '../browserUciE
 import { BIG_NETS, type BigNetConfig, type Bt4SearchProgress, type Bt4WorkerSearcher } from '../bt4Engine.ts';
 import { createCentipawnEvaluatorCache } from '../centipawnEvaluatorCache.ts';
 import { DisposableVariantPool } from '../disposableVariantPool.ts';
-import { centipawnEngineLabel, type EngineFamily, type EngineRow, engineResourceProfile, isLc0BigNetVariant } from '../engineCatalog.ts';
+import {
+  bigNetKeyForVariant,
+  centipawnEngineLabel,
+  type EngineFamily,
+  type EngineRow,
+  engineResourceProfile,
+  type Lc0BigNetVariant,
+} from '../engineCatalog.ts';
 import {
   berserkCacheKey,
   cpuEngineHashMbForSurface,
@@ -81,7 +88,7 @@ export interface AnalysisEngineDeps {
   centipawnCache?: CentipawnCache;
 }
 
-export type AnalysisBigNetKey = Extract<BigNetKey, 'bt4' | 't3'>;
+export type AnalysisBigNetKey = Lc0BigNetVariant;
 export const ANALYSIS_BIG_NET_KEYS: readonly AnalysisBigNetKey[] = ['bt4', 't3'];
 
 export const ANALYSIS_BIG_NET_SESSION = { evalCacheEntries: 0 } as const;
@@ -240,13 +247,12 @@ export function createAnalysisEngines(deps: AnalysisEngineDeps) {
     if (consent) declinedBigNetDownloads.delete(key);
   }
 
-  async function bigNetFor(variant: string, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher; cacheOnly: boolean }> {
-    const key: AnalysisBigNetKey = variant === 't3' ? 't3' : 'bt4';
+  async function bigNetFor(key: AnalysisBigNetKey, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher; cacheOnly: boolean }> {
     return { config: BIG_NETS[key], searcher: await bigNets.acquire(key, signal), cacheOnly: cacheOnlyBigNets.has(key) };
   }
 
   async function bigNetLines(
-    variant: string,
+    variant: AnalysisBigNetKey,
     fen: string,
     visits: number,
     positions: BoardState[],
@@ -286,8 +292,9 @@ export function createAnalysisEngines(deps: AnalysisEngineDeps) {
   function bigNetsAwaitingInit(rows: EngineRow[]): AnalysisBigNetKey[] {
     const keys = new Set<AnalysisBigNetKey>();
     for (const row of rows) {
-      if (row.family !== 'lc0' || !isLc0BigNetVariant(row.variant)) continue;
-      const key: AnalysisBigNetKey = row.variant === 't3' ? 't3' : 'bt4';
+      if (row.family !== 'lc0') continue;
+      const key = bigNetKeyForVariant(row.variant);
+      if (!key) continue;
       if (!bigNets.peek(key)?.isInitializedFor(ANALYSIS_BIG_NET_SESSION)) keys.add(key);
     }
     return [...keys];
@@ -354,8 +361,9 @@ export function createAnalysisEngines(deps: AnalysisEngineDeps) {
 
   function snapshotBigNetServedModels(rows: EngineRow[]): void {
     for (const row of rows) {
-      if (row.family !== 'lc0' || !isLc0BigNetVariant(row.variant)) continue;
-      const key: AnalysisBigNetKey = row.variant === 't3' ? 't3' : 'bt4';
+      if (row.family !== 'lc0') continue;
+      const key = bigNetKeyForVariant(row.variant);
+      if (!key) continue;
       const searcher = bigNets.peek(key);
       if (searcher?.isInitializedFor(ANALYSIS_BIG_NET_SESSION)) bigNetServedModel.set(key, searcher.servedModelUrl);
       else bigNetServedModel.delete(key);

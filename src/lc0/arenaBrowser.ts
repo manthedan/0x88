@@ -508,8 +508,7 @@ function abortArenaPickerConsent(): void {
   arenaPickerConsentAbort?.abort();
   arenaPickerConsentAbort = null;
 }
-async function bigNetFor(variant: string, signal: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
-  const key: BigNetKey = variant === 't3' ? 't3' : 'bt4';
+async function bigNetFor(key: 'bt4' | 't3', signal: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
   // Storage can evict a model that was cached at Start (loading Lc0 Small into a
   // full cache is enough), so a load not covered by a download approval asks again.
   // Ask unless the warm session will be reused; preparePhoneBigNet retires one configured differently.
@@ -3021,9 +3020,9 @@ function buildEngines() {
       return result.move ?? null;
     };
   const lc0BigNetMove =
-    (engineId: string, row: EngineRow): ArenaEngine['move'] =>
+    (engineId: string, row: EngineRow, key: 'bt4' | 't3'): ArenaEngine['move'] =>
     async (positions, signal) => {
-      const { config, searcher } = await bigNetFor(row.variant, signal);
+      const { config, searcher } = await bigNetFor(key, signal);
       // A stopped move gives up its progress display at once; its late download
       // callbacks and finally must not touch the next operation's display.
       const onAbort = () => {
@@ -3203,7 +3202,7 @@ function buildEngines() {
     search.resetTree();
     renderCacheInfo();
   };
-  const lc0BigNetWarmup = (variant: string) => async (signal: AbortSignal) => {
+  const lc0BigNetWarmup = (variant: 'bt4' | 't3') => async (signal: AbortSignal) => {
     const { config, searcher } = await bigNetFor(variant, signal);
     // Same ownership as a move: Stop hides this warmup's display immediately.
     const onAbort = () => hideDownloadProgress();
@@ -3313,7 +3312,8 @@ function buildEngines() {
     const suffix = fixedBudget ? ` ${row.strength}${meta.unit}` : '';
     const name = `${rowLabel(row)}${suffix}`;
     if (row.family === 'lc0') {
-      if (isLc0BigNetVariant(row.variant)) engines.set(id, { id, name, bigNet: true, move: lc0BigNetMove(id, row), warmup: lc0BigNetWarmup(row.variant) });
+      if (isLc0BigNetVariant(row.variant))
+        engines.set(id, { id, name, bigNet: true, move: lc0BigNetMove(id, row, row.variant), warmup: lc0BigNetWarmup(row.variant) });
       else engines.set(id, { id, name, move: lc0Search(id, row), warmup: lc0SearchWarmup(id) });
     } else if (row.family === 'centipawn') {
       engines.set(id, { id, name, move: centipawnMove(id, row), warmup: centipawnWarmup(row) });

@@ -4253,13 +4253,13 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       const cacheKey = snapshot.rowKeys[index];
       if (!options.force && engineLineCache.has(cacheKey)) continue;
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
-        const key: AnalysisBigNetKey = row.variant === 't3' ? 't3' : 'bt4';
+        const key = row.variant;
         const initError = bigNetInitErrors.get(key);
         const servedModelUrl = snapshot.servedModels[key] ?? '';
         pushTask(index, cacheKey, `Lc0 ${BIG_NETS[key].name}`, () =>
           initError
             ? Promise.reject(initError)
-            : engines.bigNetLines(row.variant, fen, row.strength, analysisPositions, analysisMultiPv, servedModelUrl, controller.signal, (label, progress) =>
+            : engines.bigNetLines(key, fen, row.strength, analysisPositions, analysisMultiPv, servedModelUrl, controller.signal, (label, progress) =>
                 showAnalysisProgress(runId, fen, label, progress),
               ),
         );

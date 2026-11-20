@@ -1,11 +1,7 @@
 import { type BoardState, parseFen } from '../chess/board.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, openingFromUciMoves } from './arenaOpenings.ts';
 import { LQO_BLACK_OPENING_BOOK, LQO_WHITE_OPENING_BOOK } from './lqoOpeningBookData.ts';
-
-/** Product Play FEN when the human is White and the bot (Black) is missing the queen. */
-export const LQO_BLACK_MISSING_QUEEN_FEN = 'rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
-/** Product Play FEN when the human is Black and the bot (White) is missing the queen. */
-export const LQO_WHITE_MISSING_QUEEN_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1';
+import { LQO_BLACK_MISSING_QUEEN_FEN, LQO_WHITE_MISSING_QUEEN_FEN } from './lqoStartingPositions.ts';
 
 export const SMALL_NET_EPD_PATH = '/lc0/opening_books/queen500.epd';
 
