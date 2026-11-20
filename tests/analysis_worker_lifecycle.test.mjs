@@ -111,7 +111,8 @@ function cancelController({ page, hybrid = false, reload = false }) {
     let searchWorker = worker;
     const ANALYSIS_BIG_NET_KEYS = ['bt4', 't3'];
     const peekBigNetSearcher = (key) => ({ cancel: () => calls.push('cancel ' + key) });
-    const retireAnalysisRunCentipawnKeys = () => calls.push('retire centipawn');
+    // The engine host's run pins; the rest of the host is not reached by a cancel.
+    const engines = { retireAnalysisRunCentipawnKeys: () => calls.push('retire centipawn') };
     const disposeRuntimeResources = () => { calls.push('dispose runtime'); analysisAbort = null; };
     const resetSearchWorker = (reason) => { calls.push('reset worker: ' + reason); searchWorker = null; activeWorkerSearchId = null; };
     ${slice('function modelProgressEl(', 'const loadingProgressItems')}

@@ -4,13 +4,15 @@ import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { parseFen } from '../src/chess/board.ts';
 import { createCentipawnEvaluatorCache } from '../src/lc0/centipawnEvaluatorCache.ts';
+import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
 import { BT4_SOAP_REM_C19000_FINAL_MODEL_ID, centipawnModelIdForUrls, S4FIX_V_EMA_MODEL_ID, squareformerModelSettings } from '../src/nn/runtimeRegistry.ts';
 import { centipawnSearchOptions } from '../src/search/centipawn.ts';
 import { montyLitePuctPolicy } from '../src/search/puct.ts';
+import { testAnalysisEngines } from './lib/analysis_engines.mjs';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/centipawn_s4fix_search_fixture_n256.json', import.meta.url)));
 
-test('all Centipawn product PUCT paths use the native model constants', () => {
+test('all Centipawn product PUCT paths use the native model constants', async () => {
   const expected = fixture.effective_options.search_options;
   for (const [site, native] of [
     ['cpuct', 'cpuct'],
@@ -33,24 +35,45 @@ test('all Centipawn product PUCT paths use the native model constants', () => {
   ]) {
     const source = readFileSync(new URL(`../src/lc0/${surface}Browser.ts`, import.meta.url), 'utf8');
     assert.equal((source.match(/\.\.\.centipawnSearchOptions/g) ?? []).length, paths, surface);
-    assert.match(source, /\/models\/s4fix_v_ema.onnx/);
+    if (surface !== 'play') assert.match(source, /\/models\/s4fix_v_ema.onnx/);
   }
+  // Play's engine host loads the shipped model on the ORT lane.
+  const loads = [];
+  const engines = createPlayEngines({
+    loadCentipawn: async (spec, options) => {
+      loads.push([spec.onnx, spec.meta, options.runtime]);
+      throw new Error('loader stops here');
+    },
+  });
+  const ui = { current: () => () => false, mounted: () => true, note() {}, clearNote() {}, progress() {}, hideProgress() {} };
+  await assert.rejects(engines.ensureCentipawn(ui), /loader stops here/);
+  assert.equal(loads.length, 1);
+  assert.match(loads[0][0], /\/models\/s4fix_v_ema\.onnx$/);
+  assert.match(loads[0][1], /\/models\/s4fix_v_ema\.meta\.json$/);
+  assert.equal(loads[0][2], 'ort');
 });
 
+function arenaCentipawnModel() {
+  const source = readFileSync(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8');
+  const start = source.indexOf('function centipawnModel()');
+  const end = source.indexOf('\nfunction ', start + 1);
+  const body = stripTypeScriptTypes(source.slice(start, end));
+  const extracted = new Function(
+    'centipawnModelIdForUrls',
+    'LEGACY_CENTIPAWN_OVERRIDE',
+    'CENTIPAWN_MODEL_URL',
+    'CENTIPAWN_META_URL',
+    `${body}\nreturn centipawnModel();`,
+  );
+  return (...args) => extracted(centipawnModelIdForUrls, ...args);
+}
+
+// Analysis resolves its model in the engine host.
+const analysisCentipawnModel = (legacyOverride, modelUrl, metaUrl) =>
+  testAnalysisEngines({ centipawn: { legacyOverride, modelUrl, metaUrl, legacyModelUrl: '', legacyMetaUrl: '', manifestUrl: '' } }).centipawnModel();
+
 test('research URL overrides do not inherit the shipped model settings', () => {
-  for (const surface of ['analysis', 'arena']) {
-    const source = readFileSync(new URL(`../src/lc0/${surface}Browser.ts`, import.meta.url), 'utf8');
-    const start = source.indexOf('function centipawnModel()');
-    const end = source.indexOf('\nfunction ', start + 1);
-    const body = stripTypeScriptTypes(source.slice(start, end));
-    const extracted = new Function(
-      'centipawnModelIdForUrls',
-      'LEGACY_CENTIPAWN_OVERRIDE',
-      'CENTIPAWN_MODEL_URL',
-      'CENTIPAWN_META_URL',
-      `${body}\nreturn centipawnModel();`,
-    );
-    const model = (...args) => extracted(centipawnModelIdForUrls, ...args);
+  for (const model of [analysisCentipawnModel, arenaCentipawnModel()]) {
     const shipped = model(false, '/models/s4fix_v_ema.onnx', '/models/s4fix_v_ema.meta.json');
     assert.equal(
       model(false, '/models/bt4_soap_rem_c19000_final.onnx', '/models/bt4_soap_rem_c19000_final.meta.json').modelId,

@@ -12,6 +12,13 @@ function extract(text, first, last, tail = '') {
   return stripTypeScriptTypes(text.slice(start, end) + tail);
 }
 
+/** Play reaches its DOM and listeners through ctx.dom / ctx.scope; point them at this harness's fakes. */
+function playScope(ctx, deps) {
+  ctx.dom = { el: deps.el, selectEl: deps.selectEl, buttonEl: deps.buttonEl };
+  ctx.scope = { listen: (target, type, fn) => deps.trackListener(ctx, target, type, fn), clearTimeout: (id) => deps.clearTimeout(id) };
+  return ctx;
+}
+
 for (const action of ['cpu', 'startup', 'replacement-picker']) {
   test(`Play ${action} aborts obsolete picker metadata before another dialog or admission`, async () => {
     const ctx = {
@@ -51,10 +58,15 @@ for (const action of ['cpu', 'startup', 'replacement-picker']) {
       ctxVerifySelectedEngineReady: () => admissions++,
       ctxEngineTurn: () => assert.fail('the human moves first'),
     };
+    playScope(ctx, deps);
     const code =
       extract(source.play, 'function ctxCancelPickerConsent(', 'function ctxCancelEngineTurn(') +
       extract(source.play, 'function ctxPrepareOrStartEngine(', 'function ctxResetGameStateForMount(') +
-      extract(source.play, "  trackListener(ctx, selectEl('engineSelect'), 'change', async () => {", "  trackListener(ctx, selectEl('levelSelect')");
+      extract(
+        source.play,
+        "  ctx.scope.listen(ctx.dom.selectEl('engineSelect'), 'change', async () => {",
+        "  ctx.scope.listen(ctx.dom.selectEl('levelSelect')",
+      );
     const prepare = new Function(
       'deps',
       `const { ${Object.keys(deps)} } = deps;

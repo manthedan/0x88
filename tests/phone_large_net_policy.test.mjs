@@ -336,15 +336,13 @@ test('restored Play game keeps its position but replaces a blocked large opponen
         warned = true;
       },
       ctxEngineOptionState: () => ({ disabled: false }),
-      selectEl: el,
-      el,
       ctxRenderLevelOptions() {},
       ctxResetGameStateForMount: (ctx) => {
         ctx.activeEngine = el('engineSelect').value;
       },
     };
     const init = new Function('deps', `const { ${Object.keys(deps)} } = deps; ${prefix}; return ctxInit;`)(deps);
-    const ctx = {};
+    const ctx = { dom: { el, selectEl: el } };
     init(ctx);
     assert.equal(ctx.activeEngine, key === 'lqo' ? 'lqo' : 'lc0-small');
     assert.equal(ctx.pendingPreferredEngineId, null);
@@ -375,11 +373,13 @@ test('Play revocation distinguishes live opponents, pending restart drafts, and 
           preferences: { ...active, engineId: activeLarge ? 'sf-lite' : 'bt4', color: 'black' },
           gameInProgress: true,
         });
+    const clearedTimers = [];
     const ctx = {
       opponent,
       pendingPreferredEngineId: cancellingRestore ? 't3' : null,
       pendingPreferredEngineTimer: cancellingRestore ? 42 : null,
       board: 'saved-game',
+      scope: { clearTimeout: (timer) => clearedTimers.push(timer) },
     };
     const replacesOpponent = activeLarge || cancellingRestore;
     let note = cancellingRestore ? 'Checking your saved engine assets…' : '';
@@ -387,7 +387,6 @@ test('Play revocation distinguishes live opponents, pending restart drafts, and 
     let cancelled = 0;
     let prepared = 0;
     let dismissed = 0;
-    const clearedTimers = [];
     const pool = new BigNetSessionPool(() => ({
       disposeCalls: 0,
       dispose() {
@@ -403,11 +402,10 @@ test('Play revocation distinguishes live opponents, pending restart drafts, and 
       phoneSafeEngineVariant: (family, variant) => phoneSafeEngineVariant(family, variant, true, false),
       ctxSelectedEngine: (ctx) => options[ctx.opponent.active.engineId],
       ctxDraftEngine: () => options[(ctx.opponent.pending ?? ctx.opponent.active).engineId],
-      clearTimeout: (timer) => clearedTimers.push(timer),
       ctxCancelEngineTurn: () => {
         cancelled++;
       },
-      ctxSetEngineNote: (text) => {
+      ctxSetEngineNote: (_ctx, text) => {
         note = text;
       },
       releaseUnusedBigNetSearchers: (keys, ttl) => pool.releaseUnused(keys, ttl),

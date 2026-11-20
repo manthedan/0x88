@@ -19,11 +19,19 @@ import {
   reconcileRuntimeFallbackWarning,
   updateRuntimeFallbackWarning,
 } from '../nn/runtimeAudit.ts';
-import { centipawnModelIdForUrls } from '../nn/runtimeRegistry.ts';
 import { centipawnSearchOptions } from '../search/centipawn.ts';
 import { chooseMove } from '../search/puct.ts';
+import {
+  ANALYSIS_BIG_NET_KEYS,
+  ANALYSIS_BIG_NET_SESSION,
+  type AnalysisBigNetKey,
+  cpuAnalysisTimeoutMs,
+  cpuColdStartTimeoutMs,
+  createAnalysisEngines,
+  threadedStockfishAvailable,
+} from './analysis/analysisEngines.ts';
 import { cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
-import { AnalysisCpuSessions, analysisGamePosition } from './analysisContinuity.ts';
+import { analysisGamePosition } from './analysisContinuity.ts';
 import { mountAnalysisDisclosure } from './analysisDisclosure.ts';
 import {
   ANALYSIS_DRAWABLE_BRUSHES,
@@ -37,7 +45,6 @@ import {
 import { acknowledgeInputTransfer, takeAnalysisHandoff, writePlayHandoff } from './analysisHandoff.ts';
 import { analysisUrlFen } from './analysisUrlInput.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
-import { createCentipawnEvaluatorCache } from './centipawnEvaluatorCache.ts';
 import { writeClipboard } from './clipboard.ts';
 import { CriticalAnalysisRefresh } from './criticalMoments.ts';
 import { mountCriticalMomentsPanel } from './criticalMomentsPanel.ts';
@@ -156,14 +163,7 @@ import {
   normalizeBerserkVariant,
   resolveDefaultBerserkVariantAssetFallback,
 } from './berserkVariants.ts';
-import {
-  acquireBigNetSearcherAsync,
-  type BigNetKey,
-  disposeBigNetSearcherNow,
-  peekBigNetSearcher,
-  preparePhoneBigNet,
-  releaseBigNetSearcher,
-} from './bigNetSessionPool.ts';
+import { disposeBigNetSearcherNow, peekBigNetSearcher, preparePhoneBigNet, releaseBigNetSearcher } from './bigNetSessionPool.ts';
 import { createBrowserDom, htmlEscape } from './browserDom.ts';
 import {
   type BrowserLc0Runtime,
@@ -176,12 +176,11 @@ import {
   LC0_WHOLE_MODEL_WEBGPU_RUNTIME,
   normalizeLc0Runtime,
 } from './browserLc0Runtime.ts';
-import type { BrowserUciAnalysisOptions, BrowserUciEngine } from './browserUciEngine.ts';
+import type { BrowserUciEngine } from './browserUciEngine.ts';
 import { browserVariantOption, createBrowserVariantSelector } from './browserVariantOption.ts';
 import {
   BIG_NETS,
   type BigNetConfig,
-  type Bt4WorkerSearcher,
   bigNetAssetStatusSync,
   bigNetOptionState,
   bt4SupportedSync,
@@ -189,7 +188,6 @@ import {
   phoneBlockedBigNetModelUrl,
   probeBt4Support,
 } from './bt4Engine.ts';
-import { DisposableVariantPool } from './disposableVariantPool.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import {
   canonicalEngineFamily,
@@ -201,7 +199,6 @@ import {
   type EngineFamily,
   type EngineRow,
   engineFamilyOptions,
-  engineResourceProfile,
   engineStrengthMeta,
   isLc0BigNetVariant,
   isV0DeployProfile,
@@ -212,19 +209,6 @@ import {
   stockfishVariantOptions,
 } from './engineCatalog.ts';
 import { engineLogoFamilyForEngineFamily, engineLogoHtml, probeEngineLogos } from './engineLogos.ts';
-import {
-  berserkCacheKey,
-  cpuEngineHashMbForSurface,
-  createBerserkEngine,
-  createPlentyChessEngine,
-  createRecklessEngine,
-  createStormphraxEngine,
-  createViridithasEngine,
-  plentyChessCacheKey,
-  recklessCacheKey,
-  stormphraxCacheKey,
-  viridithasCacheKey,
-} from './engineProvision.ts';
 import {
   BUILT_IN_PROFILE_VALUE_PREFIX,
   ENGINE_PROFILE_BACKUP_KIND,
@@ -246,7 +230,6 @@ import {
 import { requestLargeNetDownloadConsent, requestLargeNetRedownloadConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
-import { LC0_MODEL_DOWNLOAD_NOT_APPROVED } from './modelCache.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationProvider } from './onnxEvaluator.ts';
 import { type OpeningNameIndex, openingNameAt } from './openingNames.ts';
 import {
@@ -281,7 +264,7 @@ import {
   resolveDefaultRecklessVariantAssetFallback,
   supportsWasmRelaxedSimd,
 } from './recklessVariants.ts';
-import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
+import { loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { Lc0PuctSearcher } from './search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
 import {
@@ -562,9 +545,6 @@ function restoreAnalysisWorkspace(): void {
 }
 let searcher: Lc0PuctSearcher | null = null;
 let mainEvaluator: Lc0EvaluationProvider | null = null;
-let stockfishLite: StockfishEngine | null = null;
-let stockfishFull: StockfishEngine | null = null;
-const centipawnCache = createCentipawnEvaluatorCache(createBrowserSquareformerRuntimeEvaluator);
 let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 
 function initialPerformanceDial(): PerformanceDial {
@@ -577,14 +557,32 @@ function initialPerformanceDial(): PerformanceDial {
   }
 }
 
-// Multi-engine analysis keeps CPU engines behind an exclusive broker lease.
-// The promoted browser-native WASM engines are single-threaded but can still
-// saturate the page when started together, especially while loading sidecars.
-// Multi-engine analysis runs all selected engines concurrently. CPU engines
-// are gated by a bounded broker (max 2 concurrent) to avoid saturating the
-// page; GPU engines (Lc0, Centipawn) run without a CPU lease.
-const resourceBroker = new EngineResourceBroker({ policy: 'bounded', maxConcurrentCpu: 2, dial: initialPerformanceDial() });
-const registeredBrokerEngines = new Set<string>();
+const engines = createAnalysisEngines({
+  port: {
+    live: () => !mountAbort.signal.aborted,
+    loading: (id, item) => (item ? showLoadingProgressItem(id, item) : hideLoadingProgressItem(id)),
+    runtimeInfoChanged: () => renderRecklessRuntimeInfo(),
+  },
+  dial: initialPerformanceDial(),
+  centipawn: {
+    legacyOverride: LEGACY_CENTIPAWN_OVERRIDE,
+    modelUrl: CENTIPAWN_MODEL_URL,
+    metaUrl: CENTIPAWN_META_URL,
+    legacyModelUrl: LEGACY_CENTIPAWN_RESOLVED_MODEL_URL,
+    legacyMetaUrl: LEGACY_CENTIPAWN_RESOLVED_META_URL,
+    manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
+  },
+  loadCentipawn: createBrowserSquareformerRuntimeEvaluator,
+  variants: {
+    reckless: recklessVariantForKey,
+    viridithas: viridithasVariantForKey,
+    berserk: berserkVariantForKey,
+    plentyChess: plentyChessVariantForKey,
+    stormphrax: stormphraxVariantForKey,
+  },
+  activeRows: () => activeEngineRows(),
+  preload: (label, urls, signal) => preloadAnalysisAssets(label, urls, signal),
+});
 let analysisRunState = initialAnalysisRunState();
 let analysisTransitionLog: readonly AnalysisTransitionEntry[] = Object.freeze([]);
 let nextAnalysisOperationId = 0;
@@ -593,30 +591,6 @@ const analysisTimers = new Map<number, ReturnType<typeof setTimeout>>();
 // Observational only; not an admission guard or a cache-key component.
 let analysisBackendGeneration = 0;
 
-function syncBrokerParticipants(rows: EngineRow[]): void {
-  const desired = new Map<string, EngineFamily>();
-  for (const row of rows) {
-    if (engineResourceProfile(row.family).resourceClass !== 'cpu') continue;
-    desired.set(row.family === 'sf' ? `sf-${row.variant === 'full' ? 'full' : 'lite'}` : `${row.family}:${row.variant}`, row.family);
-  }
-  // Register the exact participant set for this run; stale entries skew shares.
-  for (const known of registeredBrokerEngines) {
-    if (!desired.has(known)) {
-      resourceBroker.unregister(known);
-      registeredBrokerEngines.delete(known);
-    }
-  }
-  for (const [engineId, family] of desired) {
-    resourceBroker.register(engineId, { ...engineResourceProfile(family) });
-    registeredBrokerEngines.add(engineId);
-  }
-}
-type AnalysisBigNetKey = Extract<BigNetKey, 'bt4' | 't3'>;
-const ANALYSIS_BIG_NET_KEYS: readonly AnalysisBigNetKey[] = ['bt4', 't3'];
-async function bigNetFor(variant: string, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher; cacheOnly: boolean }> {
-  const key: AnalysisBigNetKey = variant === 't3' ? 't3' : 'bt4'; // keep in step with engineAnalysisCacheKey
-  return { config: BIG_NETS[key], searcher: await acquireBigNetSearcherAsync(key, false, signal), cacheOnly: analysisCacheOnlyBigNets.has(key) };
-}
 let ground: Ground | null = null;
 let pvGround: Ground | null = null;
 let pvPreview: { root: GameNode; line: PvPreview; step: number; focusKey: string } | null = null;
@@ -1199,8 +1173,6 @@ interface AnalysisAssetPreload {
 const preloadingAnalysisAssetPromises = new Map<string, AnalysisAssetPreload>();
 const analysisAssetPrefetchControllers = new Map<EngineRow, AbortController>();
 let analysisAssetPreloadSequence = 0;
-const preparedCpuEngineKeys = new Set<string>();
-const cpuSessions = new AnalysisCpuSessions();
 
 function renderLoadingProgressItems(): void {
   const node = modelProgressEl();
@@ -1258,16 +1230,6 @@ function multiPv(): number {
   return Math.max(1, Math.floor(Number(inputEl('multiPvInput').value) || 3));
 }
 
-function centipawnRuntimeForVariant(variant: string): 'auto' | 'ort' | 'custom-webgpu' | 'tvmjs-webgpu' {
-  if (variant.endsWith('-ort')) return 'ort';
-  if (variant.endsWith('-custom')) return LEGACY_CENTIPAWN_OVERRIDE ? 'custom-webgpu' : 'tvmjs-webgpu';
-  return 'auto';
-}
-
-function centipawnRuntimeFallbackForVariant(variant: string): boolean {
-  return !variant.endsWith('-custom');
-}
-
 function centipawnHybridManifestStatusText(): string {
   if (!LEGACY_CENTIPAWN_OVERRIDE) return 'Centipawn s4fix-v-ema · ORT Web only';
   if (centipawnHybridManifestStatus === 'present') return `Centipawn TVMJS bundle present (${CENTIPAWN_HYBRID_MANIFEST_URL})`;
@@ -1295,82 +1257,8 @@ async function refreshCentipawnHybridManifestStatus(mountSignal = mountAbort.sig
   renderRecklessRuntimeInfo();
 }
 
-function centipawnModel(): { modelId: string; onnx: string; meta: string } {
-  return LEGACY_CENTIPAWN_OVERRIDE
-    ? { modelId: 'bt4-anneal-muon-best', onnx: LEGACY_CENTIPAWN_RESOLVED_MODEL_URL, meta: LEGACY_CENTIPAWN_RESOLVED_META_URL }
-    : {
-        modelId: centipawnModelIdForUrls(CENTIPAWN_MODEL_URL, CENTIPAWN_META_URL) ?? CENTIPAWN_MODEL_URL,
-        onnx: CENTIPAWN_MODEL_URL,
-        meta: CENTIPAWN_META_URL,
-      };
-}
-
-function centipawnEvaluatorCacheKey(variant: string): string {
-  const runtime = centipawnRuntimeForVariant(variant);
-  const fallback = centipawnRuntimeFallbackForVariant(variant);
-  const model = centipawnModel();
-  return `${runtime}:${fallback ? 'fallback' : 'strict'}:${model.onnx}:${model.meta}:${CENTIPAWN_HYBRID_MANIFEST_URL}`;
-}
-
-function centipawnEvaluatorKeysForRows(rows: EngineRow[]): Set<string> {
-  return new Set(rows.filter((row) => row.family === 'centipawn').map((row) => centipawnEvaluatorCacheKey(row.variant)));
-}
-
-// Row edits are deferred while a run is active, so the run's own row snapshot
-// must keep its Centipawn evaluators alive even if the visible rows changed.
-let analysisRunCentipawnKeys = new Set<string>();
-
-function retireAnalysisRunCentipawnKeys(): void {
-  if (!analysisRunCentipawnKeys.size) return;
-  analysisRunCentipawnKeys = new Set();
-  // Removals made while the snapshot was held could not dispose these evaluators.
-  disposeUnusedCentipawnEvaluators();
-}
-
-function activeCentipawnEvaluatorKeys(): Set<string> {
-  return new Set([...centipawnEvaluatorKeysForRows(activeEngineRows()), ...analysisRunCentipawnKeys]);
-}
-
-function centipawnEvaluator(variant: string): Promise<Evaluator> {
-  const runtime = centipawnRuntimeForVariant(variant);
-  const fallback = centipawnRuntimeFallbackForVariant(variant);
-  const model = centipawnModel();
-  const key = centipawnEvaluatorCacheKey(variant);
-  return centipawnCache.get(
-    key,
-    {
-      spec: {
-        id: model.modelId,
-        modelId: model.modelId,
-        label: centipawnEngineLabel(variant),
-        onnx: model.onnx,
-        meta: model.meta,
-        runtime,
-        manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
-      },
-      options: {
-        runtime,
-        manifestUrl: CENTIPAWN_HYBRID_MANIFEST_URL,
-        fallback,
-        audit: { surface: 'analysis', searchBudget: `multipv=${multiPv()}` },
-      },
-      maxEntries: 4096,
-      label: `centipawn-analysis:${runtime}`,
-    },
-    () => activeCentipawnEvaluatorKeys().has(key),
-  );
-}
-
 function centipawnHistoryFens(positions: BoardState[]): string[] {
   return searchHistoryFens(positions, positions.length);
-}
-
-function disposeCentipawnEvaluators(): void {
-  centipawnCache.clear();
-}
-
-function disposeUnusedCentipawnEvaluators(): void {
-  centipawnCache.retain(activeCentipawnEvaluatorKeys());
 }
 
 function clampStrengthForRow(row: EngineRow): number {
@@ -1793,8 +1681,8 @@ function engineAnalysisCacheKey(fen: string, row: EngineRow, node: GameNode = tr
       positions: tree.historyBoards(node),
       multiPv: requestedMultiPv,
       runtime: selectedLc0Runtime(),
-      servedModels: { small: lc0ServedModelUrl, ...Object.fromEntries(analysisBigNetServedModel) },
-      broker: analysisRunBroker([...activeEngineRows(), row], resourceBroker.snapshot()),
+      servedModels: { small: lc0ServedModelUrl, ...engines.servedBigNetModels() },
+      broker: analysisRunBroker([...activeEngineRows(), row], engines.broker.snapshot()),
     },
     row,
   );
@@ -1818,14 +1706,14 @@ function activeEngineRows(): EngineRow[] {
 
 function runtimeAuditIdentityForRow(row: EngineRow): string | null {
   if (row.family === 'centipawn') {
-    const model = centipawnModel();
+    const model = engines.centipawnModel();
     return browserRuntimeAuditIdentity({
       source: 'active-analysis-engine',
       surface: 'analysis',
       family: 'centipawn',
       engineLabel: centipawnEngineLabel(row.variant),
       modelId: model.modelId,
-      requestedRuntime: centipawnRuntimeForVariant(row.variant),
+      requestedRuntime: engines.centipawnRuntimeForVariant(row.variant),
     });
   }
   if (row.family === 'lc0' && !isLc0BigNetVariant(row.variant)) {
@@ -1853,10 +1741,6 @@ function activeRuntimeAuditIdentities(): Set<string> {
 function reconcileActiveRuntimeFallbackWarning(): void {
   const warningTarget = maybeEl('runtimeWarning');
   if (warningTarget) reconcileRuntimeFallbackWarning(warningTarget, activeRuntimeAuditIdentities());
-}
-
-function usesBigNetRow(variant: 'bt4' | 't3'): boolean {
-  return engineRows.some((r) => r.family === 'lc0' && r.variant === variant);
 }
 
 function renderEngineList(): void {
@@ -1907,182 +1791,12 @@ function renderEngineSetupSummary(): void {
   renderEngineSummaries(lineCache.get(tree.current.fen) ?? []);
 }
 
-/**
- * The big-net session options of an Analysis search (worker eval cache off, as
- * before). The pool shares sessions with Play and Arena, which use 2048 or
- * arenaCacheEntries(); a different size makes init dispose and reload the
- * session. initBigNetsForRun and workerBigNetLines must both use this.
- */
-const ANALYSIS_BIG_NET_SESSION = { evalCacheEntries: 0 } as const;
-
-/**
- * The served model URL of each big net as of the latest run's start, the way
- * lc0ServedModelUrl holds Lc0 Small's. Every cache and selection key reads this
- * snapshot (engineAnalysisCacheKey), never the live worker, whose
- * servedModelUrl a crash clears mid-run.
- */
-const analysisBigNetServedModel = new Map<AnalysisBigNetKey, string>();
-
-async function workerBigNetLines(
-  runId: number,
-  variant: string,
-  fen: string,
-  visits: number,
-  positions: BoardState[],
-  requestedMultiPv: number,
-  servedModelUrl: string,
-  signal?: AbortSignal,
-): Promise<AnalysisLine[]> {
-  const { config, searcher } = await bigNetFor(variant, signal);
-  const label = `Lc0 ${config.name}`;
-  // The run's keys name servedModelUrl; never search on another session under them.
-  if (!searcher.isInitializedFor(ANALYSIS_BIG_NET_SESSION) || searcher.servedModelUrl !== servedModelUrl) {
-    throw new Error(`${label} session changed during analysis; analyze again`);
-  }
-  // Like initBigNetsForRun: once this run is cancelled (Stop, a new run, or
-  // unmount), cancelAnalysisOperation has already cleared the shared model
-  // progress slot and the next owner may have shown its own. The cancelled
-  // search still settles later, so neither its callbacks nor its finally may
-  // touch the slot after that.
-  const cancelled = () => signal?.aborted === true || mountAbort.signal.aborted;
-  searcher.onDownloadProgress = (loaded, total) => {
-    if (!cancelled()) showModelProgress(label, loaded, total, 'Downloading');
-  };
-  try {
-    const result = await searcher.search(
-      { positions },
-      {
-        visits,
-        multiPv: requestedMultiPv,
-        evalCacheEntries: ANALYSIS_BIG_NET_SESSION.evalCacheEntries,
-        batchSize: config.recommendedBatchSize,
-        batchPipelineDepth: config.recommendedPipelineDepth,
-        signal,
-        onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
-      },
-    );
-    return result.cancelled ? [] : lc0AnalysisLines(result, fen, `Lc0 ${config.name}`);
-  } finally {
-    if (!cancelled()) hideModelProgress();
-  }
-}
-
-/**
- * A big net picks its served model (the shipped export or its split-K rewrite)
- * when its worker initializes, and that URL is part of every cache and
- * selection key (engineAnalysisCacheKey). So, like the Lc0 Small backend before
- * analyzeCurrent proceeds, the selected big nets are initialized, with the
- * options the search will pass, before a run takes its keys. Keys taken before
- * that init would not match the session the search runs on (none yet, or a
- * pooled one the search would reload), and the run's results would be discarded
- * or cached under the wrong model. initBigNetsForRun returns the init errors by
- * net, which the run reports as that engine's failure without retrying the
- * download.
- */
-function bigNetsAwaitingInit(rows: EngineRow[]): AnalysisBigNetKey[] {
-  const keys = new Set<AnalysisBigNetKey>();
-  for (const row of rows) {
-    if (row.family !== 'lc0' || !isLc0BigNetVariant(row.variant)) continue;
-    const key: AnalysisBigNetKey = row.variant === 't3' ? 't3' : 'bt4';
-    if (!peekBigNetSearcher(key)?.isInitializedFor(ANALYSIS_BIG_NET_SESSION)) keys.add(key);
-  }
-  return [...keys];
-}
-
-/**
- * Big nets approved on a phone because they were cached ('cached' consent). That approves no
- * download: loading Lc0 Small (or anything else) can evict the net before the run loads it, so
- * initBigNetsForRun loads these cache-only and asks again before downloading.
- */
-const analysisCacheOnlyBigNets = new Set<AnalysisBigNetKey>();
-/** Cache-only nets whose download the user declined: automatic runs fail them without asking again. */
-const analysisDeclinedBigNetDownloads = new Set<AnalysisBigNetKey>();
-/** Phone/desktop large-net consent for a row choice; records a cache-hit approval. */
 async function requestAnalysisBigNetConsent(config: BigNetConfig, signal: AbortSignal): Promise<boolean> {
   const consent = await requestLargeNetDownloadConsent(config, signal);
-  const key = config.key as AnalysisBigNetKey;
-  if (consent === 'cached') analysisCacheOnlyBigNets.add(key);
-  else if (consent === 'download') analysisCacheOnlyBigNets.delete(key);
-  // Choosing the net again is the explicit retry of a declined download.
-  if (consent) analysisDeclinedBigNetDownloads.delete(key);
+  engines.recordBigNetConsent(config.key as AnalysisBigNetKey, consent);
   return consent !== false;
 }
-/**
- * `prompt` owns the download prompt a cache-only approval may need (bigNetFor().cacheOnly);
- * `current` is false once the run is superseded, so a removed row is never asked about.
- */
-async function initBigNetsForRun(
-  keys: AnalysisBigNetKey[],
-  cancelled: () => boolean,
-  prompt?: { signal: AbortSignal; current: () => boolean },
-): Promise<Map<AnalysisBigNetKey, Error>> {
-  const errors = new Map<AnalysisBigNetKey, Error>();
-  await Promise.all(
-    keys.map(async (key) => {
-      try {
-        const { config, searcher, cacheOnly } = await bigNetFor(key);
-        // Checked before each attempt: a stopped run must not reload a pooled
-        // session that Play or Arena may have taken back.
-        if (cancelled()) return;
-        const label = `Lc0 ${config.name}`;
-        // A cancelled run no longer owns the shared model progress slot:
-        // cancelAnalysisOperation already cleared it, and the next run or mount
-        // may have shown its own. The pooled init keeps going, so its late
-        // callbacks and this finally must not touch the slot.
-        searcher.onDownloadProgress = (loaded, total) => {
-          if (!cancelled()) showModelProgress(label, loaded, total, 'Downloading');
-        };
-        const load = async (options: { evalCacheEntries?: number; noDownload?: boolean }) => {
-          await searcher.init(options);
-          // An init already in flight for other options resolves with those; reload once.
-          if (cancelled() || searcher.isInitializedFor(ANALYSIS_BIG_NET_SESSION)) return;
-          await searcher.init(options);
-        };
-        try {
-          if (!cacheOnly) {
-            await load(ANALYSIS_BIG_NET_SESSION);
-            return;
-          }
-          try {
-            await load({ ...ANALYSIS_BIG_NET_SESSION, noDownload: true });
-          } catch (error) {
-            if (cancelled() || !(error instanceof Error && error.message.includes(LC0_MODEL_DOWNLOAD_NOT_APPROVED))) throw error;
-            const notApproved = () => new Error(`Lc0 ${config.name} is no longer cached and its download was not approved.`);
-            if (!prompt || analysisDeclinedBigNetDownloads.has(key)) throw notApproved();
-            if (!prompt.current()) return;
-            const consent = await requestLargeNetRedownloadConsent(config, prompt.signal);
-            if (cancelled()) return;
-            if (consent !== 'download') {
-              if (consent === false) analysisDeclinedBigNetDownloads.add(key);
-              throw notApproved();
-            }
-            analysisCacheOnlyBigNets.delete(key);
-            if (!prompt.current()) return;
-            await load(ANALYSIS_BIG_NET_SESSION);
-          }
-        } finally {
-          if (!cancelled()) hideModelProgress();
-        }
-      } catch (error) {
-        errors.set(key, error instanceof Error ? error : new Error(String(error)));
-      }
-    }),
-  );
-  return errors;
-}
 
-/** After initBigNetsForRun: record the URL of the session each selected big net's search will use. */
-function snapshotBigNetServedModels(rows: EngineRow[]): void {
-  for (const row of rows) {
-    if (row.family !== 'lc0' || !isLc0BigNetVariant(row.variant)) continue;
-    const key: AnalysisBigNetKey = row.variant === 't3' ? 't3' : 'bt4';
-    const searcher = peekBigNetSearcher(key);
-    if (searcher?.isInitializedFor(ANALYSIS_BIG_NET_SESSION)) analysisBigNetServedModel.set(key, searcher.servedModelUrl);
-    else analysisBigNetServedModel.delete(key);
-  }
-}
-
-// Lc0 big nets use hosted ONNX assets and prefer WebGPU, with a slow CPU fallback.
 async function refreshBt4Availability(mountSignal = mountAbort.signal): Promise<void> {
   await Promise.all([
     probeBt4Support(),
@@ -2120,13 +1834,14 @@ function renderRecklessRuntimeInfo(): void {
   const centipawnRows = activeEngineRows().filter((row) => row.family === 'centipawn');
   const centipawnParts = centipawnRows.length
     ? centipawnRows.map(
-        (row) => `${centipawnEngineLabel(row.variant)} · SquareFormer ${centipawnRuntimeForVariant(row.variant)} · ${centipawnHybridManifestStatusText()}`,
+        (row) =>
+          `${centipawnEngineLabel(row.variant)} · SquareFormer ${engines.centipawnRuntimeForVariant(row.variant)} · ${centipawnHybridManifestStatusText()}`,
       )
     : [];
   const recklessRows = activeEngineRows().filter((row) => row.family === 'reckless');
   const recklessVariants = recklessRows.length ? recklessRows.map((row) => recklessVariantForKey(row.variant)) : [REQUESTED_RECKLESS_VARIANT];
   const recklessParts = recklessVariants.map((variant) => {
-    const engine = recklessEngines.peek(variant);
+    const engine = engines.pools.reckless.peek(variant);
     const status = engine?.runtimeStatus();
     const mode = `${engine?.runtimeLabel() ?? fallbackMode}${variant.backend === 'browser-api' ? ' · FEN-only (no repetition history)' : ''}`;
     const asset = recklessVariantAssetStatus(variant);
@@ -2147,7 +1862,7 @@ function renderRecklessRuntimeInfo(): void {
   const viridithasRows = activeEngineRows().filter((row) => row.family === 'viridithas');
   const viridithasVariants = viridithasRows.length ? viridithasRows.map((row) => viridithasVariantForKey(row.variant)) : [REQUESTED_VIRIDITHAS_VARIANT];
   const viridithasParts = viridithasVariants.map((variant) => {
-    const engine = viridithasEngines.peek(variant);
+    const engine = engines.pools.viridithas.peek(variant);
     const status = engine?.runtimeStatus();
     const mode = engine?.runtimeLabel() ?? (canUsePersistentViridithasWasi() ? 'persistent available' : 'one-shot fallback');
     const asset = viridithasVariantAssetStatus(variant);
@@ -2160,7 +1875,7 @@ function renderRecklessRuntimeInfo(): void {
     ? berserkRows.map((row) => berserkVariantForKey(row.variant))
     : [REQUESTED_BERSERK_VARIANT].filter((variant) => !!variant.jsUrl);
   const berserkParts = berserkVariants.map((variant) => {
-    const engine = berserkEngines.peek(variant);
+    const engine = engines.pools.berserk.peek(variant);
     const asset = berserkVariantAssetStatus(variant);
     if (assetProbePending(asset)) void checkBerserkVariantAsset(variant, whileAnalysisMounted(renderRecklessRuntimeInfo));
     const assetText = asset === 'present' ? 'asset ok' : asset === 'missing' ? 'asset missing' : 'checking asset';
@@ -2169,7 +1884,7 @@ function renderRecklessRuntimeInfo(): void {
   const plentyRows = activeEngineRows().filter((row) => row.family === 'plentychess');
   const plentyVariants = plentyRows.length ? plentyRows.map((row) => plentyChessVariantForKey(row.variant)) : [REQUESTED_PLENTYCHESS_VARIANT];
   const plentyParts = plentyVariants.map((variant) => {
-    const engine = plentyChessEngines.peek(variant);
+    const engine = engines.pools.plentyChess.peek(variant);
     const asset = plentyChessVariantAssetStatus(variant);
     const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
     if (!unsupportedReason && assetProbePending(asset)) void checkPlentyChessVariantAsset(variant, whileAnalysisMounted(renderRecklessRuntimeInfo));
@@ -2179,7 +1894,7 @@ function renderRecklessRuntimeInfo(): void {
   const stormphraxRows = activeEngineRows().filter((row) => row.family === 'stormphrax');
   const stormphraxVariants = stormphraxRows.length ? stormphraxRows.map((row) => stormphraxVariantForKey(row.variant)) : [REQUESTED_STORMPHRAX_VARIANT];
   const stormphraxParts = stormphraxVariants.map((variant) => {
-    const engine = stormphraxEngines.peek(variant);
+    const engine = engines.pools.stormphrax.peek(variant);
     const asset = stormphraxVariantAssetStatus(variant);
     const unsupportedReason = stormphraxVariantUnsupportedReason(variant);
     if (!unsupportedReason && assetProbePending(asset)) void checkStormphraxVariantAsset(variant, whileAnalysisMounted(renderRecklessRuntimeInfo));
@@ -2190,99 +1905,9 @@ function renderRecklessRuntimeInfo(): void {
     `${bt4Text} · Centipawn: ${centipawnParts.join(' | ') || 'not selected'} · Reckless: ${recklessParts.join(' | ')} · Viridithas: ${viridithasParts.join(' | ')} · Berserk: ${berserkParts.join(' | ') || 'not selected'} · PlentyChess: ${plentyParts.join(' | ') || 'not selected'} · Stormphrax: ${stormphraxParts.join(' | ') || 'not selected'}`;
 }
 
-function threadedStockfishAvailable(): boolean {
-  return typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated === true && typeof SharedArrayBuffer !== 'undefined';
-}
-
-function getStockfish(kind: 'lite' | 'full'): StockfishEngine {
-  // Constructor depth is just a default; each analyze() call passes the row
-  // depth and a broker-leased thread count. Analysis defaults to the threaded
-  // flavor whenever isolation allows it (flavor is fixed per page lifetime).
-  const threaded = threadedStockfishAvailable();
-  if (kind === 'lite') {
-    if (!stockfishLite)
-      stockfishLite = new StockfishEngine(
-        { depth: 14, hashMb: cpuEngineHashMbForSurface('analysis') },
-        stockfishFlavorUrl(threaded ? 'lite-threaded' : 'lite-single'),
-      );
-    return stockfishLite;
-  }
-  if (!stockfishFull)
-    stockfishFull = new StockfishEngine({ depth: 14, hashMb: cpuEngineHashMbForSurface('analysis') }, stockfishFlavorUrl(threaded ? 'threaded' : 'single'));
-  return stockfishFull;
-}
-
-function disposeStockfish(kind: 'lite' | 'full'): void {
-  const engine = kind === 'lite' ? stockfishLite : stockfishFull;
-  if (!engine) return;
-  engine.dispose();
-  if (kind === 'lite') stockfishLite = null;
-  else stockfishFull = null;
-  // A recreated worker downloads and starts again; show that, not a warm search.
-  preparedCpuEngineKeys.delete(`sf:${kind}`);
-}
-
-const ANALYSIS_CPU_ENGINE_OPTIONS = { surface: 'analysis' } as const;
-
-const recklessEngines = new DisposableVariantPool(recklessCacheKey, (variant: RecklessVariant) =>
-  createRecklessEngine(variant, renderRecklessRuntimeInfo, ANALYSIS_CPU_ENGINE_OPTIONS),
-);
-const viridithasEngines = new DisposableVariantPool(viridithasCacheKey, (variant: ViridithasVariant) =>
-  createViridithasEngine(variant, {}, ANALYSIS_CPU_ENGINE_OPTIONS),
-);
-const berserkEngines = new DisposableVariantPool(berserkCacheKey, (variant: BerserkVariant) => createBerserkEngine(variant, ANALYSIS_CPU_ENGINE_OPTIONS));
-const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, (variant: PlentyChessVariant) =>
-  createPlentyChessEngine(variant, ANALYSIS_CPU_ENGINE_OPTIONS),
-);
-const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant: StormphraxVariant) =>
-  createStormphraxEngine(variant, ANALYSIS_CPU_ENGINE_OPTIONS),
-);
-
-function getRecklessFor(variantKey: string) {
-  return recklessEngines.getOrCreate(recklessVariantForKey(variantKey));
-}
-
-function getViridithasFor(variantKey: string) {
-  return viridithasEngines.getOrCreate(viridithasVariantForKey(variantKey));
-}
-
-function getBerserkFor(variantKey: string) {
-  return berserkEngines.getOrCreate(berserkVariantForKey(variantKey));
-}
-
-function getPlentyChessFor(variantKey: string) {
-  const variant = plentyChessVariantForKey(variantKey);
-  const unsupportedReason = plentyChessVariantUnsupportedReason(variant);
-  if (unsupportedReason) throw new Error(`${variant.label} ${unsupportedReason}.`);
-  return plentyChessEngines.getOrCreate(variant);
-}
-
-function getStormphraxFor(variantKey: string) {
-  const variant = stormphraxVariantForKey(variantKey);
-  const unsupportedReason = stormphraxVariantUnsupportedReason(variant);
-  if (unsupportedReason) throw new Error(`${variant.label} ${unsupportedReason}.`);
-  return stormphraxEngines.getOrCreate(variant);
-}
-
-function disposeAnalysisCpuEngines(): void {
-  preparedCpuEngineKeys.clear();
-  disposeStockfish('lite');
-  disposeStockfish('full');
-  recklessEngines.disposeAll();
-  viridithasEngines.disposeAll();
-  berserkEngines.disposeAll();
-  plentyChessEngines.disposeAll();
-  stormphraxEngines.disposeAll();
-}
-
 function disposeUnusedEngines(): void {
-  for (const key of ANALYSIS_BIG_NET_KEYS) {
-    if (usesBigNetRow(key)) continue;
-    peekBigNetSearcher(key)?.cancel();
-    // Match Play: an unused net must not overlap its replacement for three minutes.
-    releaseBigNetSearcher(key, 0);
-  }
-  disposeUnusedCentipawnEvaluators();
+  engines.releaseUnusedBigNets(engineRows);
+  engines.disposeUnusedCentipawnEvaluators();
   const activeRows = activeEngineRows();
   // The eval bar consumes these rows' cached lines; review/retry are CPU-only.
   // Neither owns an independent Small search once its last row is gone.
@@ -2295,15 +1920,7 @@ function disposeUnusedEngines(): void {
   }
   // Game review always runs SF Lite, so a running review keeps its rows too.
   const stockfishRows = reviewAbort ? [...activeRows, ...reviewEngineRows()] : activeRows;
-  for (const kind of ['lite', 'full'] as const) {
-    if (stockfishRows.some((row) => row.family === 'sf' && (row.variant === 'full' ? 'full' : 'lite') === kind)) continue;
-    disposeStockfish(kind);
-  }
-  recklessEngines.retain(activeRows.filter((row) => row.family === 'reckless').map((row) => recklessVariantForKey(row.variant)));
-  viridithasEngines.retain(activeRows.filter((row) => row.family === 'viridithas').map((row) => viridithasVariantForKey(row.variant)));
-  berserkEngines.retain(activeRows.filter((row) => row.family === 'berserk').map((row) => berserkVariantForKey(row.variant)));
-  plentyChessEngines.retain(activeRows.filter((row) => row.family === 'plentychess').map((row) => plentyChessVariantForKey(row.variant)));
-  stormphraxEngines.retain(activeRows.filter((row) => row.family === 'stormphrax').map((row) => stormphraxVariantForKey(row.variant)));
+  engines.disposeUnusedCpuEngines(activeRows, stockfishRows);
   renderRecklessRuntimeInfo();
 }
 
@@ -3597,15 +3214,22 @@ function reviewEngineChoice(): ReviewEngineChoice {
   const row = { ...selected, strength: Math.max(1, Math.min(20, Number(selectEl('reviewDepth').value) || 12)) };
   {
     if (row.family === 'sf')
-      return { engine: getStockfish(row.variant === 'full' ? 'full' : 'lite'), row, label: row.variant === 'full' ? 'SF' : 'SF Lite', depth: row.strength };
-    if (row.family === 'reckless') return { engine: getRecklessFor(row.variant), row, label: recklessVariantForKey(row.variant).label, depth: row.strength };
+      return {
+        engine: engines.getStockfish(row.variant === 'full' ? 'full' : 'lite'),
+        row,
+        label: row.variant === 'full' ? 'SF' : 'SF Lite',
+        depth: row.strength,
+      };
+    if (row.family === 'reckless')
+      return { engine: engines.getRecklessFor(row.variant), row, label: recklessVariantForKey(row.variant).label, depth: row.strength };
     if (row.family === 'viridithas')
-      return { engine: getViridithasFor(row.variant), row, label: viridithasVariantForKey(row.variant).label, depth: row.strength };
-    if (row.family === 'berserk') return { engine: getBerserkFor(row.variant), row, label: berserkVariantForKey(row.variant).label, depth: row.strength };
+      return { engine: engines.getViridithasFor(row.variant), row, label: viridithasVariantForKey(row.variant).label, depth: row.strength };
+    if (row.family === 'berserk')
+      return { engine: engines.getBerserkFor(row.variant), row, label: berserkVariantForKey(row.variant).label, depth: row.strength };
     if (row.family === 'plentychess')
-      return { engine: getPlentyChessFor(row.variant), row, label: plentyChessVariantForKey(row.variant).label, depth: row.strength };
+      return { engine: engines.getPlentyChessFor(row.variant), row, label: plentyChessVariantForKey(row.variant).label, depth: row.strength };
     if (row.family === 'stormphrax')
-      return { engine: getStormphraxFor(row.variant), row, label: stormphraxVariantForKey(row.variant).label, depth: row.strength };
+      return { engine: engines.getStormphraxFor(row.variant), row, label: stormphraxVariantForKey(row.variant).label, depth: row.strength };
   }
   throw new Error('Unsupported reviewer.');
 }
@@ -3692,12 +3316,12 @@ function startMistakeRetry(): void {
   retryModeGeneration += 1;
   // We took ownership from the cancelled run, so its identity-guarded finally
   // will not restore these controls or retire its search bookkeeping.
-  retireAnalysisRunCentipawnKeys();
+  engines.retireAnalysisRunCentipawnKeys();
   el('stop').toggleAttribute('disabled', true);
   el('analyze').toggleAttribute('disabled', false);
   selectEl('lc0RuntimeSelect').disabled = false;
   // Interactive analysis may have unregistered the fallback reviewer since review.
-  syncBrokerParticipants([...activeEngineRows(), lastReviewReviewer.row]);
+  engines.syncBrokerParticipants([...activeEngineRows(), lastReviewReviewer.row]);
   retryOriginalOrientation = orientation;
   retryOriginalAuto = inputEl('autoAnalyze').checked;
   inputEl('autoAnalyze').checked = false;
@@ -3790,15 +3414,15 @@ async function verifyRetryPosition(positionTree: GameTree, signal: AbortSignal):
   );
   if (terminal) return terminal.winWhite;
   const engineId = row.family === 'sf' ? `sf-${row.variant === 'full' ? 'full' : 'lite'}` : `${row.family}:${row.variant}`;
-  const lines = await withCpuLease(engineId, signal, async (lease) => {
-    cpuSessions.setThreads(engine, row.family === 'sf' ? Math.min(lease.threads, (engine as StockfishEngine).maxThreads()) : lease.threads);
+  const lines = await engines.withCpuLease(engineId, signal, async (lease) => {
+    engines.cpuSessions.setThreads(engine, row.family === 'sf' ? Math.min(lease.threads, (engine as StockfishEngine).maxThreads()) : lease.threads);
     return withEngineTimeout(label, signal, Math.max(cpuColdStartTimeoutMs(row), cpuAnalysisTimeoutMs(row)), async (searchSignal) => {
-      if (cpuSessions.needsReset(engine, positionTree)) {
+      if (engines.cpuSessions.needsReset(engine, positionTree)) {
         await engine.newGame(searchSignal);
         if (searchSignal.aborted) throw new DOMException('Retry cancelled', 'AbortError');
-        cpuSessions.prepared(engine, positionTree);
+        engines.cpuSessions.prepared(engine, positionTree);
       }
-      return analyzeCpuPosition(engine, row, positionTree.current.fen, analysisGamePosition(positionTree), { multipv: 1, depth, signal: searchSignal });
+      return engines.analyzeCpuPosition(engine, row, positionTree.current.fen, analysisGamePosition(positionTree), { multipv: 1, depth, signal: searchSignal });
     });
   });
   const scored = cachedReviewPosition(stockfishAnalysisLines(lines, positionTree.current.fen, label), legal);
@@ -3903,7 +3527,7 @@ async function runGameReview(): Promise<void> {
   let cacheKeys: string[];
   try {
     analysisAbort = null;
-    retireAnalysisRunCentipawnKeys();
+    engines.retireAnalysisRunCentipawnKeys();
     clearAnalysisSearchProgress();
     el('message').textContent = 'Position analysis paused for game review.';
     el('stop').toggleAttribute('disabled', true);
@@ -3915,7 +3539,7 @@ async function runGameReview(): Promise<void> {
     reviewer = reviewEngineChoice();
     clearReviewState();
     cacheKeys = nodes.map((node) => engineAnalysisCacheKey(node.fen, reviewer.row, node, reviewMultiPv));
-    syncBrokerParticipants([...activeEngineRows(), reviewer.row]);
+    engines.syncBrokerParticipants([...activeEngineRows(), reviewer.row]);
   } catch (error) {
     // Setup failed (e.g. unsupported reviewer) before reviewAbort owns the mode.
     void dispatchAnalysis({ type: 'MODE_EXIT', mode: 'review' });
@@ -3962,17 +3586,17 @@ async function runGameReview(): Promise<void> {
         continue;
       }
       const engineId = row.family === 'sf' ? `sf-${row.variant === 'full' ? 'full' : 'lite'}` : `${row.family}:${row.variant}`;
-      const lines = await withCpuLease(engineId, controller.signal, async (lease) => {
-        cpuSessions.setThreads(engine, row.family === 'sf' ? Math.min(lease.threads, (engine as StockfishEngine).maxThreads()) : lease.threads);
+      const lines = await engines.withCpuLease(engineId, controller.signal, async (lease) => {
+        engines.cpuSessions.setThreads(engine, row.family === 'sf' ? Math.min(lease.threads, (engine as StockfishEngine).maxThreads()) : lease.threads);
         // Include startup in the abort race: Stockfish's cold init itself is
         // not abortable, but must not retain a CPU lease after Cancel.
         return withEngineTimeout(label, controller.signal, Math.max(cpuColdStartTimeoutMs(row), cpuAnalysisTimeoutMs(row)), async (signal) => {
-          if (cpuSessions.needsReset(engine, reviewTree)) {
+          if (engines.cpuSessions.needsReset(engine, reviewTree)) {
             await engine.newGame(signal);
             if (signal.aborted) throw new DOMException('Review aborted', 'AbortError');
-            cpuSessions.prepared(engine, reviewTree);
+            engines.cpuSessions.prepared(engine, reviewTree);
           }
-          return analyzeCpuPosition(engine, row, fen, analysisGamePosition(reviewTree, nodes[i]), { multipv: reviewMultiPv, depth, signal });
+          return engines.analyzeCpuPosition(engine, row, fen, analysisGamePosition(reviewTree, nodes[i]), { multipv: reviewMultiPv, depth, signal });
         });
       });
       if (reviewAbort !== controller) return;
@@ -4170,21 +3794,6 @@ function removeHiddenTabPause(): void {
 
 let analysisReclaimOwner: AbortController | null = null;
 const ANALYSIS_REFRESH_PENDING_MESSAGE = 'Finishing previous search before updating analysis…';
-/** The run whose big-net init is in flight, and the nets it is loading. */
-let analysisBigNetInit: { owner: AbortController; keys: AnalysisBigNetKey[] } | null = null;
-
-/**
- * Stop ends a cold big-net load instead of leaving it to run on, so the run
- * settles now and Maia3 can reload once the worker retires. Navigation keeps
- * the load: the next run joins it rather than restarting the download.
- */
-function stopAnalysisBigNetInit(): void {
-  const init = analysisBigNetInit;
-  if (!init || init.owner !== analysisAbort) return;
-  for (const key of init.keys) if (!peekBigNetSearcher(key)?.loaded) disposeBigNetSearcherNow(key);
-  // The run settles silently once its load is gone; replace "Loading Lc0 …".
-  el('message').textContent = 'Analysis stopped.';
-}
 
 function invalidateAnalysisSettings(
   maintenance: Maintenance = { reloadLc0: false, disposeUnused: false },
@@ -4232,7 +3841,7 @@ function cancelAnalysisOperation(operationId: number): void {
   const reload = analysisReloadAbort === controller || !current;
   // Engines first: page teardown (DISPOSE) cancels after Svelte has removed the DOM, and a
   // missing element must not leave a worker search or big-net init running.
-  if (current) retireAnalysisRunCentipawnKeys();
+  if (current) engines.retireAnalysisRunCentipawnKeys();
   if (reload) {
     analysisReloadAbort = null;
     disposeRuntimeResources(); // also cancels the worker and big nets, and clears analysisAbort
@@ -4272,25 +3881,6 @@ function scheduleAnalyzeCurrent(options: { force?: boolean } = {}, delayMs = 250
   }
   if (hiddenTab.hidden) deferHiddenTabWork('analysis');
   void dispatchAnalysis({ type: 'REQUEST', intent: analysisIntent(options.force), delayMs });
-}
-
-async function withCpuLease<T>(engineId: string, signal: AbortSignal, task: (lease: { threads: number }) => Promise<T>): Promise<T> {
-  const lease = await resourceBroker.acquire({ engineId, signal });
-  try {
-    return await task(lease);
-  } finally {
-    lease.release();
-  }
-}
-
-function cpuAnalysisTimeoutMs(row: EngineRow): number {
-  if (row.family === 'sf') return Math.max(60000, row.strength * 5000);
-  return Math.max(45000, row.strength * 8000);
-}
-
-function cpuColdStartTimeoutMs(row: EngineRow): number {
-  if (row.family === 'sf') return 60000;
-  return 300000;
 }
 
 function assetFileLabel(rawUrl: string): string {
@@ -4458,63 +4048,6 @@ function prefetchAnalysisAssetsForAddedRow(row: EngineRow): void {
     });
 }
 
-async function prepareCpuEngine(
-  row: EngineRow,
-  engine: object,
-  preparationKey: string,
-  label: string,
-  parentSignal: AbortSignal,
-  urls: (string | undefined)[],
-  start: (signal: AbortSignal) => Promise<void>,
-  beginSearch: () => void,
-): Promise<void> {
-  const game = tree;
-  const prepared = preparedCpuEngineKeys.has(preparationKey);
-  // A warm engine reset is part of the next search, not another model load.
-  // Show one search activity state immediately instead of briefly flashing the
-  // download/startup surface on every position.
-  if (prepared) beginSearch();
-  await withEngineTimeout(`${label} loading`, parentSignal, cpuColdStartTimeoutMs(row), async (signal) => {
-    if (prepared) {
-      if (cpuSessions.needsReset(engine, game)) await start(signal);
-      if (!signal.aborted) cpuSessions.prepared(engine, game);
-      return;
-    }
-    await preloadAnalysisAssets(label, urls, signal);
-    if (signal.aborted) throw new DOMException('Analysis aborted', 'AbortError');
-    showLoadingProgressItem(`startup:${label}`, { label, phase: 'Starting engine' });
-    try {
-      await start(signal);
-      if (!signal.aborted) cpuSessions.prepared(engine, game);
-      preparedCpuEngineKeys.add(preparationKey);
-    } finally {
-      hideLoadingProgressItem(`startup:${label}`);
-    }
-  });
-  if (!prepared) beginSearch();
-}
-
-async function analyzeCpuPosition(
-  engine: Pick<BrowserUciEngine, 'analyze'>,
-  row: EngineRow,
-  fen: string,
-  position: ReturnType<typeof analysisGamePosition>,
-  options: BrowserUciAnalysisOptions,
-) {
-  // The experimental Reckless direct ABI only exposes set_fen, not UCI moves.
-  // Keep that explicitly FEN-only rather than feeding it a malformed FEN or
-  // silently switching the user's runtime. All UCI transports receive history.
-  const fenOnly = row.family === 'reckless' && recklessVariantForKey(row.variant).backend === 'browser-api';
-  try {
-    return await engine.analyze(fenOnly ? fen : position.fen, { ...options, moves: fenOnly ? undefined : position.moves });
-  } catch (error) {
-    cpuSessions.invalidate(engine);
-    throw error;
-  } finally {
-    if (options.signal?.aborted) cpuSessions.invalidate(engine);
-  }
-}
-
 async function performAnalysisMaintenance(operationId: number, maintenance: Maintenance): Promise<void> {
   const controller = new AbortController();
   analysisOperations.set(operationId, controller);
@@ -4561,7 +4094,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
   const options = { force: intent.force };
   const runId = owner.runId;
   activeAnalysisRunId = runId;
-  retireAnalysisRunCentipawnKeys();
+  engines.retireAnalysisRunCentipawnKeys();
   const rows = activeEngineRows();
   if (!rows.length) {
     el('message').textContent = 'Add an engine to analyze.';
@@ -4607,12 +4140,12 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     }
     if (hasEngineRetirements()) await awaitEngineRetirements();
     if (controller.signal.aborted || mountAbort.signal.aborted || !analysisCanPrepare(analysisRunState, owner)) return;
-    const uninitializedBigNets = bigNetsAwaitingInit(rows).filter((key) => !bigNetInitErrors.has(key));
+    const uninitializedBigNets = engines.bigNetsAwaitingInit(rows).filter((key) => !bigNetInitErrors.has(key));
     if (uninitializedBigNets.length) {
       activeAnalysisSelectionKey = ''; // no keys yet: navigation during init cancels this run
       const reclaim =
         constrained &&
-        preparePhoneBigNet(uninitializedBigNets[0], ANALYSIS_BIG_NET_SESSION.evalCacheEntries, controller.signal, disposeAnalysisCpuEngines, () => {
+        preparePhoneBigNet(uninitializedBigNets[0], ANALYSIS_BIG_NET_SESSION.evalCacheEntries, controller.signal, engines.disposeAnalysisCpuEngines, () => {
           el('message').textContent = 'Freeing memory…';
         });
       if (reclaim) {
@@ -4625,19 +4158,22 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         if (controller.signal.aborted || mountAbort.signal.aborted || !analysisCanPrepare(analysisRunState, owner)) return;
       }
       el('message').textContent = `Loading ${uninitializedBigNets.map((key) => `Lc0 ${BIG_NETS[key].name}`).join(' + ')}…`;
-      analysisBigNetInit = { owner: controller, keys: uninitializedBigNets };
-      let initErrors: Map<AnalysisBigNetKey, Error>;
-      try {
-        const prompt = { signal: AbortSignal.any([controller.signal, mountAbort.signal]), current: () => analysisCanPrepare(analysisRunState, owner) };
-        initErrors = await initBigNetsForRun(uninitializedBigNets, () => controller.signal.aborted || mountAbort.signal.aborted, prompt);
-      } finally {
-        if (analysisBigNetInit?.owner === controller) analysisBigNetInit = null;
-      }
+      const prompt = {
+        signal: AbortSignal.any([controller.signal, mountAbort.signal]),
+        current: () => analysisCanPrepare(analysisRunState, owner),
+        ask: requestLargeNetRedownloadConsent,
+      };
+      const initErrors = await engines.initBigNetsForRun(
+        uninitializedBigNets,
+        controller,
+        () => controller.signal.aborted || mountAbort.signal.aborted,
+        prompt,
+      );
       for (const [key, error] of initErrors) bigNetInitErrors.set(key, error);
       if (controller.signal.aborted || mountAbort.signal.aborted) return;
     }
     if (!analysisCanPrepare(analysisRunState, owner)) return;
-    snapshotBigNetServedModels(rows);
+    engines.snapshotBigNetServedModels(rows);
     const snapshot = captureAnalysisRun({
       fen: tree.current.fen,
       positions: tree.historyBoards(),
@@ -4646,8 +4182,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       multiPv: multiPv(),
       runtime: selectedLc0Runtime(),
       backendGeneration: analysisBackendGeneration,
-      servedModels: { small: lc0ServedModelUrl, ...Object.fromEntries(analysisBigNetServedModel) },
-      broker: analysisRunBroker(rows, resourceBroker.snapshot()),
+      servedModels: { small: lc0ServedModelUrl, ...engines.servedBigNetModels() },
+      broker: analysisRunBroker(rows, engines.broker.snapshot()),
     });
     const admission = applyAnalysisEvent({ type: 'PREPARED', owner, revision: owner.preparationRevision, snapshot });
     if (!admission.some((effect) => effect.type === 'search')) return;
@@ -4657,12 +4193,12 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     const cpuPosition = { fen: snapshot.cpuPosition.fen, moves: [...snapshot.cpuPosition.moves] };
     const runRows = [...snapshot.rows];
     if (legalMoves(parseFen(fen)).length === 0) return;
-    analysisRunCentipawnKeys = centipawnEvaluatorKeysForRows(runRows);
+    engines.pinAnalysisRunCentipawnKeys(runRows);
     const selectedLabels = runRows.map((row) => analysisEngineName(rowLabel(row))).join(' + ');
     activeAnalysisSelectionKey = selectionCacheKey;
     el('message').textContent = `Analyzing (${selectedLabels}, ${analysisMultiPv} lines)…`;
     clearAnalysisSearchProgress();
-    syncBrokerParticipants(runRows);
+    engines.syncBrokerParticipants(runRows);
     const lineGroups: AnalysisLine[][] = snapshot.rowKeys.map((key) => (!options.force ? (engineLineCache.get(key) ?? []) : []));
     const publishLines = () => {
       if (controller.signal.aborted || analysisSelectionCacheKey(tree.current.fen) !== selectionCacheKey) return;
@@ -4721,7 +4257,9 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         pushTask(index, cacheKey, `Lc0 ${BIG_NETS[key].name}`, () =>
           initError
             ? Promise.reject(initError)
-            : workerBigNetLines(runId, row.variant, fen, row.strength, analysisPositions, analysisMultiPv, servedModelUrl, controller.signal),
+            : engines.bigNetLines(row.variant, fen, row.strength, analysisPositions, analysisMultiPv, servedModelUrl, controller.signal, (label, progress) =>
+                showAnalysisProgress(runId, fen, label, progress),
+              ),
         );
       } else if (row.family === 'lc0') {
         const label = 'Lc0';
@@ -4750,13 +4288,13 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         const label = centipawnEngineLabel(row.variant);
         pushTask(index, cacheKey, label, async (beginSearch) => {
           const loadingId = `startup:${label}`;
-          const evaluatorKey = centipawnEvaluatorCacheKey(row.variant);
-          const evaluatorPrepared = centipawnCache.has(evaluatorKey);
+          const evaluatorKey = engines.centipawnEvaluatorCacheKey(row.variant);
+          const evaluatorPrepared = engines.hasCentipawnEvaluator(evaluatorKey);
           if (evaluatorPrepared) beginSearch();
           else showLoadingProgressItem(loadingId, { label, phase: 'Preparing engine' });
           let evaluator: Evaluator;
           try {
-            evaluator = await centipawnEvaluator(row.variant);
+            evaluator = await engines.centipawnEvaluator(row.variant, multiPv());
           } finally {
             if (!evaluatorPrepared) hideLoadingProgressItem(loadingId);
           }
@@ -4781,21 +4319,22 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
           threadedStockfishAvailable() ? (kind === 'lite' ? 'lite-threaded' : 'threaded') : kind === 'lite' ? 'lite-single' : 'single',
         );
         pushTask(index, cacheKey, label, (beginSearch) =>
-          withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
-            const engine = getStockfish(kind);
-            cpuSessions.setThreads(engine, Math.min(lease.threads, engine.maxThreads()));
-            await prepareCpuEngine(
+          engines.withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
+            const engine = engines.getStockfish(kind);
+            engines.cpuSessions.setThreads(engine, Math.min(lease.threads, engine.maxThreads()));
+            await engines.prepareCpuEngine(
               row,
               engine,
               `sf:${kind}`,
               label,
+              tree,
               controller.signal,
               [stockfishUrl, jsSidecarWasmUrl(stockfishUrl)],
               (signal) => engine.newGame(signal),
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              engines.analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             return stockfishAnalysisLines(infos, fen, label);
           }),
@@ -4803,14 +4342,15 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       } else if (row.family === 'viridithas') {
         const variant = viridithasVariantForKey(row.variant);
         const label = `${variant.label}`;
-        const engine = getViridithasFor(row.variant);
+        const engine = engines.getViridithasFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) =>
-          withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
-            await prepareCpuEngine(
+          engines.withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
+            await engines.prepareCpuEngine(
               row,
               engine,
               `viridithas:${row.variant}`,
               label,
+              tree,
               controller.signal,
               [variant.wasmUrl],
               async (signal) => {
@@ -4821,7 +4361,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              engines.analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);
@@ -4830,22 +4370,23 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       } else if (row.family === 'berserk') {
         const variant = berserkVariantForKey(row.variant);
         const label = `${variant.label}`;
-        const engine = getBerserkFor(row.variant);
+        const engine = engines.getBerserkFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) =>
-          withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
-            cpuSessions.setThreads(engine, lease.threads);
-            await prepareCpuEngine(
+          engines.withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
+            engines.cpuSessions.setThreads(engine, lease.threads);
+            await engines.prepareCpuEngine(
               row,
               engine,
               `berserk:${row.variant}`,
               label,
+              tree,
               controller.signal,
               [variant.jsUrl, variant.wasmUrl, variant.dataUrl, variant.nnueUrl],
               (signal) => engine.newGame(signal),
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              engines.analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);
@@ -4854,22 +4395,23 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       } else if (row.family === 'plentychess') {
         const variant = plentyChessVariantForKey(row.variant);
         const label = `${variant.label}`;
-        const engine = getPlentyChessFor(row.variant);
+        const engine = engines.getPlentyChessFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) =>
-          withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
-            cpuSessions.setThreads(engine, lease.threads);
-            await prepareCpuEngine(
+          engines.withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
+            engines.cpuSessions.setThreads(engine, lease.threads);
+            await engines.prepareCpuEngine(
               row,
               engine,
               `plentychess:${row.variant}`,
               label,
+              tree,
               controller.signal,
               [variant.jsUrl, variant.wasmUrl, variant.dataUrl],
               (signal) => engine.newGame(signal),
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              engines.analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);
@@ -4878,22 +4420,23 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       } else if (row.family === 'stormphrax') {
         const variant = stormphraxVariantForKey(row.variant);
         const label = variant.label;
-        const engine = getStormphraxFor(row.variant);
+        const engine = engines.getStormphraxFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) =>
-          withCpuLease(`stormphrax:${row.variant}`, controller.signal, async (lease) => {
-            cpuSessions.setThreads(engine, lease.threads);
-            await prepareCpuEngine(
+          engines.withCpuLease(`stormphrax:${row.variant}`, controller.signal, async (lease) => {
+            engines.cpuSessions.setThreads(engine, lease.threads);
+            await engines.prepareCpuEngine(
               row,
               engine,
               `stormphrax:${row.variant}`,
               label,
+              tree,
               controller.signal,
               [variant.jsUrl, variant.wasmUrl, variant.dataUrl],
               (signal) => engine.newGame(signal),
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              engines.analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);
@@ -4902,21 +4445,22 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       } else {
         const variant = recklessVariantForKey(row.variant);
         const label = `${variant.label}`;
-        const engine = getRecklessFor(row.variant);
+        const engine = engines.getRecklessFor(row.variant);
         pushTask(index, cacheKey, label, (beginSearch) =>
-          withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
-            await prepareCpuEngine(
+          engines.withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
+            await engines.prepareCpuEngine(
               row,
               engine,
               `reckless:${row.variant}`,
               label,
+              tree,
               controller.signal,
               [variant.wasmUrl, variant.nnueUrl],
               (signal) => engine.newGame(signal),
               beginSearch,
             );
             const infos = await withEngineTimeout(label, controller.signal, cpuAnalysisTimeoutMs(row), (signal) =>
-              analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
+              engines.analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             renderRecklessRuntimeInfo();
             return stockfishAnalysisLines(infos, fen, label);
@@ -4953,7 +4497,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     const effects = applyAnalysisEvent({ type: 'SETTLED', operationId: runId });
     if (owns && !mountAbort.signal.aborted) {
       analysisAbort = null;
-      retireAnalysisRunCentipawnKeys();
+      engines.retireAnalysisRunCentipawnKeys();
       clearAnalysisSearchProgress();
       renderEngineComparison(lineCache.get(tree.current.fen) ?? []);
       maybeEl('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
@@ -5900,7 +5444,7 @@ function wireEvents() {
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'prefetch');
     cancelAllAnalysisAssetPrefetches();
-    stopAnalysisBigNetInit();
+    if (engines.stopBigNetInit(analysisAbort)) el('message').textContent = 'Analysis stopped.';
     cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
     if (hiddenTab.hidden) el('message').textContent = 'Analysis stopped.';
     // The paused run's finally already ran and left Stop enabled. Cancelling
@@ -6028,7 +5572,7 @@ function wireEvents() {
   });
   criticalPanel = mountCriticalMomentsPanel({
     dom: pageDom,
-    broker: resourceBroker,
+    broker: engines.broker,
     suspended: () => !!retry,
     baseline: () =>
       lastReview && lastReviewSignature === reviewSignature()
@@ -6045,7 +5589,7 @@ function wireEvents() {
       multiPv(),
       selectEl('reviewEngine').value,
       selectEl('reviewDepth').value,
-      resourceBroker.getDial(),
+      engines.broker.getDial(),
     ],
     pauseAnalysis: (maiaOwner) => {
       void dispatchAnalysis({ type: 'MODE_ENTER', mode: 'critical' });
@@ -6331,9 +5875,8 @@ function wireEvents() {
 function disposeRuntimeResources(): void {
   analysisAbort?.abort();
   analysisAbort = null;
-  analysisRunCentipawnKeys = new Set();
+  engines.dropRunState();
   cancelAllAnalysisAssetPrefetches();
-  preparedCpuEngineKeys.clear();
   const reviewWasRunning = reviewAbort !== null;
   reviewAbort?.abort();
   reviewAbort = null;
@@ -6351,12 +5894,9 @@ function disposeRuntimeResources(): void {
   }
   if (activeWorkerSearchId !== null) searchWorker?.postMessage({ type: 'cancel', target: activeWorkerSearchId });
   resetSearchWorker('LC0 worker disposed');
-  for (const key of ANALYSIS_BIG_NET_KEYS) {
-    peekBigNetSearcher(key)?.cancel();
-    releaseBigNetSearcher(key, 0);
-  }
-  disposeCentipawnEvaluators();
-  disposeAnalysisCpuEngines();
+  engines.releaseBigNets();
+  engines.disposeCentipawnEvaluators();
+  engines.disposeAnalysisCpuEngines();
   const retiredMain = mainEvaluator;
   mainEvaluator = null;
   if (retiredMain) trackEngineRetirement(Promise.resolve(retiredMain.dispose?.()));

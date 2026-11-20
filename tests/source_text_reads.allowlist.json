@@ -5,10 +5,6 @@
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/analysisBrowser.ts"]
     },
-    "tests/analysis_bignet_search_progress.test.mjs": {
-      "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
-      "reads": ["src/lc0/analysisBrowser.ts"]
-    },
     "tests/analysis_bignet_served_model.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/analysisBrowser.ts"]
@@ -16,6 +12,10 @@
     "tests/analysis_continuity.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/searchWorkerCore.ts"]
+    },
+    "tests/analysis_engines_host.test.mjs": {
+      "reason": "walks the Analysis engine host's import graph to keep it free of DOM, chessground and Svelte code",
+      "reads": ["src/lc0/analysis/analysisEngines.ts"]
     },
     "tests/analysis_hidden_status.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
@@ -27,7 +27,7 @@
     },
     "tests/analysis_progress.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
-      "reads": ["src/lc0/analysisBrowser.ts"]
+      "reads": ["src/lc0/analysis/analysisEngines.ts", "src/lc0/analysisBrowser.ts"]
     },
     "tests/analysis_pv.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
@@ -105,17 +105,11 @@
     },
     "tests/batching_strength.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
-      "reads": [
-        "src/lc0/batchingStrengthMatch.ts",
-        "src/lc0/engineCatalog.ts",
-        "src/lc0/onnxEvaluator.ts",
-        "src/lc0/playBrowser.ts",
-        "src/lc0/searchWorkerCore.ts"
-      ]
+      "reads": ["src/lc0/onnxEvaluator.ts", "src/lc0/searchWorkerCore.ts"]
     },
     "tests/bignet_progress_ownership.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
-      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts"]
+      "reads": ["src/lc0/arenaBrowser.ts"]
     },
     "tests/browser_dom_contract.test.mjs": {
       "reason": "cross-checks literal el()/maybeEl() ids in each controller against the ids its route markup and generated HTML provide",
@@ -131,7 +125,7 @@
     },
     "tests/browser_dom_scope.test.mjs": {
       "reason": "checks each controller resolves ids through its scoped createBrowserDom() and never via document.getElementById",
-      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts", "src/lc0/playBrowser.ts"]
+      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts", "src/lc0/playBrowser.ts", "src/routes/app/play/+page.svelte"]
     },
     "tests/build_scope.test.mjs": {
       "reason": "lists src/routes page files (no text read) to require every route be classified as product or lab for the BUILD_SCOPE=product prerender gate",
@@ -147,7 +141,13 @@
     },
     "tests/centipawn_search_history.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
-      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts", "src/lc0/centipawnEvaluatorCache.ts", "src/lc0/playBrowser.ts"]
+      "reads": [
+        "src/lc0/analysis/analysisEngines.ts",
+        "src/lc0/analysisBrowser.ts",
+        "src/lc0/arenaBrowser.ts",
+        "src/lc0/centipawnEvaluatorCache.ts",
+        "src/lc0/playBrowser.ts"
+      ]
     },
     "tests/csp_policy.test.mjs": {
       "reason": "src/app.html is a static HTML template; its inline-script order is the CSP contract under test",
@@ -249,11 +249,11 @@
     },
     "tests/maia3_owner_recovery.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
-      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/playBrowser.ts"]
+      "reads": ["src/lc0/analysisBrowser.ts"]
     },
     "tests/mobile_residency.test.mjs": {
       "reason": "slices controller functions out of the source to run them in isolation; importing the controller module mounts DOM state at load (phone residency: Small/Maia switch-away aborts)",
-      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts", "src/lc0/playBrowser.ts"]
+      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts"]
     },
     "tests/mobile_residency_boundaries.test.mjs": {
       "reason": "slices controller functions out of the source to run them in isolation; importing the controller module mounts DOM state at load (setup cancel and fallback release barriers)",
@@ -289,6 +289,10 @@
         "src/lc0/policyOnlyBrowser.ts",
         "src/lc0/searchWorkerCore.ts"
       ]
+    },
+    "tests/ort_fallback_policy.test.mjs": {
+      "reason": "runs the module-private EP resolution and artifact lock together; the lock state is per-thread module state with no export to drive it",
+      "reads": ["src/nn/ortRuntime.ts"]
     },
     "tests/ort_gpu_io.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
@@ -338,6 +342,20 @@
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/playBrowser.ts"]
     },
+    "tests/play_mount_lifecycle.test.mjs": {
+      "reason": "ratchets location.reload sites across src/ and checks Play keeps per-mount state off the module and listeners on its scope",
+      "reads": [
+        "src/",
+        "src/lc0/analysisBrowser.ts",
+        "src/lc0/arenaBrowser.ts",
+        "src/lc0/play/playOverrides.ts",
+        "src/lc0/playBrowser.ts",
+        "src/lc0/policyOnlyBrowser.ts",
+        "src/routes/app/analysis/+page.svelte",
+        "src/routes/app/play/+page.svelte",
+        "src/routes/single-engine/+page.svelte"
+      ]
+    },
     "tests/play_navigation.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/playBrowser.ts"]
@@ -373,6 +391,10 @@
     "tests/wake_lock.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/playBrowser.ts"]
+    },
+    "tests/lib/analysis_engines.mjs": {
+      "reason": "evaluates the controller's AnalysisEnginePort literal so host tests run through the production port wiring",
+      "reads": ["src/lc0/analysisBrowser.ts"]
     }
   }
 }

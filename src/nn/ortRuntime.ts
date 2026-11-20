@@ -525,9 +525,13 @@ function webgpuUsableForProviderSelection(): boolean {
 }
 
 export function resolvedOrtExecutionProviders(requested = requestedOrtExecutionProvider()): string[] {
+  if (requested !== 'webgpu' && lockedOrtRuntimeArtifactKind === 'wasm') return ['wasm'];
+  return selectOrtExecutionProviders(requested, webgpuUsableForProviderSelection());
+}
+
+function selectOrtExecutionProviders(requested: OrtExecutionProviderPreference, webgpuUsable: boolean): string[] {
   if (requested === 'webgpu') return ['webgpu'];
-  if (requested === 'webgpu,wasm') return webgpuUsableForProviderSelection() ? ['webgpu', 'wasm'] : ['wasm'];
-  if (requested === 'auto') return webgpuUsableForProviderSelection() ? ['webgpu', 'wasm'] : ['wasm'];
+  if (requested !== 'wasm' && webgpuUsable) return ['webgpu', 'wasm'];
   return ['wasm'];
 }
 
@@ -1220,6 +1224,10 @@ function webgpuNavigator(): { requestAdapter?: (opts?: unknown) => Promise<unkno
   return (navigator as Navigator & { gpu?: { requestAdapter?: (opts?: unknown) => Promise<unknown> } }).gpu;
 }
 
+async function requestOrtWebGpuAdapter(): Promise<unknown> {
+  return webgpuNavigator()?.requestAdapter?.({ powerPreference: 'high-performance' });
+}
+
 function summarizeGpuAdapter(adapter: unknown): string {
   if (!adapter || typeof adapter !== 'object') return String(adapter);
   const rec = adapter as Record<string, unknown>;
@@ -1378,7 +1386,7 @@ async function ensureWebGpuAdapterProbed(requested = requestedOrtExecutionProvid
   if (!webgpuAvailable()) return;
   if (requested === 'wasm' || requested === 'webgpu') return;
   try {
-    const adapter = await webgpuNavigator()?.requestAdapter?.({ powerPreference: 'high-performance' });
+    const adapter = await requestOrtWebGpuAdapter();
     probedWebGpuAdapterUsable = !!adapter;
     probedWebGpuShaderF16 = gpuAdapterShaderF16(adapter);
     if (probedWebGpuShaderF16 === false) console.info('Centipawn ORT: WebGPU adapter lacks shader-f16; ORT sessions run on WASM.');
@@ -1430,7 +1438,7 @@ async function webGpuAdapterVendor(): Promise<string | undefined> {
     try {
       // Same request ORT makes (configureOrtRuntime sets powerPreference), so on a
       // dual-GPU machine this names the adapter the session will run on.
-      const adapter = await webgpuNavigator()?.requestAdapter?.({ powerPreference: 'high-performance' });
+      const adapter = await requestOrtWebGpuAdapter();
       probedWebGpuAdapterVendor = (await gpuAdapterVendor(adapter)) ?? '';
     } catch {
       /* no adapter: vendor stays unknown */
@@ -1449,14 +1457,20 @@ export type OrtSessionPlacement = {
 /**
  * Where the next session on this thread will run, decided the same way
  * createOrtSession decides it. Lets a caller pick device-specific model bytes
- * before downloading them (src/lc0/lc0SmallModelSelection.ts). `requested`
- * answers for another thread's EP pin, e.g. a worker this page will start.
+ * before downloading them (src/lc0/lc0SmallModelSelection.ts).
  */
 export async function resolveOrtSessionPlacement(requested = requestedOrtExecutionProvider()): Promise<OrtSessionPlacement> {
   await ensureWebGpuAdapterProbed(requested);
   const providers = resolvedOrtExecutionProviders(requested);
   if (!providers.includes('webgpu') || !webgpuAvailable()) return { providers };
   const adapterVendor = await webGpuAdapterVendor();
+  return adapterVendor ? { providers, adapterVendor } : { providers };
+}
+
+export async function resolveFreshWorkerOrtSessionPlacement(requested: OrtExecutionProviderPreference): Promise<OrtSessionPlacement> {
+  const adapter = requested === 'wasm' ? undefined : await requestOrtWebGpuAdapter().catch(() => undefined);
+  const providers = selectOrtExecutionProviders(requested, !!adapter && gpuAdapterShaderF16(adapter) !== false);
+  const adapterVendor = providers.includes('webgpu') ? await gpuAdapterVendor(adapter) : undefined;
   return adapterVendor ? { providers, adapterVendor } : { providers };
 }
 

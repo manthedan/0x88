@@ -24,14 +24,13 @@ for (const move of [null, 'a1a8', 'e2e4']) {
       disposed: false,
       enginePreparationGeneration: 0,
       engineReady: false,
+      dom: { buttonEl: () => ({}) },
     };
     const deps = {
       ctxSelectedEngine: () => option,
-      retireUnusedPlayNeuralEngines: async () => {},
-      buttonEl: () => ({}),
-      ctxSetEngineNote: (text) => notes.push(text),
+      engines: { retireUnusedEngines: async () => {}, cpuEngineFor: async () => ({ setOptions() {}, bestMove: async () => move }) },
+      ctxSetEngineNote: (_ctx, text) => notes.push(text),
       ctxRender: () => {},
-      ctxCpuEngineFor: async () => ({ setOptions() {}, bestMove: async () => move }),
       ctxSetEngineFailure: (_ctx, error) => failures.push(error),
       ctxHideDownloadProgress: () => {},
       boardToFen,

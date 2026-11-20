@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { createBrowserDom } from '../src/lc0/browserDom.ts';
+import { createBrowserDom, createRootDom } from '../src/lc0/browserDom.ts';
 
 class Root {
   id = 'main';
@@ -79,7 +79,7 @@ test('scopes are independent and an old cleanup cannot release a remounted root'
   assert.throws(() => a.mount(null), /Missing #main/);
 });
 
-for (const controller of ['play', 'analysis', 'arena'])
+for (const controller of ['analysis', 'arena'])
   test(`${controller} captures its root at mount and releases it after synchronous teardown`, () => {
     const text = readFileSync(new URL(`../src/lc0/${controller}Browser.ts`, import.meta.url), 'utf8');
     assert.match(text, /const pageDom = createBrowserDom\(\)/);
@@ -93,3 +93,29 @@ for (const controller of ['play', 'analysis', 'arena'])
       'only mount may look up a route element in the document',
     );
   });
+
+test('a per-mount root scope keeps resolving on its detached root and never consults document', (t) => {
+  const root = new Root(),
+    oldNote = { textContent: '' },
+    incoming = { textContent: 'incoming' };
+  root.nodes.set('engineNote', oldNote);
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { getElementById: () => incoming, querySelector: () => incoming } });
+  t.after(() => (previous ? Object.defineProperty(globalThis, 'document', previous) : delete globalThis.document));
+  const dom = createRootDom(root);
+  assert.equal(dom.el('main'), root);
+  // Svelte has detached the root (and the next mount owns the document) by the time teardown writes.
+  dom.el('engineNote').textContent = 'Freeing memory…';
+  assert.equal(oldNote.textContent, 'Freeing memory…');
+  assert.equal(incoming.textContent, 'incoming');
+  assert.throws(() => dom.el('missing'), /Missing #missing/);
+});
+
+test('Play looks up nothing in document: every lookup is confined to its mount root', () => {
+  const text = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(text, /document\.(getElementById|querySelector|querySelectorAll)\(/);
+  assert.doesNotMatch(text, /createBrowserDom|pageDom/, 'no module-level DOM scope shared between mounts');
+  assert.match(text, /export function mountPlayBrowser\(scope: MountScope\): void/);
+  const page = readFileSync(new URL('../src/routes/app/play/+page.svelte', import.meta.url), 'utf8');
+  assert.doesNotMatch(page, /document\.(getElementById|querySelector|querySelectorAll)\(/);
+});

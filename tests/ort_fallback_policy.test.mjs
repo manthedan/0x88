@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { ORT_RUNTIME_ASSET_FILES } from '../scripts/ort_runtime_assets.mjs';
 import {
@@ -189,6 +191,34 @@ test('strict webgpu provider selection never resolves directly to wasm', () => {
   } finally {
     setRequestedOrtExecutionProviderForCurrentThread(null);
   }
+});
+
+test('once a document has loaded the CPU-only ORT runtime, a later auto request stays on WASM', () => {
+  // Play opened with ?ep=wasm, then a client-side navigation dropped the query: the
+  // binary is document-global, so the next session must not ask it for WebGPU.
+  const source = readFileSync(new URL('../src/nn/ortRuntime.ts', import.meta.url), 'utf8');
+  const slice = (start, end) =>
+    stripTypeScriptTypes(source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)))).replace('export function', 'function');
+  const session = new Function(
+    `let lockedOrtRuntimeArtifactKind = null;
+    let ep;
+    const requestedOrtExecutionProvider = () => ep;
+    const webgpuUsableForProviderSelection = () => true;
+    const ortRuntimeArtifactKindForCurrentThread = () => lockedOrtRuntimeArtifactKind ?? (ep === 'wasm' ? 'wasm' : 'asyncify');
+    ${slice('export function resolvedOrtExecutionProviders(', '/** True when this document')}
+    ${slice('function lockOrtRuntimeArtifactKind(', 'let lastOrtExecutionProviders')}
+    return (next) => {
+      ep = next;
+      const providers = resolvedOrtExecutionProviders();
+      lockOrtRuntimeArtifactKind(providers);
+      return providers;
+    };`,
+  )();
+  assert.deepEqual(session('wasm'), ['wasm']);
+  assert.deepEqual(session('auto'), ['wasm']);
+  assert.deepEqual(session('webgpu,wasm'), ['wasm']);
+  // Strict WebGPU still says why it cannot run here instead of degrading silently.
+  assert.throws(() => session('webgpu'), /CPU-only artifact/);
 });
 
 test('custom ORT WASM artifacts require matched glue and binary URLs', () => {

@@ -46,8 +46,11 @@ function playHarness(run) {
     source.indexOf('  // Only a decoded storage position handoff'),
     source.indexOf('  const validEngineIds =', source.indexOf('function ctxInit(')),
   );
-  const autosave = source.slice(source.indexOf("  ctx.autosave = createWorkspaceAutosave('play'"), source.indexOf("  trackListener(ctx, window, 'pagehide'"));
-  const handler = source.slice(source.indexOf("  trackListener(ctx, el('useStartingPosition')"), source.indexOf("  trackListener(ctx, el('changeOpponent')"));
+  const autosave = source.slice(source.indexOf("  ctx.autosave = createWorkspaceAutosave('play'"), source.indexOf("  ctx.scope.listen(window, 'pagehide'"));
+  const handler = source.slice(
+    source.indexOf("  ctx.scope.listen(ctx.dom.el('useStartingPosition')"),
+    source.indexOf("  ctx.scope.listen(ctx.dom.el('changeOpponent')"),
+  );
   const reset = source.slice(source.indexOf('function ctxResetGameStateForMount('), source.indexOf('function ctxInit('));
   const newGame = source.slice(source.indexOf('function ctxNewGame('), source.indexOf('function ctxTakeback('));
   const render =
@@ -70,14 +73,14 @@ function playHarness(run) {
   };
   const code = `
     let useStartingPosition;
-    const el = () => ({}), trackListener = (ctx, el, type, fn) => {useStartingPosition = fn;};
+    ctx.dom = { el: () => ({}) };
+    ctx.scope = { listen: (target, type, fn) => {useStartingPosition = fn;} };
     const startFenFor = () => START_FEN, ctxSelectedEngine = () => ({}), ctxRefreshEngineOptions = () => {};
     const ctxCancelEngineTurn = () => {}, ctxCurrentPlayPreferences = () => ctx.opponent.active;
     const committedPlayOpponent = active => ({active}), ctxSetOpponent = (ctx, opponent) => {ctx.opponent = opponent;};
     const ctxSetEngineNote = () => {}, ctxDisarmResign = () => {}, ctxDisarmNewGame = () => {}, ctxPrepareOrStartEngine = () => {};
-    const ctxPersistPlayPreferences = () => {}, ctxRestoreSelectedRuntimeWarning = () => {}, evictInactiveCpuEngines = () => {};
-    const lc0Searcher = null, BIG_NET_KEYS = [];
-    const pendingCpuNewGames = { markAll() {} }, cpuEnginePromises = new Map();
+    const ctxPersistPlayPreferences = () => {}, ctxRestoreSelectedRuntimeWarning = () => {};
+    const engines = { markCpuNewGame() {}, startNewGame() {} };
     ${stripTypeScriptTypes(lifecycle + apply + reset + newGame + render + init + autosave + handler)}
     ctxResetGameStateForMount(ctx); ctxRender(ctx); ctx.autosave.flush();
     return {useStartingPosition: () => useStartingPosition(), newGame: () => ctxNewGame(ctx), render: () => ctxRender(ctx)};

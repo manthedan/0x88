@@ -6,6 +6,8 @@ import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
 import { deviceMemoryClass, shouldAutoAnalyzePosition } from '../src/lc0/deviceMemoryClass.ts';
 import { awaitEngineRetirements, trackEngineRetirement } from '../src/lc0/engineRetirement.ts';
 import { untilAborted } from '../src/lc0/modelCache.ts';
+import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
+import { testAnalysisEngines } from './lib/analysis_engines.mjs';
 
 const source = (name) => readFileSync(new URL(`../src/lc0/${name}.ts`, import.meta.url), 'utf8');
 function extract(text, start, end) {
@@ -15,68 +17,47 @@ function compile(code, deps = {}) {
   deps = { untilAborted, ...deps };
   return new Function(...Object.keys(deps), `return (${stripTypeScriptTypes(`function run(){${code}\n}`)})();`)(...Object.values(deps));
 }
-const play = source('playBrowser');
+const ui = { current: () => () => false, mounted: () => true, note() {}, clearNote() {}, progress() {}, hideProgress() {} };
+const SMALL_MODEL = { modelUrl: '/small.onnx', deviceSelection: true };
+const noCentipawn = () => assert.fail('Centipawn is not used here');
 function playOwner(options = {}) {
   const loads = [],
     releases = [],
     gates = [];
-  const ctx = { enginePreparationGeneration: 0, opponent: { active: { maiaElo: 1500 } } };
-  const api = compile(
-    `
-    let lc0Searcher=null,lc0LoadPromise=null,lc0SmallOwner={evaluator:null,abort:new AbortController()};
-    let maia3Promise=null,maia3Status=null,maia3Abort=null;
-    const playCentipawn={clear(){}};
-    ${extract(play, 'function retireUnusedPlayNeuralEngines(', 'function ctxEnsureCentipawn(')}
-    ${extract(play, 'async function ctxEnsureMaia3(', 'function ctxCpuEngineFor(')}
-    return {retire:retireUnusedPlayNeuralEngines,small:()=>ctxEnsureLc0Small(ctx),maia:()=>ctxEnsureMaia3(ctx),peek:()=>lc0Searcher};
-  `,
-    {
-      ctx,
-      trackEngineRetirement,
-      awaitEngineRetirements,
-      releaseUnusedBigNetSearchers: () => {},
-      ctxAsyncUiIsCurrent: () => false,
-      MODEL_URL: '/small.onnx',
-      LC0_DEVICE_MODEL_SELECTION: true,
-      createLc0OnnxEvaluatorFromUrl: async (_url, loadOptions) => {
-        loads.push('small');
-        if (options.createSmall) return options.createSmall(loadOptions);
-        return {
-          evaluator: {
-            dispose: () => {
-              releases.push('small');
-              return gates.shift()?.promise;
-            },
+  const engines = createPlayEngines({
+    loadCentipawn: noCentipawn,
+    loadLc0Small: async (_url, loadOptions) => {
+      loads.push('small');
+      if (options.createSmall) return options.createSmall(loadOptions);
+      return {
+        evaluator: {
+          dispose: () => {
+            releases.push('small');
+            return gates.shift()?.promise;
           },
-        };
-      },
-      CachedLc0Evaluator: class {
-        constructor(inner) {
-          this.inner = inner;
-        }
-        dispose() {
-          return this.inner.dispose();
-        }
-      },
-      Lc0PuctSearcher: class {
-        resetTree() {}
-      },
-      Maia3BrowserEvaluator: {
-        create: async (createOptions) => {
-          loads.push('maia');
-          if (options.createMaia) return options.createMaia(createOptions);
-          return {
-            modelLoad: { bytes: 1 },
-            dispose: () => {
-              releases.push('maia');
-              return gates.shift()?.promise ?? Promise.resolve();
-            },
-          };
         },
-      },
+      };
     },
-  );
-  return { ...api, loads, releases, gates };
+    createMaia3: async (createOptions) => {
+      loads.push('maia');
+      if (options.createMaia) return options.createMaia(createOptions);
+      return {
+        modelLoad: { bytes: 1 },
+        dispose: () => {
+          releases.push('maia');
+          return gates.shift()?.promise ?? Promise.resolve();
+        },
+      };
+    },
+  });
+  return {
+    retire: engines.retireUnusedEngines,
+    small: () => engines.ensureLc0Small(SMALL_MODEL, ui),
+    maia: () => engines.ensureMaia3(1500, ui),
+    loads,
+    releases,
+    gates,
+  };
 }
 
 for (const old of ['maia', 'small']) {
@@ -158,44 +139,19 @@ test('switching away from a stalled Maia initialization aborts promptly but stil
 test('a Small initialization finishing after retirement cannot repopulate the page owner', async () => {
   const gate = Promise.withResolvers(),
     released = [];
-  const api = compile(
-    `
-    let lc0Searcher=null,lc0LoadPromise=null,lc0SmallOwner={evaluator:null,abort:new AbortController()};
-    let maia3Promise=null,maia3Status=null,maia3Abort=null;
-    const playCentipawn={clear(){}};
-    ${extract(play, 'function retireUnusedPlayNeuralEngines(', 'function ctxEnsureCentipawn(')}
-    return {load:()=>ctxEnsureLc0Small(ctx),retire:retireUnusedPlayNeuralEngines,peek:()=>lc0Searcher};
-  `,
-    {
-      ctx: {},
-      trackEngineRetirement,
-      awaitEngineRetirements,
-      releaseUnusedBigNetSearchers: () => {},
-      ctxAsyncUiIsCurrent: () => false,
-      MODEL_URL: 'small',
-      LC0_DEVICE_MODEL_SELECTION: true,
-      createLc0OnnxEvaluatorFromUrl: () => gate.promise,
-      CachedLc0Evaluator: class {
-        constructor(inner) {
-          this.inner = inner;
-        }
-        dispose() {
-          released.push(1);
-          return this.inner.dispose();
-        }
-      },
-      Lc0PuctSearcher: class {
-        resetTree() {}
-      },
-    },
-  );
-  const loading = api.load(),
-    retiring = api.retire();
-  gate.resolve({ evaluator: { dispose: async () => {} } });
-  await loading;
+  let loads = 0;
+  const engines = createPlayEngines({
+    loadCentipawn: noCentipawn,
+    loadLc0Small: () => (++loads === 1 ? gate.promise : Promise.resolve({ evaluator: { dispose: async () => {} } })),
+  });
+  const loading = engines.ensureLc0Small(SMALL_MODEL, ui),
+    retiring = engines.retireUnusedEngines();
+  gate.resolve({ evaluator: { dispose: async () => released.push(1) } });
+  const stale = await loading;
   await retiring;
-  assert.equal(api.peek(), null);
   assert.deepEqual(released, [1]);
+  assert.notEqual(await engines.ensureLc0Small(SMALL_MODEL, ui), stale, 'the retired load is not served again');
+  assert.equal(loads, 2);
 });
 
 test('Analysis retires Small only after its last row is removed (eval bar is cached-row-only; reviewers are CPU-only)', async () => {
@@ -212,18 +168,12 @@ test('Analysis retires Small only after its last row is removed (eval bar is cac
       {
         events,
         trackEngineRetirement,
-        ANALYSIS_BIG_NET_KEYS: [],
-        disposeUnusedCentipawnEvaluators: () => {},
+        engines: testAnalysisEngines({ activeRows: () => active }),
+        engineRows: active,
         activeEngineRows: () => active,
-        isLc0BigNetVariant: (v) => ['bt4', 't3', 'lqo'].includes(v),
+        isLc0BigNetVariant: (v) => ['bt4', 't3'].includes(v),
         resetSearchWorker: () => events.push('worker'),
         reviewAbort: null,
-        disposeStockfish: () => {},
-        recklessEngines: { retain() {} },
-        viridithasEngines: { retain() {} },
-        berserkEngines: { retain() {} },
-        plentyChessEngines: { retain() {} },
-        stormphraxEngines: { retain() {} },
         renderRecklessRuntimeInfo: () => {},
       },
     );
@@ -287,7 +237,8 @@ test('Analysis unloading Maia clears the panel and awaits even an in-flight init
   assert.equal(elements.get('maia3Grid').hidden, true);
   const perform = extract(source('analysisBrowser'), 'async function performAnalysis(owner:', 'let analysisGameTree = tree;');
   assert.match(perform, /isMemoryConstrainedDevice\(\).*rows.some/s);
-  assert.ok(perform.indexOf('unloadMaia3Panel(') < perform.indexOf('initBigNetsForRun(uninitializedBigNets'));
+  const bigNetInit = perform.indexOf('engines.initBigNetsForRun(');
+  assert.ok(bigNetInit > 0 && perform.indexOf('unloadMaia3Panel(') < bigNetInit);
 });
 
 test('Analysis cancels a pending Maia panel load, awaits terminal cleanup, and re-enable reloads it', async () => {

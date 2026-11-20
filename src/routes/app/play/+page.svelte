@@ -1,39 +1,18 @@
 <script lang="ts">
-import { onMount } from 'svelte';
 import BrowserCapabilities from '#lib/components/BrowserCapabilities.svelte';
 import PhoneLargeNetPreference from '#lib/components/PhoneLargeNetPreference.svelte';
 import RestoreNotice from '#lib/components/RestoreNotice.svelte';
 import SiteHeader from '#lib/components/SiteHeader.svelte';
-import { afterNavigate } from '$app/navigation';
+import { routeController } from '#lib/routeController.ts';
+import { browser } from '$app/env';
+import { page } from '$app/state';
 
-let mountedUrl: URL | null = null;
-afterNavigate(({ to }) => {
-  if (mountedUrl && to?.url.pathname === mountedUrl.pathname && to.url.search !== mountedUrl.search) location.reload();
-});
 const title = '0x88 Chess — play chess vs an engine in your browser';
 const description =
   'Play chess against Leela Chess Zero, Centipawn, Stockfish, Stormphrax, and other opponents running entirely in your browser. Five strength levels, takebacks, and PGN export.';
 const ratingPresets = [800, 1100, 1500, 1900, 2200];
-onMount(() => {
-  mountedUrl = new URL(location.href);
-  let cleanup: () => void = () => undefined;
-  let mounted = true;
-  void import('../../../lc0/playBrowser')
-    .then((module) => {
-      if (!mounted) return;
-      cleanup = module.mountPlayBrowser();
-    })
-    .catch((error) => {
-      if (!mounted) return;
-      console.error('[play] failed to load page controller', error);
-      const node = document.getElementById('status');
-      if (node) node.textContent = `Page failed to initialize: ${error instanceof Error ? error.message : String(error)}`;
-    });
-  return () => {
-    mounted = false;
-    cleanup();
-  };
-});
+// Stable identity, so the attachment never re-runs; the controller stays a dynamic chunk.
+const play = routeController(async () => (await import('../../../lc0/playBrowser')).mountPlayBrowser, { label: 'play', statusId: 'status' });
 </script>
 
 <svelte:head>
@@ -42,7 +21,10 @@ onMount(() => {
 </svelte:head>
 
 <SiteHeader pageTitle="Play" />
-<main id="main" class="app-main play-workspace" data-phase="setup" data-worker-retirement="1">
+<!-- A new query (?model=…) is a new mount with fresh state; the engine host outlives both.
+     Prerendering forbids reading url.search, and the server has no query to key on. -->
+{#key browser ? page.url.search : ''}
+<main id="main" class="app-main play-workspace" data-phase="setup" data-worker-retirement="1" {@attach play}>
   <section class="panel board-panel" aria-label="Board">
     <div id="topStrip" class="player-strip" data-player="engine" data-turn="false">
       <span class="player-avatar" data-avatar aria-hidden="true">M3</span>
@@ -218,6 +200,7 @@ onMount(() => {
     </div>
   </section>
 </main>
+{/key}
 
 <style>
   .play-workspace{

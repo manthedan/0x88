@@ -8,6 +8,7 @@ import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
 import { createSoakBigNetBinding } from '../src/lc0/mobileSoakBigNet.ts';
 import { requestSoakLargeNetConsent } from '../src/lc0/mobileSoakBrowser.ts';
 import { phoneLargeNetPreference } from '../src/lc0/phoneLargeNetPolicy.ts';
+import { createOrtSession, InferenceSession, resolveOrtSessionPlacement } from '../src/nn/ortRuntime.ts';
 
 const tick = () => new Promise(setImmediate);
 function browser(t, device = 'phone') {
@@ -362,6 +363,35 @@ test('lab download warnings inspect effective Queen Odds overrides and do not by
   const searcher = binding.acquire();
   assert.equal(binding.retire(searcher), true);
   await searcher.dispose();
+});
+
+test('t3 consent estimates the fresh Apple WebGPU worker downloads after Play locks the document to WASM', async (t) => {
+  const f = browser(t);
+  const navigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { gpu: { requestAdapter: async () => ({ features: new Set(['shader-f16']), info: { vendor: 'apple' } }) } },
+  });
+  t.after(() => Object.defineProperty(globalThis, 'navigator', navigator));
+  t.mock.method(InferenceSession, 'create', async () => ({}));
+  location.searchParams.set('ep', 'wasm');
+  await createOrtSession('small.onnx');
+  location.searchParams.delete('ep');
+  assert.deepEqual(await resolveOrtSessionPlacement(), { providers: ['wasm'] });
+
+  const original = BIG_NETS.t3.modelUrl;
+  const splitK = lc0SplitKUrl(original);
+  const models = [original, splitK].map((url, i) => ({ file: url.split('/').at(-1), url, bytes: (160 + 10 * i) * 1_000_000, sha256: 'a'.repeat(64) }));
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    assert.match(String(url), /manifest.json$/);
+    return Response.json({ models });
+  });
+  phoneLargeNetPreference.setEnabled(true);
+  const pending = f.request(BIG_NETS.t3, { inspect: inspectLargeNetDownload });
+  const dialog = await f.dialog();
+  choose(dialog, false);
+  assert.equal(await pending, false);
+  assert.match(dialog.children[1].textContent, /Model downloads with fallback are estimated at 330 MB/);
 });
 
 test('the short preference hint is limited to engine pickers that offer gated nets', () => {

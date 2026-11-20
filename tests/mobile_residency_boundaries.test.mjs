@@ -7,6 +7,7 @@ import { loadRetirableResource } from '../src/lc0/arenaResourceLoad.ts';
 import { awaitEngineRetirements, trackEngineRetirement } from '../src/lc0/engineRetirement.ts';
 import { untilAborted } from '../src/lc0/modelCache.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from '../src/lc0/wholeOnnxWebgpuEvaluator.ts';
+import { testAnalysisEngines } from './lib/analysis_engines.mjs';
 
 const source = (name) => readFileSync(new URL(`../src/lc0/${name}.ts`, import.meta.url), 'utf8');
 function extract(text, first, last) {
@@ -74,22 +75,17 @@ test('Analysis runtime teardown publishes main-thread fallback release to the re
   const release = Promise.withResolvers();
   const dispose = compile(
     `
-    let analysisAbort=null,analysisRunCentipawnKeys=new Set(),reviewAbort=null,activeWorkerSearchId=null;
+    let analysisAbort=null,reviewAbort=null,activeWorkerSearchId=null;
     let mainEvaluator={dispose:()=>release},searcher={},lc0ServedModelUrl='small';
-    const preparedCpuEngineKeys=new Set(),cpu={disposeAll(){}};
-    const recklessEngines=cpu,viridithasEngines=cpu,berserkEngines=cpu,plentyChessEngines=cpu,stormphraxEngines=cpu;
-    ${extract(source('analysisBrowser'), 'function disposeAnalysisCpuEngines():', 'function disposeUnusedEngines():')}
     ${extract(source('analysisBrowser'), 'function disposeRuntimeResources():', 'function disposePageResources():')}
     return disposeRuntimeResources;
   `,
     {
       release: release.promise,
       trackEngineRetirement,
-      ANALYSIS_BIG_NET_KEYS: [],
+      engines: testAnalysisEngines(),
       cancelAllAnalysisAssetPrefetches: () => {},
       resetSearchWorker: () => {},
-      disposeStockfish: () => {},
-      disposeCentipawnEvaluators: () => {},
     },
   );
   dispose();

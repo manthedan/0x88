@@ -10,6 +10,7 @@ const PATH_LITERAL_RE = /['"]((?:\.\.\/)+(?:src|eval|scripts|wasm|cloudflare)\/[
 // entrypoints). The walk is authoritative for source; this only adds coverage.
 const EXACT_TESTS = new Map([
   ['src/lc0/analysisBrowser.ts', ['engine_catalog', 'engine_resource_broker', 'lc0_analysis_format', 'disposable_variant_pool']],
+  ['src/lc0/analysis/analysisEngines.ts', ['engine_resource_broker', 'disposable_variant_pool']],
   ['src/lc0/arenaBrowser.ts', ['engine_catalog', 'engine_resource_broker', 'disposable_variant_pool']],
   ['src/lc0/disposableVariantPool.ts', ['disposable_variant_pool']],
   ['src/lc0/browserVariantOption.ts', ['browser_variant_option']],

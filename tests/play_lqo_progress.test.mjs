@@ -15,15 +15,17 @@ test('a phone plays the known LQO book reply before its background reclaim wait 
   const acquire = Promise.withResolvers();
   const ctx = { opponent: { active: { level: 0 } }, humanColor: 'w', moves: ['e2e4'] };
   const deps = {
-    retireUnusedPlayNeuralEngines: async () => {},
+    engines: {
+      retireUnusedEngines: async () => {},
+      acquireBigNet: () => {
+        acquire.resolve();
+        return reclaim.promise;
+      },
+    },
     ctxSelectedEngine: () => ({ family: 'lc0', variant: 'lqo' }),
     ctxStrengthFor: () => 1,
     isMemoryConstrainedDevice: () => true,
     peekBigNetSearcher: () => null,
-    ctxAcquireBigNet: () => {
-      acquire.resolve();
-      return reclaim.promise;
-    },
     ctxSetEngineNote: () => {},
     ctxShowDownloadProgress: () => {},
     ctxHideDownloadProgress: () => {},
@@ -63,10 +65,9 @@ for (const lifecycle of ['current', 'cancelled', 'disposed']) {
         },
       };
       const deps = {
-        retireUnusedPlayNeuralEngines: async () => {},
+        engines: { retireUnusedEngines: async () => {}, acquireBigNet: async () => searcher },
         ctxSelectedEngine: () => ({ family: 'lc0', variant: 'lqo' }),
         ctxStrengthFor: () => 1,
-        ctxAcquireBigNet: async () => searcher,
         ctxSetEngineNote: (...args) => writes.push(['note', ...args]),
         ctxShowDownloadProgress: (...args) => writes.push(['show', ...args]),
         ctxHideDownloadProgress: () => writes.push(['hide']),

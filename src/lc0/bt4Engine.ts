@@ -25,7 +25,7 @@ import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from '
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import { terminateEngineWorker } from './engineRetirement.ts';
-import { type LargeNetPrefetchOptions, type LargeNetPrefetchResult, phoneColdPrefetch } from './largeNetDownload.ts';
+import { type LargeNetPrefetchOptions, type LargeNetPrefetchResult, largeNetWorkerEp, phoneColdPrefetch } from './largeNetDownload.ts';
 import { lc0SplitKUrl } from './lc0SmallModelSelection.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
 import { PHONE_LARGE_NET_SUFFIX, phoneBigNetBlocked } from './phoneLargeNetPolicy.ts';
@@ -445,7 +445,7 @@ export class Bt4WorkerSearcher {
       // so big nets stay playable (slowly) without WebGPU — callers read
       // `backend` and scale visit budgets via config.wasmLevels. An explicit
       // ?ortEp=wasm page override forces the CPU path end to end.
-      const ep = requestedOrtExecutionProvider() === 'wasm' ? 'wasm' : 'auto';
+      const ep = largeNetWorkerEp();
       // Phones only: a cold net is fetched into Cache Storage by a throwaway worker
       // first, so this worker's load is a cached load (largeNetDownload.ts).
       // A load that may not download has nothing to prefetch.

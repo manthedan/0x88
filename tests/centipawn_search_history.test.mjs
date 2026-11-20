@@ -103,5 +103,5 @@ test('Play, Analysis and Arena retain the long history for native repetition fea
   // The new model scans older positions for repetition; legacy nets retain the bound.
   assert.doesNotMatch(source('playBrowser.ts'), /maxHistoryPositions:/);
   assert.match(source('centipawnEvaluatorCache.ts'), /nativeHistory \? undefined : CENTIPAWN_NET_HISTORY_POSITIONS/);
-  for (const page of ['analysisBrowser.ts', 'arenaBrowser.ts']) assert.match(source(page), /createCentipawnEvaluatorCache\(/, page);
+  for (const page of ['analysis/analysisEngines.ts', 'arenaBrowser.ts']) assert.match(source(page), /createCentipawnEvaluatorCache\(/, page);
 });

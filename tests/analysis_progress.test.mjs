@@ -7,6 +7,7 @@ import { analysisEngineName } from '../src/lc0/analysisPresentation.ts';
 import { analysisIsAnalyzing, initialAnalysisRunState, transitionAnalysis } from '../src/lc0/analysisRunState.ts';
 
 const analysisSourceUrl = new URL('../src/lc0/analysisBrowser.ts', import.meta.url);
+const engineHostUrl = new URL('../src/lc0/analysis/analysisEngines.ts', import.meta.url);
 
 async function preparationSource() {
   const source = await readFile(analysisSourceUrl, 'utf8');
@@ -20,7 +21,8 @@ test('analysis model assets are only preloaded once per mounted page', async () 
 });
 
 test('warm CPU engine preparation uses search progress without reopening startup progress', async () => {
-  const source = await preparationSource();
+  const host = await readFile(engineHostUrl, 'utf8');
+  const source = host.slice(host.indexOf('async function prepareCpuEngine('), host.indexOf('async function analyzeCpuPosition('));
   assert.match(source, /if \(prepared\) beginSearch\(\);/);
   assert.match(source, /if \(prepared\) \{\s*if \(cpuSessions\.needsReset\(engine, game\)\) await start\(signal\);/);
   assert.match(source, /preparedCpuEngineKeys\.add\(preparationKey\)/);
@@ -28,7 +30,7 @@ test('warm CPU engine preparation uses search progress without reopening startup
 
 test('warm Centipawn analysis skips its evaluator preparation indicator', async () => {
   const source = await readFile(analysisSourceUrl, 'utf8');
-  assert.match(source, /const evaluatorPrepared = centipawnCache\.has\(evaluatorKey\);/);
+  assert.match(source, /const evaluatorPrepared = engines\.hasCentipawnEvaluator\(evaluatorKey\);/);
   assert.match(source, /if \(evaluatorPrepared\) beginSearch\(\);\s*else showLoadingProgressItem/);
 });
 

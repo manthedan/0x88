@@ -22,6 +22,7 @@ import {
 import { strengthRandom, strengthSeed } from '../src/lc0/batchingStrengthRandom.ts';
 import { candidatePoints, distinctOpeningElo, equalVisitGate, pentanomialElo, queenSidePoints, uciLineToPgn } from '../src/lc0/batchingStrengthScore.ts';
 import { swapColorsUci } from '../src/lc0/bt4Engine.ts';
+import { enginePlayLevels } from '../src/lc0/engineCatalog.ts';
 import { resolveOrtPhysicalBatchSize } from '../src/lc0/ortPhysicalBatch.ts';
 import { searchRoot } from '../src/search/puct.ts';
 
@@ -83,26 +84,24 @@ test('product evaluator and worker default to declared physical batching', () =>
   assert.match(worker, /createLc0OnnxEvaluatorFromUrl\(\s*message\.modelUrl,\s*\{[\s\S]*?evaluator:\s*\{\s*physicalBatchMode[,\s}]/);
 });
 
-test('Play and LQO search constants stay locked to the product source', () => {
-  const play = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
-  const match = readFileSync(new URL('../src/lc0/batchingStrengthMatch.ts', import.meta.url), 'utf8');
-  const catalog = readFileSync(new URL('../src/lc0/engineCatalog.ts', import.meta.url), 'utf8');
-  for (const literal of [
-    'const PLAY_DRAW_SCORE = -0.25;',
-    'const PLAY_SEARCH_CONTEMPT_LIMIT = 16;',
-    'const LQO_CPUCT = 1.5;',
-    'const LQO_FPU_VALUE = 0.4;',
-    'const LQO_WHITE_DRAW_SCORE = -0.4;',
-    'const LQO_BLACK_DRAW_SCORE = -0.6;',
-    'const LQO_WHITE_SEARCH_CONTEMPT_LIMIT = 40;',
-    'const LQO_BLACK_SEARCH_CONTEMPT_LIMIT = 32;',
-    'const BIG_NET_LEVELS = [4, 16, 64, 256, 800];',
-  ]) {
-    assert.match(play, new RegExp(literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-    if (!literal.startsWith('const BIG_NET'))
-      assert.match(match, new RegExp(literal.replace('const ', 'export const ').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+test('Play and LQO search constants stay locked to the product source', async () => {
+  const [play, harness] = await Promise.all([import('../src/lc0/play/playSearchSettings.ts'), import('../src/lc0/batchingStrengthMatch.ts')]);
+  const locked = {
+    PLAY_DRAW_SCORE: -0.25,
+    PLAY_SEARCH_CONTEMPT_LIMIT: 16,
+    LQO_CPUCT: 1.5,
+    LQO_FPU_VALUE: 0.4,
+    LQO_WHITE_DRAW_SCORE: -0.4,
+    LQO_BLACK_DRAW_SCORE: -0.6,
+    LQO_WHITE_SEARCH_CONTEMPT_LIMIT: 40,
+    LQO_BLACK_SEARCH_CONTEMPT_LIMIT: 32,
+  };
+  for (const [name, value] of Object.entries(locked)) {
+    assert.equal(play[name], value, `Play ${name}`);
+    assert.equal(harness[name], value, `harness copy of ${name}`);
   }
-  assert.match(catalog, /levels: \[8, 32, 100, 400, 1600\]/);
+  assert.deepEqual(play.BIG_NET_LEVELS, [4, 16, 64, 256, 800]);
+  assert.deepEqual(enginePlayLevels('lc0'), [8, 32, 100, 400, 1600]);
 });
 
 test('match catalog covers the ladders where moves changed and skips 1600', () => {
