@@ -205,7 +205,11 @@ let supportProbe: Promise<boolean> | null = null;
 let supportedCached: boolean | null = null;
 const assetProbes = new Map<string, Promise<Bt4AssetStatus>>();
 const assetStatuses = new Map<string, Bt4AssetStatus>();
-const DEPLOYED_BIG_NET_URLS = new Set<string>(Object.values(BIG_NETS).map((config) => assetPathname(config.modelUrl)));
+const DEPLOYED_BIG_NET_URLS = new Set<string>([
+  '/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx',
+  '/models/lc0/t3-512x15x16h-distill-swa-2767500.batch8.f16.onnx',
+  '/models/lc0/lqo_v2.f16.qdq8.onnx',
+]);
 
 function bigNetProbeKey(config: BigNetConfig): string {
   return config.diagnosticModel ? `lab:${config.modelUrl}` : config.modelUrl;

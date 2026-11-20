@@ -442,10 +442,27 @@ async function handleSearch(message: SearchMessage): Promise<void> {
   const controller = new AbortController();
   activeSearches.set(message.id, controller);
   try {
-    const { type: _type, id, input, reportProgress, ...rest } = message;
+    const { id, input, reportProgress } = message;
     const { search, ...summary } = await searcher.search(input, {
-      ...rest,
-      batchSize: rest.batchSize ?? 1,
+      visits: message.visits,
+      movetimeMs: message.movetimeMs,
+      batchSize: message.batchSize ?? 1,
+      batchCollisionMode: message.batchCollisionMode,
+      batchPipelineDepth: message.batchPipelineDepth,
+      traceSearchVisits: message.traceSearchVisits,
+      multiPv: message.multiPv,
+      reuseTree: message.reuseTree,
+      earlyStop: message.earlyStop,
+      cpuct: message.cpuct,
+      fpu: message.fpu,
+      cpuctSchedule: message.cpuctSchedule,
+      fpuStrategy: message.fpuStrategy,
+      fpuReduction: message.fpuReduction,
+      temperature: message.temperature,
+      drawScore: message.drawScore,
+      contemptElo: message.contemptElo,
+      searchContemptLimit: message.searchContemptLimit,
+      progressEveryMs: message.progressEveryMs,
       onProgress: reportProgress ? (progress) => post({ type: 'searchProgress', id, progress }) : undefined,
       signal: controller.signal,
       yieldEveryMs: 16,

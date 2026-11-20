@@ -58,6 +58,24 @@ test('production skips known-unhosted big-net asset probes', async () => {
   }
 });
 
+test('production probes canonical deployed big-net paths even with a prefixed asset base', async (t) => {
+  const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: new URL('https://0x88.app/?assetBase=https://0x88.app/prefix'),
+  });
+  t.after(() => {
+    if (originalLocation) Object.defineProperty(globalThis, 'location', originalLocation);
+    else delete globalThis.location;
+  });
+  const { BT4_NET: prefixedNet, checkBigNetAsset: checkWithPrefixedBase } = await import('../src/lc0/bt4Engine.ts?prefixed-base');
+  assert.match(prefixedNet.modelUrl, /^https:\/\/0x88\.app\/prefix\/models\/lc0\//);
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 200 }));
+  const config = testConfig('/models/lc0/BT4-1024x15x32h-swa-6147500-policytune-332.batch8.f16.qdq8.onnx');
+  assert.equal(await checkWithPrefixedBase(config), 'present');
+  assert.equal(fetch.mock.callCount(), 1);
+});
+
 test('IPv6 loopback still probes local big-net assets', async () => {
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');

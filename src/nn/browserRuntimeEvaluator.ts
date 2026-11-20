@@ -107,9 +107,9 @@ export async function createBrowserSquareformerRuntimeEvaluator(
     evaluator: Evaluator,
     resolvedRuntime: BrowserRuntimeEvaluatorResult['resolvedRuntime'],
     extra: Partial<Pick<BrowserRuntimeEvaluatorResult, 'runtimeConfigId' | 'manifestUrl' | 'fallbackReason'>> = {},
-    auditOverride: Partial<BrowserRuntimeAuditDetail> = {},
+    audit = auditBase,
   ): BrowserRuntimeEvaluatorResult => {
-    publishBrowserRuntimeAudit({ ...auditBase, ...auditOverride, resolvedRuntime, fallbackReason: extra.fallbackReason });
+    publishBrowserRuntimeAudit({ ...audit, resolvedRuntime, ...('fallbackReason' in extra ? { fallbackReason: extra.fallbackReason } : {}) });
     return { evaluator, meta, modelId, requestedRuntime, resolvedRuntime, ...extra };
   };
 
@@ -156,12 +156,12 @@ export async function createBrowserSquareformerRuntimeEvaluator(
           throw error;
         }
       }
-      const selectedAudit = { ...auditBase, manifestUrl: selectedManifestUrl, runtimeConfigId };
-      const evaluator = fallback ? new RuntimeFallbackEvaluator(primary, createOrtEvaluator, selectedAudit, fallbackRuntime) : primary;
-      return finish(evaluator, resolvedRuntime, { runtimeConfigId, manifestUrl: selectedManifestUrl }, selectedAudit);
+      const audit = attemptTvmjs ? { ...auditBase, manifestUrl: selectedManifestUrl, runtimeConfigId } : auditBase;
+      const evaluator = fallback ? new RuntimeFallbackEvaluator(primary, createOrtEvaluator, audit, fallbackRuntime) : primary;
+      return finish(evaluator, resolvedRuntime, { runtimeConfigId, manifestUrl: selectedManifestUrl }, audit);
     } catch (err) {
       signal?.throwIfAborted();
-      if ((err instanceof Error && err.name === 'AbortError') || !fallback) throw err;
+      if (!fallback || (attemptTvmjs && err instanceof Error && err.name === 'AbortError')) throw err;
       const fallbackReason = err instanceof Error ? err.message : String(err);
       console.warn(`${attemptTvmjs ? 'TVMJS' : 'Custom'} WebGPU runtime unavailable; falling back to ORT SquareFormer.`, {
         label: spec.label ?? spec.id,

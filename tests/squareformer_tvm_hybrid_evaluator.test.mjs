@@ -16,14 +16,14 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
       env,
     });
     assert.equal(child.status, 0, `${child.stdout}\n${child.stderr}`);
-    assert.match(child.stdout, /^# pass 7$/m);
+    assert.match(child.stdout, /^# pass 8$/m);
     assert.match(child.stdout, /^# fail 0$/m);
   });
 } else {
   const { parseFen, START_FEN } = await import('../src/chess/board.ts');
-  const { disposeEvaluator, RuntimeFallbackEvaluator } = await import('../src/nn/runtimeFallbackEvaluator.ts');
+  const { disposeEvaluator } = await import('../src/nn/runtimeFallbackEvaluator.ts');
   const { createBrowserSquareformerRuntimeEvaluator } = await import('../src/nn/browserRuntimeEvaluator.ts');
-  const { THREATGRAPH_SQUARE_SUMMARY_V1_FEATURES } = await import('../src/nn/squareformerEvaluator.ts');
+  const { SquareFormerEvaluator, THREATGRAPH_SQUARE_SUMMARY_V1_FEATURES } = await import('../src/nn/squareformerEvaluator.ts');
   const { SquareformerTvmHybridEvaluator } = await import('../src/nn/squareformerTvmHybridEvaluator.ts');
   const { SquareformerTvmFullLayerWebgpuBlock } = await import('../src/nn/squareformerTvmFullLayerWebgpu.ts');
   const { SquareformerTvmInputStemWebgpuBlock } = await import('../src/nn/squareformerTvmInputStemWebgpu.ts');
@@ -101,9 +101,24 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
       while (!state.pending.length) await new Promise((resolve) => setTimeout(resolve, 0));
       state.pending.shift()();
     };
-    return { evaluator, state, destroyed, settleNext, loseDevice };
+    return { device, evaluator, state, destroyed, settleNext, loseDevice };
   }
 
+  function mockGpu(t, requestDevice) {
+    Object.defineProperty(globalThis.navigator, 'gpu', {
+      configurable: true,
+      value: { requestAdapter: async () => ({ requestDevice }) },
+    });
+    t.after(() => delete globalThis.navigator.gpu);
+  }
+
+  const spec = {
+    modelId: 'custom-test',
+    onnx: '/models/custom-test.onnx',
+    meta: '/models/custom-test.meta.json',
+    runtime: 'custom-webgpu',
+    manifestUrl: '/runtimes/custom-test/manifest.json',
+  };
   const encoded = () => [new Uint32Array(64), new Float32Array(64 * THREATGRAPH_SQUARE_SUMMARY_V1_FEATURES), new Uint32Array([1, 2, 3])];
   const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -154,32 +169,48 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
     assert.equal(state.submits, 1);
   });
 
-  test('a lost custom WebGPU device switches the wrapping fallback evaluator to ORT', async (t) => {
-    const { evaluator, state, loseDevice } = fakeHybrid();
+  test('a lost custom WebGPU device switches to ORT and retains the caller audit fields', async (t) => {
+    const { device, evaluator, state, loseDevice } = fakeHybrid();
+    mockGpu(t, async () => device);
+    t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => META }));
+    t.mock.method(SquareformerTvmHybridEvaluator, 'create', async () => evaluator);
     const audits = [];
     const warnings = [];
     t.mock.method(console, 'info', (_tag, detail) => audits.push(detail));
     t.mock.method(console, 'warn', (message) => warnings.push(message));
-    let fallbackCreates = 0;
-    const wrapped = new RuntimeFallbackEvaluator(
-      evaluator,
-      async () => {
-        fallbackCreates += 1;
-        return { evaluate: async () => ({ policy: new Map(), wdl: [0, 1, 0] }) };
-      },
-      { source: 'test', family: 'centipawn', requestedRuntime: 'custom-webgpu' },
-      'custom-webgpu-fallback-ort',
-    );
+    const createOrt = t.mock.method(SquareFormerEvaluator, 'create', async () => ({ evaluate: async () => ({ policy: new Map(), wdl: [0, 1, 0] }) }));
+    const audit = { manifestUrl: '/audit/manifest.json', runtimeConfigId: 'caller-config' };
+    const { evaluator: wrapped } = await createBrowserSquareformerRuntimeEvaluator(spec, { audit: { ...audit, fallbackReason: 'Caller context' } });
+    assert.equal(audits[0].resolvedRuntime, 'custom-webgpu');
+    assert.equal(audits[0].fallbackReason, 'Caller context');
     loseDevice({ message: 'GPU reset' });
     await tick();
     assert.deepEqual((await wrapped.evaluate(parseFen(START_FEN))).wdl, [0, 1, 0]);
-    assert.equal(fallbackCreates, 1);
+    assert.equal(createOrt.mock.callCount(), 1);
     assert.equal(state.submits, 0);
+    assert.deepEqual(
+      audits.map(({ manifestUrl, runtimeConfigId }) => ({ manifestUrl, runtimeConfigId })),
+      [audit, audit],
+    );
     assert.equal(audits.at(-1).resolvedRuntime, 'custom-webgpu-fallback-ort');
     assert.match(audits.at(-1).fallbackReason, /GPU reset/);
     assert.match(warnings[0], /^Custom WebGPU runtime failed/);
     await tick();
     assert.equal(state.deviceDestroys, 1, 'the fallback destroys the failed primary and its device');
+  });
+
+  test('custom WebGPU falls back to ORT on an AbortError when the caller has not aborted', async (t) => {
+    mockGpu(t, async () => {
+      throw new DOMException('Device request interrupted', 'AbortError');
+    });
+    t.mock.method(globalThis, 'fetch', async () => ({ ok: true, json: async () => META }));
+    const ort = { evaluate: async () => ({ policy: new Map(), wdl: [0, 1, 0] }) };
+    t.mock.method(SquareFormerEvaluator, 'create', async () => ort);
+    const { signal } = new AbortController();
+    const loaded = await createBrowserSquareformerRuntimeEvaluator(spec, { signal });
+    assert.equal(loaded.resolvedRuntime, 'custom-webgpu-fallback-ort');
+    assert.equal(loaded.evaluator, ort);
+    assert.equal(loaded.fallbackReason, 'Device request interrupted');
   });
 
   test('disposing the custom WebGPU evaluator resolves only after its queue drains and the device is destroyed', async () => {
@@ -212,16 +243,9 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
         deviceDestroys += 1;
       },
     };
-    Object.defineProperty(globalThis.navigator, 'gpu', {
-      configurable: true,
-      value: { requestAdapter: async () => ({ requestDevice: async () => device }) },
-    });
-    t.after(() => delete globalThis.navigator.gpu);
+    mockGpu(t, async () => device);
     const controller = new AbortController();
-    const loading = createBrowserSquareformerRuntimeEvaluator(
-      { modelId: 'custom-test', onnx: '/models/custom-test.onnx', meta: '/models/custom-test.meta.json' },
-      { runtime: 'custom-webgpu', manifestUrl: '/runtimes/custom-test/manifest.json', signal: controller.signal, fallback: true },
-    );
+    const loading = createBrowserSquareformerRuntimeEvaluator(spec, { signal: controller.signal, fallback: true });
     while (!fetches.length) await tick();
     assert.match(fetches[0], /manifest\.json$/);
     controller.abort();
@@ -280,23 +304,14 @@ if (!process.execArgv.includes('--experimental-transform-types')) {
         deviceDestroys += 1;
       },
     };
-    Object.defineProperty(globalThis.navigator, 'gpu', {
-      configurable: true,
-      value: { requestAdapter: async () => ({ requestDevice: async () => device }) },
-    });
-    t.after(() => delete globalThis.navigator.gpu);
+    mockGpu(t, async () => device);
     const controller = new AbortController();
-    const loading = createBrowserSquareformerRuntimeEvaluator(
-      { modelId: 'custom-test', onnx: '/models/custom-test.onnx', meta: '/models/custom-test.meta.json' },
-      {
-        runtime: 'custom-webgpu',
-        manifestUrl: '/runtimes/custom-test/manifest.json',
-        kernelBase: '/k',
-        fixtureRoot: '/f',
-        signal: controller.signal,
-        fallback: true,
-      },
-    );
+    const loading = createBrowserSquareformerRuntimeEvaluator(spec, {
+      kernelBase: '/k',
+      fixtureRoot: '/f',
+      signal: controller.signal,
+      fallback: true,
+    });
     while (!compileHead) await tick();
     controller.abort();
     compileHead();

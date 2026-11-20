@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { START_FEN } from '../src/chess/board.ts';
 import { Lc0OnnxEvaluator } from '../src/lc0/onnxEvaluator.ts';
 import { startSearchWorker } from '../src/lc0/searchWorkerCore.ts';
 import { env } from '../src/nn/ortRuntime.ts';
@@ -79,6 +80,29 @@ test('worker loss during replacement init has no request ID and cannot settle in
       else delete globalThis[key];
     }
   }
+});
+
+test('worker search ignores rootMoves supplied in a message', async (t) => {
+  const originalSelf = Object.getOwnPropertyDescriptor(globalThis, 'self');
+  const worker = new EventTarget();
+  let reply;
+  worker.postMessage = (message) => reply.resolve(message);
+  Object.defineProperty(globalThis, 'self', { configurable: true, value: worker });
+  t.after(() => {
+    if (originalSelf) Object.defineProperty(globalThis, 'self', originalSelf);
+    else delete globalThis.self;
+  });
+  startSearchWorker({ createHybridEvaluator: () => ({ evaluate: async () => ({ wdl: [0, 1, 0], legalPriors: [] }) }) });
+  const send = (data) => {
+    reply = Promise.withResolvers();
+    worker.dispatchEvent(new MessageEvent('message', { data }));
+    return reply.promise;
+  };
+  const ready = await send({ type: 'init', id: 1, runtime: 'hybrid', modelUrl: 'unused', packUrl: 'unused', ep: 'wasm', cacheModel: false });
+  assert.equal(ready.type, 'ready', ready.error);
+  const search = await send({ type: 'search', id: 2, input: START_FEN, visits: 2, rootMoves: [] });
+  assert.equal(search.type, 'searchResult', search.error);
+  assert.ok(search.result.move, 'the starting position still has a playable move');
 });
 
 test('worker disposes a replacement after diagnostics fail and keeps its working evaluator', async (t) => {
