@@ -541,35 +541,13 @@ export function ortRuntimeArtifactKindIsLocked(): boolean {
   return lockedOrtRuntimeArtifactKind !== null;
 }
 
-/**
- * Which staged runtime pair this thread loads. Asyncify is required by the
- * WebGPU/JSEP path and is pure download + instrumentation overhead for
- * CPU-only sessions, so wasm-EP-only threads take the smaller CPU build.
- *
- * The choice must be made before ORT initializes and can never change
- * afterwards (the binary is worker-global), which is why "this session happens
- * to run on wasm" is not sufficient on its own:
- * - strict `ep=webgpu` keeps a GPU pair (JSPI on a production build that can
- *   use it, otherwise asyncify), so a GPU-less browser still fails with
- *   "WebGPU unavailable" instead of an opaque link error;
- * - anything that resolves to include `webgpu` keeps that same GPU pair, which
- *   also keeps the in-process WebGPU->WASM fallback in `createOrtSession` on
- *   one binary;
- * - a CPU-only resolution takes the small build only when escalating to WebGPU
- *   later in this same thread is impossible (`navigator.gpu` missing, i.e.
- *   Safari/Firefox) or has been ruled out by an explicit `?ep=wasm` / env pin.
- *   A programmatic `setRequestedOrtExecutionProviderForCurrentThread('wasm')`
- *   deliberately does NOT qualify: search workers switch EP per message and
- *   must keep the GPU-capable binary. Such a worker can still opt in via
- *   `setOrtRuntimeArtifactKindForCurrentThread('wasm')` before its first
- *   session.
- */
 let ortJspiFallbackReason: string | undefined;
 
 function requestedOrtJspiPreference(): OrtJspiPreference {
   return resolveOrtJspiPreference(browserParam('ortJspi') ?? envValue('ORT_JSPI') ?? envValue('TINY_LEELA_ORT_JSPI'));
 }
 
+/** ORT can only initialize one binary per thread. Use a GPU-capable pair if a later session could need WebGPU. */
 export function ortRuntimeArtifactKindForCurrentThread(): OrtRuntimeArtifactKind {
   if (lockedOrtRuntimeArtifactKind) return lockedOrtRuntimeArtifactKind;
   // Node (no `location`) imports ORT's bundle with the Emscripten glue inlined,
@@ -1205,22 +1183,7 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
   return diag;
 }
 
-/**
- * Settle `probedWebGpuAdapterUsable` before the artifact is chosen.
- *
- * `navigator.gpu` existing does not mean an adapter can be acquired (a
- * blocklisted GPU, a headless or software-only context). Provider and artifact
- * resolution are both synchronous and consult the probe result, but the only
- * thing that used to set it was `collectOrtRuntimeDiagnostics({probeAdapter})`,
- * which normal worker startup runs *after* the first session. Such a browser
- * therefore locked the 24 MB asyncify pair at one thread, tried WebGPU, failed,
- * and served the rest of the session from the large binary anyway.
- *
- * Runs at most once per thread, and only when the answer can change a decision:
- * a pinned `ep=wasm` never consults it, and strict `ep=webgpu` resolves to
- * `['webgpu']` regardless so it still surfaces "WebGPU unavailable" rather than
- * silently degrading.
- */
+/** navigator.gpu can exist even when no adapter is available (e.g. a blocklisted GPU). */
 async function ensureWebGpuAdapterProbed(requested = requestedOrtExecutionProvider()): Promise<void> {
   if (probedWebGpuAdapterUsable !== null || !webgpuAvailable() || requested === 'wasm' || requested === 'webgpu') return;
   try {

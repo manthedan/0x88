@@ -1213,14 +1213,14 @@ function storageSet(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
   } catch {
-    /* profiles are optional */
+    /* Storage may be denied. */
   }
 }
 function storageRemove(key: string): void {
   try {
     localStorage.removeItem(key);
   } catch {
-    /* profiles are optional */
+    /* Storage may be denied. */
   }
 }
 function setShapes(shapes: DrawShape[]) {
@@ -1468,10 +1468,6 @@ function deleteSelectedEngineProfile(): void {
   );
 }
 
-// Engines to analyze are chosen as an add/remove list of cascading selects:
-// family (Lc0/Centipawn/Stockfish/Reckless/Viridithas/Berserk/PlentyChess)
-// -> variant (Lc0: Small|BT4; Centipawn: runtime config; SF: Lite|Full; UCI engines: variant)
-// -> strength (neural visits, UCI depth), all per row.
 function strengthMeta(family: EngineFamily) {
   return engineStrengthMeta(family, 'analysis');
 }
@@ -1519,9 +1515,6 @@ function stormphraxVariantForKey(variantKey: string): StormphraxVariant {
   return stormphraxBrowserVariants.resolve(variantKey);
 }
 
-// "Add engine" fills the next missing family by priority
-// (Lc0 → SF → Reckless → Viridithas → Berserk → PlentyChess → Centipawn),
-// falling back to the top priority when all families are present.
 function nextEngineFamily(): EngineFamily {
   const present = new Set(engineRows.map((row) => row.family));
   const priority = analysisEngineFamilyOptions().map((option) => option.value);
@@ -3195,7 +3188,6 @@ interface ReviewEngineChoice {
   depth: number;
 }
 
-/** This first review slice supports explicit CPU reviewers, not neural/ human-policy nets. */
 function reviewEngineRows(): EngineRow[] {
   const rows = activeEngineRows().filter((row) => ['sf', 'reckless', 'viridithas', 'berserk', 'plentychess', 'stormphrax'].includes(row.family));
   if (!rows.some((row) => row.family === 'sf' && row.variant === 'lite')) rows.unshift({ family: 'sf', variant: 'lite', strength: 12 });
@@ -6164,8 +6156,6 @@ async function init(mountSignal: AbortSignal) {
   installExperimentalLc0RuntimeOption();
   selectEl('lc0RuntimeSelect').value = initialLc0Runtime();
   const storedLastProfile = engineProfiles.find((profile) => profile.name === storageGet(LAST_ENGINE_PROFILE_STORAGE_KEY));
-  // Do not silently restore saved BT4 rows on page load: selecting that profile
-  // later goes through the explicit support check and large-download prompt.
   const lastProfile = storedLastProfile && !profileHasBt4(storedLastProfile.rows) ? storedLastProfile : undefined;
   if (phoneLargeNetsBlocked() && storedLastProfile && profileHasBt4(storedLastProfile.rows)) {
     engineRows = await profileRowsForUse(storedLastProfile.rows, false);

@@ -456,7 +456,6 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
     .board-panel{scroll-margin-top:74px}
     :global(#moveList.move-list){max-height:180px}
     .play-workspace:global(:not([data-phase=setup])[data-config=open]) .setup-pane{max-height:none}
-    /* DOM, visual and keyboard order all follow board → setup/game → actions. */
     .move-nav button, .move-form input, .game-actions button, .record-actions :is(button,a){min-height:44px}
     :global(#moveList.move-list){--row-h:44px}
   }

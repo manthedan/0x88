@@ -1,12 +1,4 @@
 import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
-// Lc0 big-net (BT4-it332, t3-512 distill) browser integration.
-//
-// Big nets are large and attention-heavy, so they are handled with care:
-//   - Lazy: the dedicated search worker is only created/initialized on first use
-//     (the first init fetches the model, cached afterwards by the Cache API).
-//   - Off the main thread: search runs entirely inside searchWorker.ts so heavy
-//     inference never blocks the UI.
-//   - Disposable: `dispose()` terminates the worker, freeing model memory.
 
 import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
 import { rankFlipColorSwapBoard, rankFlipMove } from '../chess/boardNormalization.ts';
@@ -332,10 +324,6 @@ export function bt4LoadWarning(): string {
   return bigNetLoadWarning(BT4_NET);
 }
 
-/**
- * A lazily-initialized, worker-backed Lc0 big-net searcher. One instance owns
- * one searchWorker (one resident net). Call `dispose()` to free its memory.
- */
 function normalizedEvalCacheEntries(entries: number | undefined): number {
   return Math.max(0, Math.floor(Number(entries ?? 0) || 0));
 }
@@ -406,9 +394,7 @@ export class Bt4WorkerSearcher {
   }
 
   /**
-   * True when init(options) would reuse the loaded session as is: ready, with the
-   * same eval-cache size. Otherwise init disposes and reloads it, and may then
-   * serve a different model (servedModelUrl).
+   * Whether init can reuse the session with the requested cache size and diagnostics.
    */
   isInitializedFor(options: { evalCacheEntries?: number } = {}): boolean {
     return (
@@ -472,9 +458,6 @@ export class Bt4WorkerSearcher {
       const prefetchedLoad = prefetched?.status === 'memory' ? prefetched.load : undefined;
       const prefetchedModel = prefetched && prefetched.status !== 'fallback' ? { url: prefetched.modelUrl, load: prefetchedLoad } : undefined;
       const worker = this.startWorker();
-      // Big nets opt into app-owned Cache Storage so immutable model bytes
-      // survive route changes even when the browser HTTP cache skips large
-      // entries. Quota-limited browsers fall back to URL-loading in the worker.
       this.ortRuntime = { graphOptimizationLevel: diagnostics.ortDiagnostics.graphOptimizationLevel ?? 'all', dequantFoldEnabled: diagnostics.dequantFold };
       const ready = await this.post<{
         backend: string;
@@ -488,6 +471,7 @@ export class Bt4WorkerSearcher {
           // Keep the production device rule for both shipped and lab-selected configs.
           deviceModelSelection: true,
           ep,
+          // The browser HTTP cache may skip large entries.
           cacheModel: true,
           ...diagnostics,
           evalCacheEntries,
