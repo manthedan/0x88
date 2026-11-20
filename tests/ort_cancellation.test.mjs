@@ -68,6 +68,34 @@ test('canceling a pending WebGPU probe rejects promptly without admitting any na
   );
 });
 
+test('model preparation cannot change a session’s admitted fallback policy', async (t) => {
+  configure(t, 'auto');
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { gpu: { requestAdapter: async () => ({ features: new Set(['shader-f16']) }) } },
+  });
+  t.after(() => (previous ? Object.defineProperty(globalThis, 'navigator', previous) : delete globalThis.navigator));
+  const attempts = [];
+  const session = { release() {} };
+  t.mock.method(ort.InferenceSession, 'create', async (_model, { executionProviders }) => {
+    attempts.push(executionProviders);
+    if (executionProviders.includes('webgpu')) throw new Error('GPU unavailable');
+    return session;
+  });
+  assert.equal(
+    await ort.createOrtSession(new Uint8Array([1]), {
+      get reloadModel() {
+        ort.setRequestedOrtExecutionProviderForCurrentThread('webgpu');
+        return undefined;
+      },
+    }),
+    session,
+  );
+  assert.deepEqual(attempts, [['webgpu', 'wasm'], ['wasm']]);
+  await ort.releaseOrtSession(session);
+});
+
 test('an already-stopped consumer observes a shared operation rejection without dropping it', async () => {
   const controller = new AbortController();
   controller.abort();

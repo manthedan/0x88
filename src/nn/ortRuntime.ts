@@ -1356,21 +1356,21 @@ export function createOrtSession(modelPath: OrtModelInput, options: CreateOrtSes
   }, options);
 }
 
-async function createOrtSessionFromSource(takeModel: () => OrtModelInput, options: CreateOrtSessionOptions): Promise<ort.InferenceSession> {
-  // Must precede resolvedOrtExecutionProviders(): both it and the artifact
-  // selector read the probe result, and the locks below freeze that choice.
-  await untilAborted(ensureWebGpuAdapterProbed(), options.signal);
-  options.signal?.throwIfAborted();
-  const resolved = resolvedOrtExecutionProviders();
-  if (options.webgpuOnly && !resolved.includes('webgpu')) throw new Error('createOrtSession: webgpuOnly requested but WebGPU is not a resolved provider');
-  const providers = options.webgpuOnly ? ['webgpu'] : resolved;
-  // Both locks run before the first InferenceSession.create so the artifact is
-  // decided (and frozen) before ORT initializes its worker-global wasm module;
-  // the WebGPU->WASM fallback below then reuses the same binary.
+async function prepareOrtThread({ signal, webgpuOnly }: CreateOrtSessionOptions) {
+  await untilAborted(ensureWebGpuAdapterProbed(), signal);
+  signal?.throwIfAborted();
+  const requested = requestedOrtExecutionProvider();
+  const resolved = resolvedOrtExecutionProviders(requested);
+  if (webgpuOnly && !resolved.includes('webgpu')) throw new Error('createOrtSession: webgpuOnly requested but WebGPU is not a resolved provider');
+  const providers = webgpuOnly ? ['webgpu'] : resolved;
   lockRequestedOrtWasmArtifact();
   lockOrtRuntimeArtifactKind(providers);
+  return { providers, wasmFallback: !webgpuOnly && shouldFallbackToWasmAfterOrtFailure(requested, providers) };
+}
+
+async function createOrtSessionFromSource(takeModel: () => OrtModelInput, options: CreateOrtSessionOptions): Promise<ort.InferenceSession> {
+  const { providers, wasmFallback } = await prepareOrtThread(options);
   let prepared: PreparedOrtModelInput | undefined = await prepareOrtModelInput(takeModel(), options.reloadModel);
-  const wasmFallback = !options.webgpuOnly && shouldFallbackToWasmAfterOrtFailure(requestedOrtExecutionProvider(), providers);
   const attempts = planOrtSessionAttempts(prepared, providers, wasmFallback, options);
   prepared = undefined;
   let firstMessage: string | undefined;

@@ -1568,7 +1568,6 @@ function ctxRender(ctx: PlayContext): void {
     fen: boardToFen(shownBoard).split(' ')[0],
     turnColor: shownBoard.turn === 'w' ? ('white' as const) : ('black' as const),
     coordinates: true,
-    trustAllEvents: true,
     check: boardCheck(shownBoard),
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 160 },

@@ -1976,8 +1976,6 @@ function renderBoard() {
     fen: displayTree.current.fen.split(' ')[0],
     turnColor: board.turn === 'w' ? ('white' as const) : ('black' as const),
     coordinates: true,
-    // Allows synthetic pointer events so automated browser checks can move pieces.
-    trustAllEvents: true,
     check: boardCheck(board),
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 160 },
