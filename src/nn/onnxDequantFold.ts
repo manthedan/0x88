@@ -234,8 +234,6 @@ function parseTensor(buf: Uint8Array, f: Field): TensorInfo {
         info.raw = null;
         info.dataType = -1;
         break;
-      default:
-        break;
     }
   }
   if (int32.length) info.int32Data = Int32Array.from(int32);
@@ -244,9 +242,7 @@ function parseTensor(buf: Uint8Array, f: Field): TensorInfo {
 }
 
 function elementCount(dims: number[]): number {
-  let n = 1;
-  for (const d of dims) n *= d;
-  return n;
+  return dims.reduce((n, d) => n * d, 1);
 }
 
 type TensorReader = { length: number; at(index: number): number };
@@ -306,11 +302,10 @@ function planDequantize(x: TensorInfo, scale: TensorInfo, zeroPoint: TensorInfo 
   if (!q || !s) return null;
   let zp: TensorReader | null = null;
   if (zeroPoint) {
-    if (zeroPoint.dataType !== x.dataType) return null;
-    zp = integerReader(zeroPoint);
+    zp = zeroPoint.dataType === x.dataType ? integerReader(zeroPoint) : null;
     if (!zp || zp.length !== s.length) return null;
   }
-  const dims = x.dims;
+  const { dims } = x;
   const rank = dims.length;
   const total = q.length;
   const scalar = s.length === 1 && blockSize === 0;
@@ -328,8 +323,7 @@ function planDequantize(x: TensorInfo, scale: TensorInfo, zeroPoint: TensorInfo 
       if (scale.dims.length !== 1 || scale.dims[0] !== axisDim) return null;
     } else {
       blocks = Math.ceil(axisDim / blockSize);
-      if (scale.dims.length !== rank) return null;
-      for (let d = 0; d < rank; d++) if (scale.dims[d] !== (d === axis ? blocks : dims[d])) return null;
+      if (scale.dims.length !== rank || scale.dims.some((dim, d) => dim !== (d === axis ? blocks : dims[d]))) return null;
     }
   }
   return {
@@ -412,27 +406,6 @@ class ModelWriter {
 }
 
 type FoldedTensor = { name: Uint8Array; dataType: number; dims: number[]; plan: DequantPlan; rawBytes: number; byteLength: number };
-function planFoldedTensor(name: string, dataType: number, dims: number[], plan: DequantPlan): FoldedTensor {
-  const encodedName = textEncoder.encode(name);
-  const rawBytes = plan.total * (dataType === ONNX_FLOAT16 ? 2 : 4);
-  const byteLength =
-    dims.reduce((n, dim) => n + 1 + varintLength(dim), 0) +
-    1 +
-    varintLength(dataType) +
-    bytesFieldLength(8, encodedName.length) +
-    bytesFieldLength(9, rawBytes);
-  return { name: encodedName, dataType, dims, plan, rawBytes, byteLength };
-}
-function writeFoldedTensor(writer: ModelWriter, tensor: FoldedTensor): void {
-  writer.header(5, tensor.byteLength);
-  for (const dim of tensor.dims) writer.varintField(1, dim);
-  writer.varintField(2, tensor.dataType);
-  writer.header(8, tensor.name.length);
-  writer.raw(tensor.name);
-  writer.header(9, tensor.rawBytes);
-  tensor.plan.write(writer.view, writer.position, tensor.dataType);
-  writer.position += tensor.rawBytes;
-}
 
 type NodeInfo = {
   field: Field;
@@ -459,15 +432,14 @@ function countNodeConsumers(buf: Uint8Array, node: Field, consumers: Map<string,
       consumers.set(name, (consumers.get(name) ?? 0) + 1);
     } else if (t.field === 5 && t.wire === WIRE_LEN) {
       for (const a of parseProtoFields(buf, t.valueStart, t.valueEnd)) {
-        if ((a.field === 6 || a.field === 11) && a.wire === WIRE_LEN) countGraphConsumers(buf, a, consumers); // AttributeProto.g (6) / .graphs (11)
+        if ((a.field === 6 || a.field === 11) && a.wire === WIRE_LEN) {
+          // AttributeProto.g (6) / .graphs (11)
+          for (const f of parseProtoFields(buf, a.valueStart, a.valueEnd)) {
+            if (f.field === 1 && f.wire === WIRE_LEN) countNodeConsumers(buf, f, consumers);
+          }
+        }
       }
     }
-  }
-}
-
-function countGraphConsumers(buf: Uint8Array, graph: Field, consumers: Map<string, number>): void {
-  for (const f of parseProtoFields(buf, graph.valueStart, graph.valueEnd)) {
-    if (f.field === 1 && f.wire === WIRE_LEN) countNodeConsumers(buf, f, consumers);
   }
 }
 
@@ -501,8 +473,6 @@ function parseNode(buf: Uint8Array, f: Field): NodeInfo {
         else if (name === 'output_dtype') node.outputDtype = ival;
         break;
       }
-      default:
-        break;
     }
   }
   return node;
@@ -530,9 +500,7 @@ export function countOnnxDequantizeLinear(model: Uint8Array): number {
   if (!graph) return 0;
   let n = 0;
   for (const f of parseProtoFields(model, graph.valueStart, graph.valueEnd)) {
-    if (f.field !== 1 || f.wire !== WIRE_LEN) continue;
-    const node = parseNode(model, f);
-    if (node.opType === 'DequantizeLinear') n += 1;
+    if (f.field === 1 && f.wire === WIRE_LEN && parseNode(model, f).opType === 'DequantizeLinear') n += 1;
   }
   return n;
 }
@@ -564,16 +532,11 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
       nodes.push(parseNode(model, f));
       countNodeConsumers(model, f, consumers);
     } else if (f.field === 5) {
-      let name = '';
-      for (const t of parseProtoFields(model, f.valueStart, f.valueEnd))
-        if (t.field === 8) {
-          name = fieldString(model, t);
-          break;
-        }
-      initializers.set(name, { field: f, info: null });
+      const nameField = parseProtoFields(model, f.valueStart, f.valueEnd).find((t) => t.field === 8);
+      initializers.set(nameField ? fieldString(model, nameField) : '', { field: f, info: null });
     } else if (f.field === 11 || f.field === 12) {
-      for (const t of parseProtoFields(model, f.valueStart, f.valueEnd))
-        if (t.field === 1) (f.field === 11 ? graphInputs : graphOutputs).add(fieldString(model, t));
+      const target = f.field === 11 ? graphInputs : graphOutputs;
+      for (const t of parseProtoFields(model, f.valueStart, f.valueEnd)) if (t.field === 1) target.add(fieldString(model, t));
     }
   }
   const dql = nodes.filter((n) => n.opType === 'DequantizeLinear' && (n.domain === '' || n.domain === 'ai.onnx'));
@@ -582,7 +545,7 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
   const tensor = (name: string): TensorInfo | null => {
     const entry = initializers.get(name);
     if (!entry) return null;
-    if (!entry.info) entry.info = parseTensor(model, entry.field);
+    entry.info ??= parseTensor(model, entry.field);
     return entry.info;
   };
 
@@ -591,46 +554,48 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
   const droppedInitializers = new Set<Field>();
   let skipped = 0;
   for (const node of dql) {
-    if (node.inputs.length < 2 || node.outputs.length !== 1) {
-      skipped += 1;
-      continue;
-    }
-    const x = tensor(node.inputs[0]);
-    const scale = tensor(node.inputs[1]);
-    const zpName = node.inputs.length > 2 && node.inputs[2] ? node.inputs[2] : null;
+    const [xName, scaleName, rawZpName] = node.inputs;
+    const outName = node.outputs[0];
+    const zpName = rawZpName || null;
+    const xEntry = xName ? initializers.get(xName) : undefined;
     // An initializer that is also a graph input is a default the caller may override at run
     // time, so it is not a constant we can bake in.
-    if (graphInputs.has(node.inputs[0]) || graphInputs.has(node.inputs[1]) || (zpName && graphInputs.has(zpName))) {
+    if (
+      node.inputs.length < 2 ||
+      node.outputs.length !== 1 ||
+      !xEntry ||
+      folds.has(xEntry.field) ||
+      initializers.has(outName) ||
+      graphInputs.has(xName) ||
+      graphInputs.has(scaleName) ||
+      (zpName && graphInputs.has(zpName))
+    ) {
       skipped += 1;
       continue;
     }
+    const x = tensor(xName)!;
+    const scale = tensor(scaleName);
     const zp = zpName ? tensor(zpName) : null;
-    if (!x || !scale || (zpName && !zp) || (scale.dataType !== ONNX_FLOAT && scale.dataType !== ONNX_FLOAT16)) {
-      skipped += 1;
-      continue;
-    }
-    if (initializers.has(node.outputs[0])) {
-      skipped += 1;
-      continue;
-    }
-    const outType = node.outputDtype || scale.dataType;
-    if (outType !== ONNX_FLOAT && outType !== ONNX_FLOAT16) {
-      skipped += 1;
-      continue;
-    }
-    const plan = planDequantize(x, scale, zp, node.axis, node.blockSize);
+    const outType = node.outputDtype || scale?.dataType || 0;
+    const plan =
+      scale && (!zpName || zp) && (scale.dataType === ONNX_FLOAT || scale.dataType === ONNX_FLOAT16) && (outType === ONNX_FLOAT || outType === ONNX_FLOAT16)
+        ? planDequantize(x, scale, zp, node.axis, node.blockSize)
+        : null;
     if (!plan) {
       skipped += 1;
       continue;
     }
-    const xEntry = initializers.get(node.inputs[0])!;
-    if (folds.has(xEntry.field)) {
-      skipped += 1;
-      continue;
-    }
     removedNodes.add(node.field);
-    folds.set(xEntry.field, planFoldedTensor(node.outputs[0], outType, x.dims, plan));
-    for (const name of [node.inputs[0], node.inputs[1], zpName]) {
+    const encodedName = textEncoder.encode(outName);
+    const rawBytes = plan.total * (outType === ONNX_FLOAT16 ? 2 : 4);
+    const byteLength =
+      x.dims.reduce((n, dim) => n + 1 + varintLength(dim), 0) +
+      1 +
+      varintLength(outType) +
+      bytesFieldLength(8, encodedName.length) +
+      bytesFieldLength(9, rawBytes);
+    folds.set(xEntry.field, { name: encodedName, dataType: outType, dims: x.dims, plan, rawBytes, byteLength });
+    for (const name of [xName, scaleName, zpName]) {
       if (!name) continue;
       const left = (consumers.get(name) ?? 1) - 1;
       consumers.set(name, left);
@@ -647,7 +612,16 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
         const folded = folds.get(f);
         if (folded) {
           length += bytesFieldLength(5, folded.byteLength);
-          if (writer) writeFoldedTensor(writer, folded);
+          if (writer) {
+            writer.header(5, folded.byteLength);
+            for (const dim of folded.dims) writer.varintField(1, dim);
+            writer.varintField(2, folded.dataType);
+            writer.header(8, folded.name.length);
+            writer.raw(folded.name);
+            writer.header(9, folded.rawBytes);
+            folded.plan.write(writer.view, writer.position, folded.dataType);
+            writer.position += folded.rawBytes;
+          }
         }
         if (droppedInitializers.has(f)) continue;
       }
@@ -666,14 +640,13 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
     } else writer.raw(model.subarray(f.start, f.end));
   }
   if (writer.position !== modelLength) throw new Error('onnx: folded model size mismatch');
-  const bytes = writer.bytes;
   return {
-    bytes,
+    bytes: writer.bytes,
     foldedNodes: removedNodes.size,
     skippedNodes: skipped,
     removedInitializers: droppedInitializers.size,
     bytesBefore: model.byteLength,
-    bytesAfter: bytes.byteLength,
+    bytesAfter: writer.bytes.byteLength,
     elapsedMs: now() - t0,
   };
 }
