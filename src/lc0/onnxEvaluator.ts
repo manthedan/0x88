@@ -353,14 +353,43 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
   }
 
   async evaluateBatch(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
-    return inputs.length ? (await this.evaluateGroups([inputs], false))[0] : [];
+    if (!inputs.length) return [];
+    const results = new Array<Lc0Evaluation>(inputs.length);
+    const groups = new Map<string, { input: Lc0EvaluatorInput; slots: number[]; promise?: Promise<Lc0Evaluation> }>();
+
+    for (let i = 0; i < inputs.length; i++) {
+      const key = inputHistoryKey(inputs[i]);
+      const cached = this.cachedValue(key);
+      if (cached) {
+        results[i] = cached;
+        continue;
+      }
+      this.misses += 1;
+      const group = groups.get(key);
+      if (group) group.slots.push(i);
+      else groups.set(key, { input: inputs[i], slots: [i], promise: this.inFlight.get(key) });
+    }
+    if (!groups.size) return results;
+
+    const deferred: PendingMiss[] = [];
+    for (const [key, group] of groups) {
+      if (group.promise) continue;
+      const pending = this.createInFlight(key, group.input);
+      group.promise = pending.promise;
+      deferred.push(pending);
+    }
+    if (deferred.length) void this.runMissBatch(deferred);
+
+    await Promise.all(
+      [...groups.values()].map(async (group) => {
+        const value = await group.promise!;
+        for (const slot of group.slots) results[slot] = cloneEvaluation(value);
+      }),
+    );
+    return results;
   }
 
-  evaluateBatchSequence(batches: Lc0EvaluatorInput[][]): Promise<Lc0Evaluation[][]> {
-    return this.evaluateGroups(batches, true);
-  }
-
-  private async evaluateGroups(batches: Lc0EvaluatorInput[][], useSequence: boolean): Promise<Lc0Evaluation[][]> {
+  async evaluateBatchSequence(batches: Lc0EvaluatorInput[][]): Promise<Lc0Evaluation[][]> {
     const out = batches.map((batch) => new Array<Lc0Evaluation>(batch.length));
     const groups = new Map<
       string,
@@ -371,59 +400,96 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
       for (let slot = 0; slot < batches[batchIndex].length; slot++) {
         const input = batches[batchIndex][slot];
         const key = inputHistoryKey(input);
-        const cached = this.cache.get(key);
+        const cached = this.cachedValue(key);
         if (cached) {
-          this.hits += 1;
-          this.cache.delete(key);
-          this.cache.set(key, cached);
-          out[batchIndex][slot] = cloneCachedEvaluation(cached);
+          out[batchIndex][slot] = cached;
           continue;
         }
         this.misses += 1;
         const group = groups.get(key);
-        if (group) {
-          group.slots.push({ batch: batchIndex, slot });
-        } else {
-          groups.set(key, { input, slots: [{ batch: batchIndex, slot }], sourceBatch: batchIndex, promise: this.inFlight.get(key) });
-        }
+        if (group) group.slots.push({ batch: batchIndex, slot });
+        else groups.set(key, { input, slots: [{ batch: batchIndex, slot }], sourceBatch: batchIndex, promise: this.inFlight.get(key) });
       }
     }
+    if (!groups.size) return out;
 
     const newBySourceBatch = new Map<number, PendingMiss[]>();
     for (const [key, group] of groups) {
       if (group.promise) continue;
-      let resolve!: (value: Lc0Evaluation) => void;
-      let reject!: (error: unknown) => void;
-      const promise = new Promise<Lc0Evaluation>((res, rej) => {
-        resolve = res;
-        reject = rej;
-      });
-      this.inFlight.set(key, promise);
-      group.promise = promise;
+      const pending = this.createInFlight(key, group.input);
+      group.promise = pending.promise;
       const entries = newBySourceBatch.get(group.sourceBatch) ?? [];
-      entries.push({ key, input: group.input, promise, resolve, reject });
+      entries.push(pending);
       newBySourceBatch.set(group.sourceBatch, entries);
     }
-    if (newBySourceBatch.size) {
-      void this.runMissBatches([...newBySourceBatch.values()], useSequence);
-    }
+    if (newBySourceBatch.size) void this.runMissSequence([...newBySourceBatch.values()]);
 
     await Promise.all(
       [...groups.values()].map(async (group) => {
         const value = await group.promise!;
-        for (const target of group.slots) {
-          out[target.batch][target.slot] = cloneEvaluation(value);
-        }
+        for (const target of group.slots) out[target.batch][target.slot] = cloneEvaluation(value);
       }),
     );
     return out;
   }
 
-  private async runMissBatches(batchEntries: PendingMiss[][], useSequence: boolean): Promise<void> {
+  private cachedValue(key: string): Lc0Evaluation | undefined {
+    const cached = this.cache.get(key);
+    if (!cached) return undefined;
+    this.hits += 1;
+    this.cache.delete(key);
+    this.cache.set(key, cached);
+    return cloneCachedEvaluation(cached);
+  }
+
+  private createInFlight(key: string, input: Lc0EvaluatorInput): PendingMiss {
+    let resolve!: (value: Lc0Evaluation) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<Lc0Evaluation>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    this.inFlight.set(key, promise);
+    return { key, input, promise, resolve, reject };
+  }
+
+  private settleMissBatch(entries: PendingMiss[], evals: Lc0Evaluation[]): void {
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      const cloned = cloneEvaluation(evals[i]);
+      if (this.maxEntries > 0) {
+        this.cache.set(entry.key, cloneCachedEvaluation(cloned));
+        this.evictIfNeeded();
+      }
+      this.inFlight.delete(entry.key);
+      entry.resolve(cloned);
+    }
+  }
+
+  private rejectMissBatch(entries: PendingMiss[], error: unknown): void {
+    for (const entry of entries) {
+      this.inFlight.delete(entry.key);
+      entry.reject(error);
+    }
+  }
+
+  private async runMissBatch(entries: PendingMiss[]): Promise<void> {
+    try {
+      const evals = this.inner.evaluateBatch
+        ? await this.inner.evaluateBatch(entries.map((entry) => entry.input))
+        : await Promise.all(entries.map((entry) => this.inner.evaluate(entry.input)));
+      if (evals.length !== entries.length) throw new Error(`LC0 evaluator returned ${evals.length} result(s), expected ${entries.length}`);
+      this.settleMissBatch(entries, evals);
+    } catch (error) {
+      this.rejectMissBatch(entries, error);
+    }
+  }
+
+  private async runMissSequence(batchEntries: PendingMiss[][]): Promise<void> {
     try {
       const inputs = batchEntries.map((batch) => batch.map((entry) => entry.input));
       let results: Lc0Evaluation[][];
-      if (useSequence && this.inner.evaluateBatchSequence) {
+      if (this.inner.evaluateBatchSequence) {
         results = await this.inner.evaluateBatchSequence(inputs);
       } else {
         results = [];
@@ -438,24 +504,10 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
         if (results[batch].length !== batchEntries[batch].length) {
           throw new Error(`LC0 evaluator returned ${results[batch].length} result(s) for sequence batch ${batch}, expected ${batchEntries[batch].length}`);
         }
-        for (let i = 0; i < batchEntries[batch].length; i++) {
-          const entry = batchEntries[batch][i];
-          const cloned = cloneEvaluation(results[batch][i]);
-          if (this.maxEntries > 0) {
-            this.cache.set(entry.key, cloneCachedEvaluation(cloned));
-            this.evictIfNeeded();
-          }
-          this.inFlight.delete(entry.key);
-          entry.resolve(cloned);
-        }
+        this.settleMissBatch(batchEntries[batch], results[batch]);
       }
     } catch (error) {
-      for (const entries of batchEntries) {
-        for (const entry of entries) {
-          this.inFlight.delete(entry.key);
-          entry.reject(error);
-        }
-      }
+      for (const entries of batchEntries) this.rejectMissBatch(entries, error);
     }
   }
 

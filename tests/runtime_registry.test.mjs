@@ -50,3 +50,14 @@ test('Centipawn model ids follow served file names, so research overrides keep t
   assert.equal(centipawnModelIdForUrls('/models/unregistered.onnx', '/models/unregistered.meta.json'), null);
   assert.ok(registry.promotedTvmjsRuntimeForModel(centipawnModelIdForUrls('/models/bt4_soap_rem_c19000_final.onnx')));
 });
+
+test('centipawnModelIdForUrls rejects mixed-separator custom URLs while keeping exact underscore and hyphen aliases', async () => {
+  const { centipawnModelIdForUrls, BT4_ANNEAL_MUON_BEST_MODEL_ID } = await import('../src/nn/runtimeRegistry.ts');
+  assert.equal(centipawnModelIdForUrls('/models/bt4-soap_rem-c19000_final-tuned.onnx'), null);
+  assert.equal(centipawnModelIdForUrls('/models/bt4_anneal-muon_best-tuned.onnx'), null);
+  assert.equal(centipawnModelIdForUrls('/models/s4fix-v_ema-tuned.onnx'), null);
+  assert.equal(centipawnModelIdForUrls('/models/bt4-soap-rem-c19000-final.onnx'), BT4_SOAP_REM_C19000_FINAL_MODEL_ID);
+  assert.equal(centipawnModelIdForUrls('/models/bt4_soap_rem_c19000_final.onnx'), BT4_SOAP_REM_C19000_FINAL_MODEL_ID);
+  assert.equal(centipawnModelIdForUrls('/models/bt4-anneal-muon-best.onnx'), BT4_ANNEAL_MUON_BEST_MODEL_ID);
+  assert.equal(centipawnModelIdForUrls('/models/s4fix-v-ema.onnx'), S4FIX_V_EMA_MODEL_ID);
+});

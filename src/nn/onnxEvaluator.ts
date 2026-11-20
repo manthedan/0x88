@@ -340,9 +340,7 @@ export class OnnxEvaluator implements Evaluator {
     for (let i = 0; i < boards.length; i++) {
       const { board, legalMoves: legalOverride, flipped } = normalized[i];
       const policy = new Map<number, number>();
-      let auxMoves: Move[] | null = null;
-      let auxCount = 0;
-      let auxStride = 0;
+      let auxMaps: Map<number, number>[] | null = null;
       if (moveTokenLegal) {
         const moves = moveTokenLegal.moves[i];
         const n = Math.min(legalWidth, moves.length);
@@ -351,43 +349,42 @@ export class OnnxEvaluator implements Evaluator {
           continue;
         }
         const probs = softmax(policyRaw.subarray(i * legalWidth, i * legalWidth + n));
-        for (let j = 0; j < n; j++) policy.set(moveToActionId(normalizedMoveToOriginal(moves[j], flipped)), probs[j] ?? 0);
+        if (auxHeads.length > 0) auxMaps = auxHeads.map(() => new Map<number, number>());
+        for (let j = 0; j < n; j++) {
+          const actionId = moveToActionId(normalizedMoveToOriginal(moves[j], flipped));
+          policy.set(actionId, probs[j] ?? 0);
+          if (auxMaps) {
+            for (let k = 0; k < auxHeads.length; k++) auxMaps[k].set(actionId, Number(auxHeads[k][1][i * legalWidth + j] ?? 0));
+          }
+        }
         // Legacy compatibility path, enabled only by meta.allow_legal_overflow_zero_prior.
         for (let j = legalWidth; j < moves.length; j++) policy.set(moveToActionId(normalizedMoveToOriginal(moves[j], flipped)), 0);
-        auxMoves = moves;
-        auxCount = n;
-        auxStride = legalWidth;
       } else {
         const probs = softmax(policyRaw.subarray(i * policySize, (i + 1) * policySize));
-        const legal = legalOverride ?? legalMoves(board);
+        const legal = candidateMoves ? candidateMoves[i] : (legalOverride ?? legalMoves(board));
+        if (candidateMoves && legal.length > 0 && auxHeads.length > 0) auxMaps = auxHeads.map(() => new Map<number, number>());
         let legalMass = 0;
         for (const move of legal) {
           const index = moveToResidualPolicyIndex(move);
           if (index !== undefined) legalMass += probs[index] ?? 0;
         }
-        for (const move of legal) {
+        for (let j = 0; j < legal.length; j++) {
+          const move = legal[j];
           const actionId = moveToActionId(normalizedMoveToOriginal(move, flipped));
           if (legalMass <= 0) policy.set(actionId, 1 / legal.length);
           else {
             const index = moveToResidualPolicyIndex(move);
             policy.set(actionId, index === undefined ? 0 : probs[index] / legalMass);
           }
-        }
-        if (candidateMoves) {
-          auxMoves = candidateMoves[i];
-          auxCount = auxMoves.length;
-          auxStride = candidateWidth;
+          if (auxMaps) {
+            for (let k = 0; k < auxHeads.length; k++) auxMaps[k].set(actionId, Number(auxHeads[k][1][i * candidateWidth + j] ?? 0));
+          }
         }
       }
       const wdl = softmax(wdlRaw.subarray(i * 3, i * 3 + 3));
       const evaluation: Evaluation = { policy, wdl: [wdl[0] ?? 0, wdl[1] ?? 0, wdl[2] ?? 0] };
-      if (auxMoves && auxCount > 0 && auxHeads.length > 0) {
-        const actionIds = auxMoves.slice(0, auxCount).map((m) => moveToActionId(normalizedMoveToOriginal(m, flipped)));
-        for (const [field, raw] of auxHeads) {
-          const map = new Map<number, number>();
-          for (let j = 0; j < auxCount; j++) map.set(actionIds[j], Number(raw[i * auxStride + j] ?? 0));
-          evaluation[field] = map;
-        }
+      if (auxMaps) {
+        for (let k = 0; k < auxHeads.length; k++) evaluation[auxHeads[k][0]] = auxMaps[k];
       }
       out.push(evaluation);
     }

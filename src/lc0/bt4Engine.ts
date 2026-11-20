@@ -547,7 +547,7 @@ export class Bt4WorkerSearcher {
 
   async search(input: Lc0EvaluatorInput, options: Bt4SearchOptions): Promise<Bt4SearchResult> {
     const cancelled: Bt4SearchResult = { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
-    const { onProgress, signal, swapColors, evalCacheEntries, yieldEveryMs: _yieldEveryMs, ...searchOptions } = options;
+    const { onProgress, signal, swapColors, evalCacheEntries } = options;
     if (signal?.aborted) return cancelled;
     try {
       await this.init({ evalCacheEntries });
@@ -565,15 +565,24 @@ export class Bt4WorkerSearcher {
     try {
       const response = await this.post<{ result: Bt4SearchResult }>(
         {
-          ...searchOptions,
           type: 'search',
           input: swapColors ? swapColorsInput(input) : input,
-          batchSize: Math.max(1, Math.floor(Number(searchOptions.batchSize ?? this.config.recommendedBatchSize) || this.config.recommendedBatchSize)),
+          visits: options.visits,
+          movetimeMs: options.movetimeMs,
+          multiPv: options.multiPv,
+          batchSize: Math.max(1, Math.floor(Number(options.batchSize ?? this.config.recommendedBatchSize) || this.config.recommendedBatchSize)),
           batchPipelineDepth: Math.max(
             1,
-            Math.floor(Number(searchOptions.batchPipelineDepth ?? this.config.recommendedPipelineDepth) || this.config.recommendedPipelineDepth),
+            Math.floor(Number(options.batchPipelineDepth ?? this.config.recommendedPipelineDepth) || this.config.recommendedPipelineDepth),
           ),
+          reuseTree: options.reuseTree,
+          drawScore: options.drawScore,
+          contemptElo: options.contemptElo,
+          cpuct: options.cpuct,
+          fpu: options.fpu,
+          searchContemptLimit: options.searchContemptLimit,
           reportProgress: !!onProgress,
+          progressEveryMs: options.progressEveryMs,
         },
         (id) => {
           searchId = id;

@@ -911,7 +911,7 @@ function configureOrtRuntime(): { threads: number; logSeverityLevel: 0 | 1 | 2 |
     // Production builds hand ORT explicit staged glue + wasm URLs so helper workers
     // re-import the exact pthread bootstrap; dev only pins the asyncify .wasm binary.
     wasm.wasmPaths =
-      browserParam('ortWasmPath') ??
+      browserParam('ortWasmPath') ||
       (IS_PROD ? resolveOrtPthreadRuntimeUrls('/ort/', location.href, ortRuntimeArtifactKindForCurrentThread()) : { wasm: `/ort/${ORT_PTHREAD_WASM_FILE}` });
   }
   const threads = requestedOrtWasmThreads(isBrowserMainThread, isNode);

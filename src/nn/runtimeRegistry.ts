@@ -19,10 +19,10 @@ export const S4FIX_V_EMA_MODEL_ID = 's4fix-v-ema';
 
 /** Registered Centipawn model id named by served file URLs, or null for an unregistered model. */
 export function centipawnModelIdForUrls(...urls: string[]): string | null {
-  const text = urls.join(' ').replace(/_/g, '-');
-  if (text.includes(S4FIX_V_EMA_MODEL_ID)) return S4FIX_V_EMA_MODEL_ID;
-  if (text.includes(BT4_ANNEAL_MUON_BEST_MODEL_ID)) return BT4_ANNEAL_MUON_BEST_MODEL_ID;
-  if (text.includes(BT4_SOAP_REM_C19000_FINAL_MODEL_ID)) return BT4_SOAP_REM_C19000_FINAL_MODEL_ID;
+  const text = urls.join(' ');
+  if (text.includes('s4fix_v_ema') || text.includes(S4FIX_V_EMA_MODEL_ID)) return S4FIX_V_EMA_MODEL_ID;
+  if (text.includes('bt4_anneal_muon_best') || text.includes(BT4_ANNEAL_MUON_BEST_MODEL_ID)) return BT4_ANNEAL_MUON_BEST_MODEL_ID;
+  if (text.includes('bt4_soap_rem_c19000_final') || text.includes(BT4_SOAP_REM_C19000_FINAL_MODEL_ID)) return BT4_SOAP_REM_C19000_FINAL_MODEL_ID;
   return null;
 }
 
