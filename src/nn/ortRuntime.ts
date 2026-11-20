@@ -61,6 +61,9 @@ export const ORT_RUNTIME_ARTIFACT_FILES: Readonly<Record<OrtRuntimeArtifactKind,
 });
 
 const ORT_JSPI_UNAVAILABLE = 'WebAssembly.Suspending or WebAssembly.promising is unavailable';
+const IS_PROD = (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true;
+const FALSY_FLAGS = new Set(['0', 'false', 'no', 'off']);
+const TRUTHY_FLAGS = new Set(['1', 'true', 'yes', 'on']);
 
 /** JSPI glue wraps imports with `Suspending` and exports with `promising`. */
 export function ortJspiApiAvailable(
@@ -75,9 +78,8 @@ export function resolveOrtJspiPreference(raw: string | null | undefined): OrtJsp
   const normalized = String(raw ?? '')
     .trim()
     .toLowerCase();
-  if (!normalized || normalized === 'auto') return 'auto';
-  if (['0', 'false', 'no', 'off', 'asyncify'].includes(normalized)) return 'off';
-  if (['1', 'true', 'yes', 'on', 'jspi'].includes(normalized)) return 'on';
+  if (FALSY_FLAGS.has(normalized) || normalized === 'asyncify') return 'off';
+  if (TRUTHY_FLAGS.has(normalized) || normalized === 'jspi') return 'on';
   return 'auto';
 }
 
@@ -88,9 +90,7 @@ export function resolveOrtJspiPreference(raw: string | null | undefined): OrtJsp
  * `on`, so a browser without the API still boots.
  */
 export function gpuOrtRuntimeArtifactForThread(env: { prod: boolean; jspiApiAvailable: boolean; preference: OrtJspiPreference }): 'jspi' | 'asyncify' {
-  if (!env.prod) return 'asyncify';
-  if (env.preference === 'off' || !env.jspiApiAvailable) return 'asyncify';
-  return 'jspi';
+  return env.prod && env.preference !== 'off' && env.jspiApiAvailable ? 'jspi' : 'asyncify';
 }
 
 export function coerceOrtRuntimeArtifactKind(kind: OrtRuntimeArtifactKind, jspiApiAvailable: boolean): { kind: OrtRuntimeArtifactKind; jspiFallback?: string } {
@@ -243,58 +243,39 @@ function debugParam(name: string): string | null {
   return browserParam(name) ?? envValue(`TINY_LEELA_${name.toUpperCase()}`) ?? null;
 }
 
-function debugTokens(value: string | null | undefined): string[] {
-  return String(value ?? '')
-    .toLowerCase()
-    .split(/[,+\s]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
 export function tinyLeelaDebugEnabled(area = 'latency'): boolean {
   const normalizedArea = area.toLowerCase();
   const direct = debugParam(`debug${normalizedArea[0].toUpperCase()}${normalizedArea.slice(1)}`) ?? debugParam(normalizedArea);
-  if (direct !== null) return !['0', 'false', 'no', 'off'].includes(String(direct).toLowerCase());
-  const tokens = [...debugTokens(debugParam('debug')), ...debugTokens(debugParam('tlDebug'))];
-  return tokens.some((token) => ['1', 'true', 'yes', 'on', 'all', 'perf', 'timing', normalizedArea].includes(token));
+  if (direct !== null) return !FALSY_FLAGS.has(direct.toLowerCase());
+  const tokens = [debugParam('debug'), debugParam('tlDebug')].flatMap((value) => (value ?? '').toLowerCase().split(/[,+\s]+/));
+  return tokens.some((token) => TRUTHY_FLAGS.has(token) || token === 'all' || token === 'perf' || token === 'timing' || token === normalizedArea);
 }
 
 export function tinyLeelaNowMs(): number {
   return typeof performance === 'undefined' ? Date.now() : performance.now();
 }
 
-function roundMs(ms: number): number {
-  return Number(ms.toFixed(2));
-}
-
 export function tinyLeelaLogLatency(label: string, payload: Record<string, unknown>): void {
   if (!tinyLeelaDebugEnabled('latency')) return;
   console.info(
     `Centipawn latency: ${label}`,
-    Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, typeof value === 'number' ? roundMs(value) : value])),
+    Object.fromEntries(Object.entries(payload).map(([key, value]) => [key, typeof value === 'number' ? Number(value.toFixed(2)) : value])),
   );
 }
 
-function truthyParam(value: string | null | undefined): boolean {
-  if (value === null || value === undefined) return false;
-  return !['0', 'false', 'no', 'off'].includes(String(value).toLowerCase());
-}
-
-function falseyParam(value: string | null | undefined): boolean {
-  if (value === null || value === undefined) return false;
-  return ['0', 'false', 'no', 'off'].includes(String(value).toLowerCase());
-}
-
-function diagnosticParamValue(name: string): string | null | undefined {
-  return browserParam(name) ?? envValue(`TINY_LEELA_${name.toUpperCase()}`);
-}
-
-function ortDiagnosticsParamEnabled(...names: string[]): boolean {
-  return names.some((name) => truthyParam(diagnosticParamValue(name)));
-}
-
-function ortDiagnosticsParamDisabled(...names: string[]): boolean {
-  return names.some((name) => falseyParam(diagnosticParamValue(name)));
+function diagFlagEnabled(disableNames: string[], enableNames: string[]): boolean {
+  if (
+    disableNames.some((name) => {
+      const value = debugParam(name);
+      return value !== null && FALSY_FLAGS.has(value.toLowerCase());
+    })
+  ) {
+    return false;
+  }
+  return enableNames.some((name) => {
+    const value = debugParam(name);
+    return value !== null && !FALSY_FLAGS.has(value.toLowerCase());
+  });
 }
 
 let forcedOrtExecutionProvider: OrtExecutionProviderPreference | null = null;
@@ -384,8 +365,8 @@ export function ortDequantFoldEnabled(defaultEnabled = true): boolean {
   const raw = String(browserParam('ortDequantFold') ?? envValue('ORT_DEQUANT_FOLD') ?? '')
     .trim()
     .toLowerCase();
-  if (['0', 'false', 'off', 'no'].includes(raw)) return false;
-  if (['1', 'true', 'on', 'yes'].includes(raw)) return true;
+  if (FALSY_FLAGS.has(raw)) return false;
+  if (TRUTHY_FLAGS.has(raw)) return true;
   return defaultEnabled;
 }
 
@@ -453,14 +434,13 @@ async function prepareOrtModelInput(modelPath: OrtModelInput, reloadModel?: () =
 }
 
 function discardDequantFold(reason: string): void {
-  const fold = lastOrtDequantFold;
-  if (!fold) return;
-  lastOrtDequantFold = { ...fold, foldedNodes: 0, removedInitializers: 0, bytesAfter: fold.bytesBefore, discardedAfter: reason };
+  if (!lastOrtDequantFold) return;
+  lastOrtDequantFold = { ...lastOrtDequantFold, foldedNodes: 0, removedInitializers: 0, bytesAfter: lastOrtDequantFold.bytesBefore, discardedAfter: reason };
 }
 
 function describeDequantFold(): string | undefined {
   const fold = lastOrtDequantFold;
-  if (!fold || !fold.enabled || fold.foldedNodes === 0) return undefined;
+  if (!fold?.enabled || fold.foldedNodes === 0) return undefined;
   return `dequant fold: ${fold.foldedNodes} DequantizeLinear folded (${(fold.bytesBefore / 1e6).toFixed(1)} -> ${(fold.bytesAfter / 1e6).toFixed(1)} MB, ${fold.elapsedMs.toFixed(0)} ms)`;
 }
 
@@ -468,10 +448,9 @@ function normalizeEp(value: string | null | undefined): OrtExecutionProviderPref
   const raw = String(value ?? '')
     .trim()
     .toLowerCase();
-  if (!raw) return 'auto';
+  if (!raw || raw === 'auto') return 'auto';
   if (raw === 'webgpu' || raw === 'gpu') return 'webgpu';
   if (raw === 'webgpu,wasm' || raw === 'webgpu+wasm' || raw === 'gpu,wasm' || raw === 'gpu+wasm') return 'webgpu,wasm';
-  if (raw === 'auto') return 'auto';
   return 'wasm';
 }
 
@@ -483,8 +462,7 @@ function ambientOrtExecutionProviderParam(): string | null | undefined {
 }
 
 export function requestedOrtExecutionProvider(): OrtExecutionProviderPreference {
-  if (forcedOrtExecutionProvider) return forcedOrtExecutionProvider;
-  return normalizeEp(ambientOrtExecutionProviderParam());
+  return forcedOrtExecutionProvider ?? normalizeEp(ambientOrtExecutionProviderParam());
 }
 
 function webgpuAvailable(): boolean {
@@ -503,8 +481,7 @@ export function gpuAdapterShaderF16(adapter: unknown): boolean | null {
   if (!adapter || typeof adapter !== 'object') return null;
   try {
     const features = (adapter as { features?: { has?: (name: string) => boolean } }).features;
-    if (!features || typeof features.has !== 'function') return null;
-    return features.has('shader-f16') === true;
+    return typeof features?.has === 'function' ? features.has('shader-f16') === true : null;
   } catch {
     return null;
   }
@@ -593,52 +570,33 @@ function requestedOrtJspiPreference(): OrtJspiPreference {
   return resolveOrtJspiPreference(browserParam('ortJspi') ?? envValue('ORT_JSPI') ?? envValue('TINY_LEELA_ORT_JSPI'));
 }
 
-function rememberJspiFallback(fallback: string | undefined): void {
-  ortJspiFallbackReason = fallback;
-}
-
-function selectGpuOrtRuntimeArtifact(): 'jspi' | 'asyncify' {
-  const preference = requestedOrtJspiPreference();
-  const available = ortJspiApiAvailable();
-  const kind = gpuOrtRuntimeArtifactForThread({
-    prod: (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true,
-    jspiApiAvailable: available,
-    preference,
-  });
-  rememberJspiFallback(kind === 'asyncify' && preference !== 'off' && !available ? ORT_JSPI_UNAVAILABLE : undefined);
-  return kind;
-}
-
 export function ortRuntimeArtifactKindForCurrentThread(): OrtRuntimeArtifactKind {
   if (lockedOrtRuntimeArtifactKind) return lockedOrtRuntimeArtifactKind;
   // Node (no `location`) imports ORT's bundle with the Emscripten glue inlined,
-  // which is the asyncify one; configureNodeOrtWasmBinary feeds it the matching
+  // which is the asyncify one; configureOrtRuntime feeds it the matching
   // binary and wasmPaths are never consulted, so the kind is fixed there.
   if (typeof location === 'undefined') return 'asyncify';
-  // Checked BEFORE the forced kind: the experimental /ort-experimental/ builds
-  // carry their own explicit URLs and are asyncify binaries, so what they are
-  // is not a matter of preference. `?ortWasmVariant=fixed|relaxed` combined
-  // with an `ep=wasm` pin would otherwise report the CPU-only kind while
-  // actually loading asyncify, and the thread policy keys off this value --
-  // which is exactly the asyncify-plus-threads combination measured as a 55%
-  // regression.
+  // Checked BEFORE the forced kind: experimental builds carry explicit URLs and
+  // are asyncify binaries, so reporting 'wasm' here would enable multi-threading
+  // on asyncify (a measured 55% regression).
   if (forcedOrtWasmArtifact.variant !== 'bundled') return 'asyncify';
   if (forcedOrtRuntimeArtifactKind) {
     const coerced = coerceOrtRuntimeArtifactKind(forcedOrtRuntimeArtifactKind, ortJspiApiAvailable());
-    rememberJspiFallback(coerced.jspiFallback);
+    ortJspiFallbackReason = coerced.jspiFallback;
     return coerced.kind;
   }
-  if (requestedOrtExecutionProvider() === 'webgpu') return selectGpuOrtRuntimeArtifact();
-  if (resolvedOrtExecutionProviders().includes('webgpu')) return selectGpuOrtRuntimeArtifact();
-  // `webgpuUsableForProviderSelection`, not `webgpuAvailable`: a browser can
-  // expose `navigator.gpu` and still fail to yield an adapter. Once the probe
-  // has explicitly failed, provider resolution already drops WebGPU, so keying
-  // the artifact off mere API presence would hand that browser the larger
-  // GPU pair and the single-thread policy for a GPU it can never use.
-  // Strict `ep=webgpu` is unaffected: it returned the GPU pair above, so a
-  // GPU-less browser still fails with "WebGPU unavailable" rather than a link error.
-  if (!webgpuUsableForProviderSelection() || explicitWasmOnlyOrtEpPin()) return 'wasm';
-  return selectGpuOrtRuntimeArtifact();
+  if (
+    requestedOrtExecutionProvider() !== 'webgpu' &&
+    !resolvedOrtExecutionProviders().includes('webgpu') &&
+    (!webgpuUsableForProviderSelection() || explicitWasmOnlyOrtEpPin())
+  ) {
+    return 'wasm';
+  }
+  const preference = requestedOrtJspiPreference();
+  const available = ortJspiApiAvailable();
+  const kind = gpuOrtRuntimeArtifactForThread({ prod: IS_PROD, jspiApiAvailable: available, preference });
+  ortJspiFallbackReason = kind === 'asyncify' && preference !== 'off' && !available ? ORT_JSPI_UNAVAILABLE : undefined;
+  return kind;
 }
 
 function lockOrtRuntimeArtifactKind(providers: string[]): OrtRuntimeArtifactKind {
@@ -665,42 +623,9 @@ export function describeOrtBackendConfig(): string {
   return `${backend}[${artifact.variant}:${artifact.artifactId ?? 'custom'}]`;
 }
 
-function configureNodeOrtWasmBinary(wasm: { wasmBinary?: ArrayBufferLike | Uint8Array; wasmPaths?: string | { wasm?: string; mjs?: string } }): void {
-  // Node resolves `onnxruntime-web/webgpu` to the bundle whose Emscripten glue
-  // is inlined (the asyncify one), and glue and binary must match, so Node
-  // always feeds it the asyncify binary regardless of the requested EP.
-  if (typeof document !== 'undefined' || wasm.wasmBinary || forcedOrtWasmArtifact.variant !== 'bundled') return;
-  const proc = globalThis.process as unknown as { cwd?: () => string; getBuiltinModule?: (name: string) => unknown } | undefined;
-  const fs = (proc?.getBuiltinModule?.('node:fs') ?? proc?.getBuiltinModule?.('fs')) as
-    | { existsSync?: (path: string) => boolean; readFileSync?: (path: string) => Uint8Array }
-    | undefined;
-  if (!proc?.cwd || !fs?.existsSync || !fs.readFileSync) return;
-  const wasmPath = `${proc.cwd()}/node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.wasm`;
-  if (fs.existsSync(wasmPath)) {
-    wasm.wasmBinary = fs.readFileSync(wasmPath);
-    // ORT-web 1.25's Node path may still consult wasmPaths in some import modes.
-    wasm.wasmPaths = { wasm: wasmPath };
-  }
-}
-
 function browserThreadedWasmAvailable(): boolean {
-  const isNode = typeof globalThis.process?.versions?.node === 'string';
-  if (isNode) return true;
+  if (runningUnderNode()) return true;
   return typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined';
-}
-
-/**
- * Thread count for `auto`. Capped at 4 and never more than half the machine:
- * ORT is not a participant in the CPU broker (`src/lc0/resourceBroker.ts`), so
- * a page that is also running a threaded Stockfish must not have every core
- * claimed here. 4 was also the measured optimum for the CPU-only LC0 path on a
- * 10-core machine (6 and 8 threads both regressed); see the sweep recorded on
- * `resolveOrtWasmThreads`.
- */
-function defaultAutoThreads(): number {
-  const hc = typeof navigator === 'undefined' ? 2 : Number(navigator.hardwareConcurrency ?? 2);
-  const cores = Math.floor(Number.isFinite(hc) ? hc : 2);
-  return Math.max(1, Math.min(4, Math.floor(cores / 2)));
 }
 
 export type OrtWasmThreadContext = {
@@ -723,37 +648,14 @@ export type OrtWasmThreadContext = {
  */
 export function resolveOrtWasmThreads(context: OrtWasmThreadContext): number {
   const raw = context.raw === undefined || context.raw === null || String(context.raw).trim() === '' ? null : context.raw;
+  const autoBudget = context.cpuOnlyRuntimeArtifact && context.threadedAvailable ? context.autoThreads : 1;
   if (raw === null) {
-    // Main thread and Node stay single-threaded: the UI thread must not fan out,
-    // and Node's inlined glue has no pthread sidecar to re-import.
+    // Main thread and Node stay single-threaded; dev workers keep ORT's default;
+    // built workers only fan out on the CPU-only pair (asyncify+threads regressed 55%).
     if (context.isBrowserMainThread || context.isNode) return 1;
-    // Dev worker: ORT picks its own default from the node_modules glue.
-    if (!context.builtWorker) return 0;
-    // Retested 2026-07-25 against the built `searchWorker` chunk served with
-    // COOP/COEP: threaded ORT no longer deadlocks in a bundled worker. The
-    // 2026-06-11 workaround (`2cc2f65`) predated the self-hosted pthread
-    // sidecars (`180a4a4`, `0157f71`), which is what fixed it -- the helper
-    // workers now re-import the staged glue at its own deployed URL instead of
-    // re-executing our worker chunk. Measured on the CPU-only pair (median of
-    // 20 evals, t1-256x10 qdq8, 10-core): 1t 61.3ms, 2t 43.4ms, 3t 42.2ms,
-    // 4t 40.1ms, 6t 54.0ms, 8t 44.2ms; outputs matched the single-threaded run.
-    // The budget stays 1 on a WebGPU-capable pair (asyncify or JSPI): with a
-    // WebGPU session, numThreads=4 *regressed* the same workload from 11.6ms to
-    // 17.9ms, and the artifact is worker-global, so only a thread that can
-    // never escalate to WebGPU (Safari/Firefox, or an explicit `?ep=wasm` pin)
-    // opts in.
-    if (!context.cpuOnlyRuntimeArtifact) return 1;
-    return context.threadedAvailable ? context.autoThreads : 1;
+    return context.builtWorker ? autoBudget : 0;
   }
-  // `auto` means "choose sensibly for me", so it obeys the same artifact rule
-  // as the default: on the WebGPU-capable asyncify pair the sensible choice is
-  // 1, because threads there measured as a 55% regression. An explicit integer
-  // below is left as a genuine override -- someone benchmarking asyncify at 4
-  // threads is stating a number, not asking for a recommendation.
-  if (String(raw).toLowerCase() === 'auto') {
-    if (!context.cpuOnlyRuntimeArtifact) return 1;
-    return context.threadedAvailable ? context.autoThreads : 1;
-  }
+  if (String(raw).toLowerCase() === 'auto') return autoBudget;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
   const requested = Math.floor(parsed);
@@ -764,67 +666,19 @@ function requestedOrtWasmThreads(isBrowserMainThread: boolean, isNode: boolean):
   if (forcedOrtWasmThreads !== null) {
     return isBrowserMainThread && forcedOrtWasmThreads > 1 && !browserThreadedWasmAvailable() ? 1 : forcedOrtWasmThreads;
   }
+  // Cap auto threads at 4 and half the machine: ORT is outside the CPU broker
+  // (`src/lc0/resourceBroker.ts`), and 4 was the measured optimum on 10 cores.
+  const hc = typeof navigator === 'undefined' ? 2 : Number(navigator.hardwareConcurrency ?? 2);
+  const cores = Math.floor(Number.isFinite(hc) ? hc : 2);
   return resolveOrtWasmThreads({
     raw: browserParam('ortThreads') ?? browserParam('wasmThreads') ?? envValue('ORT_INTRA_OP_NUM_THREADS') ?? envValue('ORT_NUM_THREADS') ?? null,
     isBrowserMainThread,
     isNode,
-    builtWorker:
-      !isBrowserMainThread && !isNode && typeof document === 'undefined' && (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true,
+    builtWorker: !isBrowserMainThread && !isNode && IS_PROD,
     cpuOnlyRuntimeArtifact: ortRuntimeArtifactKindForCurrentThread() === 'wasm',
     threadedAvailable: browserThreadedWasmAvailable(),
-    autoThreads: defaultAutoThreads(),
+    autoThreads: Math.max(1, Math.min(4, Math.floor(cores / 2))),
   });
-}
-
-function browserOrtWasmPaths(kind: OrtRuntimeArtifactKind): string | Record<string, string> {
-  const override = browserParam('ortWasmPath');
-  if (override) return override;
-  // Production builds: Vite/rolldown does not emit ORT's dynamic-import glue
-  // (.mjs sidecars) into /assets/, so the runtime's import() resolves to the
-  // SPA-fallback HTML and initWasm fails ("no available backend found").
-  // Hand ORT explicit same-origin glue and wasm URLs instead. The glue module
-  // is also the Emscripten pthread bootstrap, so preserving its deployed URL
-  // lets helper workers re-import that exact staged module. Each staged glue
-  // bootstraps its own em-pthread workers.
-  // `location` (not `document`) detects browser-ness so this also applies
-  // inside workers.
-  const builtBrowser = typeof location !== 'undefined' && (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true;
-  if (builtBrowser) return resolveOrtPthreadRuntimeUrls('/ort/', location.href, kind);
-  // Dev server: a '/ort/' prefix is blocked for source-mode module imports,
-  // so let the glue resolve from node_modules and only pin the .wasm binary.
-  // (Empirically the jsep glue resolves its own binary in dev and tolerates
-  // this asyncify-named pin; a jsep-named pin breaks its init instead.)
-  // That glue is always ORT's own asyncify module -- the only entrypoint the
-  // webgpu bundle names -- and glue and binary must match, so dev stays on the
-  // asyncify binary for every EP, including a wasm-EP request. JSPI is
-  // selected only in the production branch above, where both URLs are
-  // explicit. The CPU-only build is a production saving.
-  return { wasm: `/ort/${ORT_PTHREAD_WASM_FILE}` };
-}
-
-function configureOrtWasmArtifact(
-  wasm: {
-    simd?: boolean | 'fixed' | 'relaxed';
-    wasmBinary?: ArrayBufferLike | Uint8Array;
-    wasmPaths?: string | { wasm?: string; mjs?: string };
-  },
-  isBrowserRuntime: boolean,
-): void {
-  const artifact = requestedOrtWasmArtifact();
-  if (artifact.variant === 'relaxed') {
-    if (!supportsWasmRelaxedSimdIntegerDot()) {
-      throw new Error('requested relaxed ORT WASM artifact requires i32x4.relaxed_dot_i8x16_i7x16_add support');
-    }
-    wasm.simd = 'relaxed';
-  } else {
-    wasm.simd = 'fixed';
-  }
-  if (artifact.variant !== 'bundled') {
-    wasm.wasmBinary = undefined;
-    wasm.wasmPaths = { mjs: artifact.mjsUrl!, wasm: artifact.wasmUrl! };
-  } else if (isBrowserRuntime) {
-    wasm.wasmPaths = browserOrtWasmPaths(ortRuntimeArtifactKindForCurrentThread());
-  }
 }
 
 /** Worker init pins this option explicitly because its location does not contain the page query. */
@@ -855,33 +709,30 @@ function requestedOrtPreferredOutputLocation(): OrtRuntimeDiagnosticOptions['pre
   if (forcedOrtDiagnosticsOptions?.preferredOutputLocation) return forcedOrtDiagnosticsOptions.preferredOutputLocation;
   const raw = browserParam('ortPreferredOutputLocation') ?? browserParam('preferredOutputLocation');
   if (raw === 'gpu-buffer' || raw === 'cpu-pinned' || raw === 'cpu') return raw;
-  if (ortDiagnosticsParamDisabled('ortGpuOutputs')) return undefined;
-  if (ortDiagnosticsParamEnabled('ortGpuOutputs', 'ortReadbackProfile')) return 'gpu-buffer';
-  return undefined;
+  return diagFlagEnabled(['ortGpuOutputs'], ['ortGpuOutputs', 'ortReadbackProfile']) ? 'gpu-buffer' : undefined;
 }
 
 function requestedOrtWebGpuProfiling(): boolean {
   if (forcedOrtDiagnosticsOptions?.webgpuProfiling !== undefined) return forcedOrtDiagnosticsOptions.webgpuProfiling;
-  if (ortDiagnosticsParamDisabled('ortWebGpuProfile', 'ortKernelProfile')) return false;
-  return ortDiagnosticsParamEnabled('ortWebGpuProfile', 'ortKernelProfile', 'ortReadbackProfile');
+  return diagFlagEnabled(['ortWebGpuProfile', 'ortKernelProfile'], ['ortWebGpuProfile', 'ortKernelProfile', 'ortReadbackProfile']);
 }
 
 function requestedOrtWebGpuApiInstrumentation(): boolean {
   if (forcedOrtDiagnosticsOptions?.webgpuApiInstrumentation !== undefined) return forcedOrtDiagnosticsOptions.webgpuApiInstrumentation;
-  if (ortDiagnosticsParamDisabled('ortMonkeyPatchWebGpu', 'ortWebGpuApiTrace')) return false;
-  return ortDiagnosticsParamEnabled('ortMonkeyPatchWebGpu', 'ortWebGpuApiTrace', 'ortReadbackProfile');
+  return diagFlagEnabled(['ortMonkeyPatchWebGpu', 'ortWebGpuApiTrace'], ['ortMonkeyPatchWebGpu', 'ortWebGpuApiTrace', 'ortReadbackProfile']);
 }
+
+const ORT_LOG_LEVELS = ['verbose', 'info', 'warning', 'error', 'fatal'] as const;
 
 function requestedOrtLogSeverityLevel(): 0 | 1 | 2 | 3 | 4 {
   const raw = browserParam('ortLogSeverity') ?? browserParam('ortLogLevel') ?? envValue('ORT_LOG_SEVERITY_LEVEL') ?? envValue('ORT_LOG_LEVEL');
   const normalized = String(raw ?? '')
     .trim()
     .toLowerCase();
-  if (!normalized) return 4;
+  if (!normalized || normalized === 'fatal') return 4;
   if (normalized === 'verbose') return 0;
   if (normalized === 'info') return 1;
   if (normalized === 'warning' || normalized === 'warn') return 2;
-  if (normalized === 'fatal') return 4;
   const parsed = Number(normalized);
   if (Number.isFinite(parsed)) {
     const value = Math.max(0, Math.min(4, Math.floor(parsed)));
@@ -890,37 +741,12 @@ function requestedOrtLogSeverityLevel(): 0 | 1 | 2 | 3 | 4 {
   return 4;
 }
 
-function requestedOrtLogLevelName(): 'verbose' | 'info' | 'warning' | 'error' | 'fatal' {
-  const severity = requestedOrtLogSeverityLevel();
-  if (severity <= 0) return 'verbose';
-  if (severity === 1) return 'info';
-  if (severity === 2) return 'warning';
-  if (severity === 4) return 'fatal';
-  return 'error';
-}
-
 type OrtWebGpuProfileRecord = { programName: string; kernelName: string; kernelType: string; gpuMs: number };
 const ortWebGpuProfileRecords: OrtWebGpuProfileRecord[] = [];
 let ortWebGpuProfileEventCount = 0;
 let ortWebGpuProfileTotalMs = 0;
 let ortWebGpuProfilingConfigured = false;
 let previousOrtWebGpuProfilingOnData: ((data: unknown) => void) | undefined;
-
-function recordOrtWebGpuProfileData(data: unknown): void {
-  const rec = data as { programName?: unknown; kernelName?: unknown; kernelType?: unknown; startTime?: unknown; endTime?: unknown };
-  const start = Number(rec.startTime ?? 0);
-  const end = Number(rec.endTime ?? 0);
-  const gpuMs = Number.isFinite(start) && Number.isFinite(end) && end >= start ? (end - start) / 1e6 : 0;
-  ortWebGpuProfileEventCount += 1;
-  ortWebGpuProfileTotalMs += gpuMs;
-  ortWebGpuProfileRecords.push({
-    programName: String(rec.programName ?? 'unknown'),
-    kernelName: String(rec.kernelName ?? 'unknown'),
-    kernelType: String(rec.kernelType ?? 'unknown'),
-    gpuMs,
-  });
-  while (ortWebGpuProfileRecords.length > 4096) ortWebGpuProfileRecords.shift();
-}
 
 function webGpuProfilingSummary(
   enabled: boolean,
@@ -950,24 +776,19 @@ function webGpuProfilingSummary(
   };
 }
 
-function ortProfilingSummary(): OrtWebGpuProfilingSummary {
-  const byProgram = new Map<string, { count: number; gpuMs: number }>();
-  for (const record of ortWebGpuProfileRecords) {
-    const value = byProgram.get(record.programName) ?? { count: 0, gpuMs: 0 };
-    value.count += 1;
-    value.gpuMs += record.gpuMs;
-    byProgram.set(record.programName, value);
-  }
-  return webGpuProfilingSummary(
-    requestedOrtWebGpuProfiling(),
-    ortWebGpuProfileEventCount,
-    ortWebGpuProfileTotalMs,
-    Array.from(byProgram.entries())
-      .map(([programName, value]) => ({ programName, count: value.count, gpuMs: Number(value.gpuMs.toFixed(6)) }))
-      .sort((a, b) => b.gpuMs - a.gpuMs)
-      .slice(0, 12),
-  );
-}
+const WEBGPU_API_COUNTER_KEYS = [
+  'submitCount',
+  'submittedCommandBufferCount',
+  'mapAsyncCount',
+  'copyBufferToBufferCount',
+  'copyBufferToBufferBytes',
+  'createBufferCount',
+  'createBufferBytes',
+  'mapReadBufferCount',
+  'mapReadBufferBytes',
+  'computePipelineCreateCount',
+  'computePipelineCreateAsyncCount',
+] as const;
 
 const webGpuApiStats: OrtWebGpuApiInstrumentationSummary = {
   enabled: false,
@@ -1001,108 +822,22 @@ function wrapPrototypeMethod<T extends (...args: never[]) => unknown>(proto: unk
   }
 }
 
-function installWebGpuApiInstrumentation(): void {
-  webGpuApiStats.enabled = requestedOrtWebGpuApiInstrumentation();
-  if (!webGpuApiStats.enabled || webGpuApiInstrumentationInstalled) return;
-  webGpuApiInstrumentationInstalled = true;
-  const g = globalThis as unknown as Record<string, { prototype?: unknown } | undefined>;
-  const installed = [
-    wrapPrototypeMethod(
-      g.GPUQueue?.prototype,
-      'submit',
-      (original: (buffers: unknown[]) => void) =>
-        function submit(this: unknown, buffers: unknown[]) {
-          webGpuApiStats.submitCount += 1;
-          webGpuApiStats.submittedCommandBufferCount += Array.isArray(buffers) ? buffers.length : 0;
-          return original.call(this, buffers);
-        } as never,
-    ),
-    wrapPrototypeMethod(
-      g.GPUBuffer?.prototype,
-      'mapAsync',
-      (original: (mode: number, offset?: number, size?: number) => Promise<void>) =>
-        async function mapAsync(this: unknown, mode: number, offset?: number, size?: number) {
-          const started = tinyLeelaNowMs();
-          webGpuApiStats.mapAsyncCount += 1;
-          try {
-            return await original.call(this, mode, offset, size);
-          } finally {
-            webGpuApiStats.mapAsyncMsTotal += tinyLeelaNowMs() - started;
-          }
-        } as never,
-    ),
-    wrapPrototypeMethod(
-      g.GPUCommandEncoder?.prototype,
-      'copyBufferToBuffer',
-      (original: (...args: unknown[]) => void) =>
-        function copyBufferToBuffer(this: unknown, ...args: unknown[]) {
-          webGpuApiStats.copyBufferToBufferCount += 1;
-          const size = Number(args[4] ?? 0);
-          if (Number.isFinite(size) && size > 0) webGpuApiStats.copyBufferToBufferBytes += size;
-          return original.apply(this, args);
-        } as never,
-    ),
-    wrapPrototypeMethod(
-      g.GPUDevice?.prototype,
-      'createBuffer',
-      (original: (descriptor: { size?: number; usage?: number }) => unknown) =>
-        function createBuffer(this: unknown, descriptor: { size?: number; usage?: number }) {
-          const size = Number(descriptor?.size ?? 0);
-          const usage = Number(descriptor?.usage ?? 0);
-          webGpuApiStats.createBufferCount += 1;
-          if (Number.isFinite(size) && size > 0) webGpuApiStats.createBufferBytes += size;
-          const gpuBufferUsage = (globalThis as unknown as { GPUBufferUsage?: { MAP_READ?: number } }).GPUBufferUsage;
-          const mapRead = gpuBufferUsage?.MAP_READ ?? 1;
-          if ((usage & mapRead) !== 0) {
-            webGpuApiStats.mapReadBufferCount += 1;
-            if (Number.isFinite(size) && size > 0) webGpuApiStats.mapReadBufferBytes += size;
-          }
-          return original.call(this, descriptor);
-        } as never,
-    ),
-    wrapPrototypeMethod(
-      g.GPUDevice?.prototype,
-      'createComputePipeline',
-      (original: (descriptor: unknown) => unknown) =>
-        function createComputePipeline(this: unknown, descriptor: unknown) {
-          webGpuApiStats.computePipelineCreateCount += 1;
-          return original.call(this, descriptor);
-        } as never,
-    ),
-    wrapPrototypeMethod(
-      g.GPUDevice?.prototype,
-      'createComputePipelineAsync',
-      (original: (descriptor: unknown) => Promise<unknown>) =>
-        function createComputePipelineAsync(this: unknown, descriptor: unknown) {
-          webGpuApiStats.computePipelineCreateAsyncCount += 1;
-          return original.call(this, descriptor);
-        } as never,
-    ),
-  ];
-  webGpuApiStats.installed = installed.some(Boolean);
-  if (!webGpuApiStats.installed) webGpuApiStats.errors.push('No WebGPU prototypes were available to patch before ORT initialization');
-}
-
-function configureOrtWebGpuProfiling(webgpu: { profiling?: { mode?: 'off' | 'default'; ondata?: (data: unknown) => void } } | undefined): void {
-  if (!webgpu || !requestedOrtWebGpuProfiling()) return;
-  webgpu.profiling ??= {};
-  webgpu.profiling.mode = 'default';
-  if (!ortWebGpuProfilingConfigured) {
-    previousOrtWebGpuProfilingOnData = webgpu.profiling.ondata;
-    webgpu.profiling.ondata = (data: unknown) => {
-      recordOrtWebGpuProfileData(data);
-      previousOrtWebGpuProfilingOnData?.(data);
-    };
-    ortWebGpuProfilingConfigured = true;
-  }
-}
-
-function roundedApiStats(): OrtWebGpuApiInstrumentationSummary {
-  return { ...webGpuApiStats, errors: [...webGpuApiStats.errors], mapAsyncMsTotal: Number(webGpuApiStats.mapAsyncMsTotal.toFixed(6)) };
-}
-
 export function getOrtWebGpuDiagnosticsSnapshot(): OrtWebGpuDiagnosticsSnapshot {
-  return { profiling: ortProfilingSummary(), api: roundedApiStats() };
+  const byProgram = new Map<string, { count: number; gpuMs: number }>();
+  for (const record of ortWebGpuProfileRecords) {
+    const value = byProgram.get(record.programName) ?? { count: 0, gpuMs: 0 };
+    value.count += 1;
+    value.gpuMs += record.gpuMs;
+    byProgram.set(record.programName, value);
+  }
+  const topPrograms = Array.from(byProgram.entries())
+    .map(([programName, value]) => ({ programName, count: value.count, gpuMs: Number(value.gpuMs.toFixed(6)) }))
+    .sort((a, b) => b.gpuMs - a.gpuMs)
+    .slice(0, 12);
+  return {
+    profiling: webGpuProfilingSummary(requestedOrtWebGpuProfiling(), ortWebGpuProfileEventCount, ortWebGpuProfileTotalMs, topPrograms),
+    api: { ...webGpuApiStats, errors: [...webGpuApiStats.errors], mapAsyncMsTotal: Number(webGpuApiStats.mapAsyncMsTotal.toFixed(6)) },
+  };
 }
 
 export async function waitForOrtWebGpuDiagnostics(): Promise<void> {
@@ -1113,6 +848,11 @@ export async function waitForOrtWebGpuDiagnostics(): Promise<void> {
 
 export function subtractOrtWebGpuDiagnosticsSnapshot(after: OrtWebGpuDiagnosticsSnapshot, before: OrtWebGpuDiagnosticsSnapshot): OrtWebGpuDiagnosticsSnapshot {
   const beforePrograms = new Map(before.profiling.topPrograms?.map((entry) => [entry.programName, entry]));
+  const api: OrtWebGpuApiInstrumentationSummary = {
+    ...after.api,
+    mapAsyncMsTotal: Number((after.api.mapAsyncMsTotal - before.api.mapAsyncMsTotal).toFixed(6)),
+  };
+  for (const key of WEBGPU_API_COUNTER_KEYS) api[key] = after.api[key] - before.api[key];
   return {
     profiling: webGpuProfilingSummary(
       after.profiling.enabled,
@@ -1128,27 +868,13 @@ export function subtractOrtWebGpuDiagnosticsSnapshot(after: OrtWebGpuDiagnostics
         .sort((a, b) => b.gpuMs - a.gpuMs)
         .slice(0, 12),
     ),
-    api: {
-      ...after.api,
-      submitCount: after.api.submitCount - before.api.submitCount,
-      submittedCommandBufferCount: after.api.submittedCommandBufferCount - before.api.submittedCommandBufferCount,
-      mapAsyncCount: after.api.mapAsyncCount - before.api.mapAsyncCount,
-      mapAsyncMsTotal: Number((after.api.mapAsyncMsTotal - before.api.mapAsyncMsTotal).toFixed(6)),
-      copyBufferToBufferCount: after.api.copyBufferToBufferCount - before.api.copyBufferToBufferCount,
-      copyBufferToBufferBytes: after.api.copyBufferToBufferBytes - before.api.copyBufferToBufferBytes,
-      createBufferCount: after.api.createBufferCount - before.api.createBufferCount,
-      createBufferBytes: after.api.createBufferBytes - before.api.createBufferBytes,
-      mapReadBufferCount: after.api.mapReadBufferCount - before.api.mapReadBufferCount,
-      mapReadBufferBytes: after.api.mapReadBufferBytes - before.api.mapReadBufferBytes,
-      computePipelineCreateCount: after.api.computePipelineCreateCount - before.api.computePipelineCreateCount,
-      computePipelineCreateAsyncCount: after.api.computePipelineCreateAsyncCount - before.api.computePipelineCreateAsyncCount,
-    },
+    api,
   };
 }
 
-function configureOrtRuntime() {
-  const env = ort.env as unknown as { logLevel?: 'verbose' | 'info' | 'warning' | 'error' | 'fatal' };
-  env.logLevel = requestedOrtLogLevelName();
+function configureOrtRuntime(): { threads: number; logSeverityLevel: 0 | 1 | 2 | 3 | 4 } {
+  const logSeverityLevel = requestedOrtLogSeverityLevel();
+  (ort.env as unknown as { logLevel?: (typeof ORT_LOG_LEVELS)[number] }).logLevel = ORT_LOG_LEVELS[logSeverityLevel];
   const wasm = ort.env.wasm as unknown as {
     numThreads?: number;
     proxy?: boolean;
@@ -1156,33 +882,158 @@ function configureOrtRuntime() {
     wasmBinary?: ArrayBufferLike | Uint8Array;
     wasmPaths?: string | { wasm?: string; mjs?: string };
   };
-  configureNodeOrtWasmBinary(wasm);
   const isBrowserMainThread = typeof document !== 'undefined';
-  const isNode = typeof document === 'undefined' && !!globalThis.process?.versions?.node;
-  const isBrowserRuntime = !isNode && typeof location !== 'undefined';
-  configureOrtWasmArtifact(wasm, isBrowserRuntime);
+  const isNode = !isBrowserMainThread && runningUnderNode();
+  // Node resolves `onnxruntime-web/webgpu` to its inlined asyncify glue; feed the matching binary.
+  if (!isBrowserMainThread && !wasm.wasmBinary && forcedOrtWasmArtifact.variant === 'bundled') {
+    const proc = globalThis.process as unknown as { cwd?: () => string; getBuiltinModule?: (name: string) => unknown } | undefined;
+    const fs = (proc?.getBuiltinModule?.('node:fs') ?? proc?.getBuiltinModule?.('fs')) as
+      | { existsSync?: (path: string) => boolean; readFileSync?: (path: string) => Uint8Array }
+      | undefined;
+    const wasmPath = proc?.cwd ? `${proc.cwd()}/node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.wasm` : '';
+    if (wasmPath && fs?.existsSync?.(wasmPath) && fs.readFileSync) {
+      wasm.wasmBinary = fs.readFileSync(wasmPath);
+      wasm.wasmPaths = { wasm: wasmPath };
+    }
+  }
+  if (forcedOrtWasmArtifact.variant === 'relaxed') {
+    if (!supportsWasmRelaxedSimdIntegerDot()) {
+      throw new Error('requested relaxed ORT WASM artifact requires i32x4.relaxed_dot_i8x16_i7x16_add support');
+    }
+    wasm.simd = 'relaxed';
+  } else {
+    wasm.simd = 'fixed';
+  }
+  if (forcedOrtWasmArtifact.variant !== 'bundled') {
+    wasm.wasmBinary = undefined;
+    wasm.wasmPaths = { mjs: forcedOrtWasmArtifact.mjsUrl!, wasm: forcedOrtWasmArtifact.wasmUrl! };
+  } else if (!isNode && typeof location !== 'undefined') {
+    // Production builds hand ORT explicit staged glue + wasm URLs so helper workers
+    // re-import the exact pthread bootstrap; dev only pins the asyncify .wasm binary.
+    wasm.wasmPaths =
+      browserParam('ortWasmPath') ??
+      (IS_PROD ? resolveOrtPthreadRuntimeUrls('/ort/', location.href, ortRuntimeArtifactKindForCurrentThread()) : { wasm: `/ort/${ORT_PTHREAD_WASM_FILE}` });
+  }
   const threads = requestedOrtWasmThreads(isBrowserMainThread, isNode);
   if (threads > 0) wasm.numThreads = threads;
-  if (isBrowserMainThread) {
-    // Threaded ORT WASM requires cross-origin isolation / SharedArrayBuffer.
-    // Keep proxy disabled; users can opt into pthread workers with ?ortThreads=auto or ?ortThreads=N.
-    wasm.proxy = false;
+  // Keep proxy disabled on the main thread; users opt into pthread workers via ?ortThreads.
+  if (isBrowserMainThread) wasm.proxy = false;
+  webGpuApiStats.enabled = requestedOrtWebGpuApiInstrumentation();
+  if (webGpuApiStats.enabled && !webGpuApiInstrumentationInstalled) {
+    webGpuApiInstrumentationInstalled = true;
+    const g = globalThis as unknown as Record<string, { prototype?: unknown } | undefined>;
+    const installed = [
+      wrapPrototypeMethod(
+        g.GPUQueue?.prototype,
+        'submit',
+        (original: (buffers: unknown[]) => void) =>
+          function submit(this: unknown, buffers: unknown[]) {
+            webGpuApiStats.submitCount += 1;
+            webGpuApiStats.submittedCommandBufferCount += Array.isArray(buffers) ? buffers.length : 0;
+            return original.call(this, buffers);
+          } as never,
+      ),
+      wrapPrototypeMethod(
+        g.GPUBuffer?.prototype,
+        'mapAsync',
+        (original: (mode: number, offset?: number, size?: number) => Promise<void>) =>
+          async function mapAsync(this: unknown, mode: number, offset?: number, size?: number) {
+            const started = tinyLeelaNowMs();
+            webGpuApiStats.mapAsyncCount += 1;
+            try {
+              return await original.call(this, mode, offset, size);
+            } finally {
+              webGpuApiStats.mapAsyncMsTotal += tinyLeelaNowMs() - started;
+            }
+          } as never,
+      ),
+      wrapPrototypeMethod(
+        g.GPUCommandEncoder?.prototype,
+        'copyBufferToBuffer',
+        (original: (...args: unknown[]) => void) =>
+          function copyBufferToBuffer(this: unknown, ...args: unknown[]) {
+            webGpuApiStats.copyBufferToBufferCount += 1;
+            const size = Number(args[4] ?? 0);
+            if (Number.isFinite(size) && size > 0) webGpuApiStats.copyBufferToBufferBytes += size;
+            return original.apply(this, args);
+          } as never,
+      ),
+      wrapPrototypeMethod(
+        g.GPUDevice?.prototype,
+        'createBuffer',
+        (original: (descriptor: { size?: number; usage?: number }) => unknown) =>
+          function createBuffer(this: unknown, descriptor: { size?: number; usage?: number }) {
+            const size = Number(descriptor?.size ?? 0);
+            const usage = Number(descriptor?.usage ?? 0);
+            webGpuApiStats.createBufferCount += 1;
+            if (Number.isFinite(size) && size > 0) webGpuApiStats.createBufferBytes += size;
+            const mapRead = (globalThis as unknown as { GPUBufferUsage?: { MAP_READ?: number } }).GPUBufferUsage?.MAP_READ ?? 1;
+            if ((usage & mapRead) !== 0) {
+              webGpuApiStats.mapReadBufferCount += 1;
+              if (Number.isFinite(size) && size > 0) webGpuApiStats.mapReadBufferBytes += size;
+            }
+            return original.call(this, descriptor);
+          } as never,
+      ),
+      wrapPrototypeMethod(
+        g.GPUDevice?.prototype,
+        'createComputePipeline',
+        (original: (descriptor: unknown) => unknown) =>
+          function createComputePipeline(this: unknown, descriptor: unknown) {
+            webGpuApiStats.computePipelineCreateCount += 1;
+            return original.call(this, descriptor);
+          } as never,
+      ),
+      wrapPrototypeMethod(
+        g.GPUDevice?.prototype,
+        'createComputePipelineAsync',
+        (original: (descriptor: unknown) => Promise<unknown>) =>
+          function createComputePipelineAsync(this: unknown, descriptor: unknown) {
+            webGpuApiStats.computePipelineCreateAsyncCount += 1;
+            return original.call(this, descriptor);
+          } as never,
+      ),
+    ];
+    webGpuApiStats.installed = installed.some(Boolean);
+    if (!webGpuApiStats.installed) webGpuApiStats.errors.push('No WebGPU prototypes were available to patch before ORT initialization');
   }
-  installWebGpuApiInstrumentation();
   const webgpu = ort.env.webgpu as unknown as
     | { powerPreference?: 'low-power' | 'high-performance'; profiling?: { mode?: 'off' | 'default'; ondata?: (data: unknown) => void } }
     | undefined;
   if (webgpu && requestedOrtExecutionProvider() !== 'wasm') webgpu.powerPreference = 'high-performance';
-  configureOrtWebGpuProfiling(webgpu);
+  if (webgpu && requestedOrtWebGpuProfiling()) {
+    webgpu.profiling ??= {};
+    webgpu.profiling.mode = 'default';
+    if (!ortWebGpuProfilingConfigured) {
+      previousOrtWebGpuProfilingOnData = webgpu.profiling.ondata;
+      webgpu.profiling.ondata = (data: unknown) => {
+        const rec = data as { programName?: unknown; kernelName?: unknown; kernelType?: unknown; startTime?: unknown; endTime?: unknown };
+        const start = Number(rec.startTime ?? 0);
+        const end = Number(rec.endTime ?? 0);
+        const gpuMs = Number.isFinite(start) && Number.isFinite(end) && end >= start ? (end - start) / 1e6 : 0;
+        ortWebGpuProfileEventCount += 1;
+        ortWebGpuProfileTotalMs += gpuMs;
+        ortWebGpuProfileRecords.push({
+          programName: String(rec.programName ?? 'unknown'),
+          kernelName: String(rec.kernelName ?? 'unknown'),
+          kernelType: String(rec.kernelType ?? 'unknown'),
+          gpuMs,
+        });
+        while (ortWebGpuProfileRecords.length > 4096) ortWebGpuProfileRecords.shift();
+        previousOrtWebGpuProfilingOnData?.(data);
+      };
+      ortWebGpuProfilingConfigured = true;
+    }
+  }
+  return { threads, logSeverityLevel };
 }
 
 export function sessionOptions(executionProviders = resolvedOrtExecutionProviders()): ort.InferenceSession.SessionOptions {
-  configureOrtRuntime();
-  const threads = requestedOrtWasmThreads(typeof document !== 'undefined', typeof document === 'undefined' && !!globalThis.process?.versions?.node);
+  const { threads, logSeverityLevel } = configureOrtRuntime();
   const opts: ort.InferenceSession.SessionOptions = {
     graphOptimizationLevel: requestedOrtGraphOptimizationLevel(),
     executionProviders,
-    logSeverityLevel: requestedOrtLogSeverityLevel(),
+    logSeverityLevel,
   };
   const preferredOutputLocation = requestedOrtPreferredOutputLocation();
   if (preferredOutputLocation && executionProviders.includes('webgpu')) opts.preferredOutputLocation = preferredOutputLocation;
@@ -1203,13 +1054,11 @@ function recordSessionAttempt(providers: string[], ok: boolean, ms: number, erro
 }
 
 function logOrtSessionReady(providers: string[], ms: number, note?: string) {
-  const requested = requestedOrtExecutionProvider();
-  const usesWebGpuProvider = providers.includes('webgpu');
-  const message = usesWebGpuProvider
+  const message = providers.includes('webgpu')
     ? 'Centipawn ORT: session ready with WebGPU provider requested/accepted.'
     : 'Centipawn ORT: session ready with WASM provider.';
   console.info(message, {
-    requestedEp: requested,
+    requestedEp: requestedOrtExecutionProvider(),
     sessionProviders: providers,
     webgpuAvailable: webgpuAvailable(),
     describe: describeOrtBackendConfig(),
@@ -1228,58 +1077,19 @@ async function requestOrtWebGpuAdapter(): Promise<unknown> {
   return webgpuNavigator()?.requestAdapter?.({ powerPreference: 'high-performance' });
 }
 
-function summarizeGpuAdapter(adapter: unknown): string {
-  if (!adapter || typeof adapter !== 'object') return String(adapter);
-  const rec = adapter as Record<string, unknown>;
-  const parts: string[] = [];
-  for (const key of ['name', 'vendor', 'architecture', 'device', 'description']) {
-    if (typeof rec[key] === 'string' && rec[key]) parts.push(`${key}=${rec[key]}`);
-  }
-  if (rec.info && typeof rec.info === 'object') {
-    const info = rec.info as Record<string, unknown>;
-    for (const key of ['vendor', 'architecture', 'device', 'description']) {
-      if (typeof info[key] === 'string' && info[key]) parts.push(`${key}=${info[key]}`);
-    }
-  }
-  return parts.join(' ') || Object.prototype.toString.call(adapter);
-}
-
-function stringArrayFromSetLike(value: unknown): string[] | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  try {
-    const iterable = value as Iterable<unknown>;
-    const items = Array.from(iterable, (feature) => String(feature))
-      .filter(Boolean)
-      .sort();
-    return items.length ? items : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function selectedGpuLimits(value: unknown): Record<string, number> | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const rec = value as Record<string, unknown>;
-  const keys = [
-    'maxBindGroups',
-    'maxBindingsPerBindGroup',
-    'maxBufferSize',
-    'maxComputeInvocationsPerWorkgroup',
-    'maxComputeWorkgroupSizeX',
-    'maxComputeWorkgroupSizeY',
-    'maxComputeWorkgroupSizeZ',
-    'maxComputeWorkgroupsPerDimension',
-    'maxStorageBufferBindingSize',
-    'maxStorageBuffersPerShaderStage',
-    'maxUniformBufferBindingSize',
-  ];
-  const limits: Record<string, number> = {};
-  for (const key of keys) {
-    const raw = rec[key];
-    if (typeof raw === 'number' && Number.isFinite(raw)) limits[key] = raw;
-  }
-  return Object.keys(limits).length ? limits : undefined;
-}
+const GPU_LIMIT_KEYS = [
+  'maxBindGroups',
+  'maxBindingsPerBindGroup',
+  'maxBufferSize',
+  'maxComputeInvocationsPerWorkgroup',
+  'maxComputeWorkgroupSizeX',
+  'maxComputeWorkgroupSizeY',
+  'maxComputeWorkgroupSizeZ',
+  'maxComputeWorkgroupsPerDimension',
+  'maxStorageBufferBindingSize',
+  'maxStorageBuffersPerShaderStage',
+  'maxUniformBufferBindingSize',
+];
 
 export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boolean } = {}): Promise<OrtRuntimeDiagnostics> {
   configureOrtRuntime();
@@ -1325,42 +1135,72 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
     ...(lastOrtRuntimeFallback ? { fallback: { ...lastOrtRuntimeFallback } } : {}),
     webgpuDiagnostics: getOrtWebGpuDiagnosticsSnapshot(),
   };
-  if (options.probeAdapter && webgpuAvailable()) {
-    try {
-      const adapter = await webgpuNavigator()?.requestAdapter?.({ powerPreference: 'high-performance' });
-      const rec = adapter as Record<string, unknown> | null | undefined;
-      let info: unknown = rec?.info;
-      const requestAdapterInfo = rec?.requestAdapterInfo;
-      if (!info && typeof requestAdapterInfo === 'function') {
-        try {
-          info = await (requestAdapterInfo as () => Promise<unknown>)();
-        } catch {
-          /* optional API */
+  if (!options.probeAdapter || !webgpuAvailable()) return diag;
+  try {
+    const adapter = await webgpuNavigator()?.requestAdapter?.({ powerPreference: 'high-performance' });
+    const rec = adapter && typeof adapter === 'object' ? (adapter as Record<string, unknown>) : undefined;
+    let info: unknown = rec?.info;
+    if (!info && typeof rec?.requestAdapterInfo === 'function') {
+      try {
+        info = await (rec.requestAdapterInfo as () => Promise<unknown>)();
+      } catch {
+        /* optional API */
+      }
+    }
+    let features: string[] | undefined;
+    if (rec?.features && typeof rec.features === 'object') {
+      try {
+        const items = Array.from(rec.features as Iterable<unknown>, (feature) => String(feature))
+          .filter(Boolean)
+          .sort();
+        if (items.length) features = items;
+      } catch {
+        /* optional API */
+      }
+    }
+    let limits: Record<string, number> | undefined;
+    if (rec?.limits && typeof rec.limits === 'object') {
+      const limitRec = rec.limits as Record<string, unknown>;
+      const collected: Record<string, number> = {};
+      for (const key of GPU_LIMIT_KEYS) {
+        const raw = limitRec[key];
+        if (typeof raw === 'number' && Number.isFinite(raw)) collected[key] = raw;
+      }
+      if (Object.keys(collected).length) limits = collected;
+    }
+    probedWebGpuAdapterUsable = !!adapter;
+    probedWebGpuShaderF16 = gpuAdapterShaderF16(adapter);
+    diag.resolvedExecutionProviders = resolvedOrtExecutionProviders();
+    diag.describe = describeOrtBackendConfig();
+    if (!adapter) {
+      diag.adapter = { ok: false, error: 'navigator.gpu.requestAdapter returned null' };
+      return diag;
+    }
+    const parts: string[] = [];
+    if (rec) {
+      for (const key of ['name', 'vendor', 'architecture', 'device', 'description']) {
+        if (typeof rec[key] === 'string' && rec[key]) parts.push(`${key}=${rec[key]}`);
+      }
+      if (rec.info && typeof rec.info === 'object') {
+        const infoRec = rec.info as Record<string, unknown>;
+        for (const key of ['vendor', 'architecture', 'device', 'description']) {
+          if (typeof infoRec[key] === 'string' && infoRec[key]) parts.push(`${key}=${infoRec[key]}`);
         }
       }
-      const adapterRec = adapter as Record<string, unknown> | null | undefined;
-      const features = stringArrayFromSetLike(adapterRec?.features);
-      const limits = selectedGpuLimits(adapterRec?.limits);
-      probedWebGpuAdapterUsable = !!adapter;
-      probedWebGpuShaderF16 = gpuAdapterShaderF16(adapter);
-      diag.resolvedExecutionProviders = resolvedOrtExecutionProviders();
-      diag.describe = describeOrtBackendConfig();
-      diag.adapter = adapter
-        ? {
-            ok: true,
-            summary: summarizeGpuAdapter(adapter),
-            ...(info ? { info } : {}),
-            ...(features ? { features } : {}),
-            ...(probedWebGpuShaderF16 !== null ? { shaderF16: probedWebGpuShaderF16 } : {}),
-            ...(limits ? { limits } : {}),
-          }
-        : { ok: false, error: 'navigator.gpu.requestAdapter returned null' };
-    } catch (err) {
-      probedWebGpuAdapterUsable = false;
-      diag.resolvedExecutionProviders = resolvedOrtExecutionProviders();
-      diag.describe = describeOrtBackendConfig();
-      diag.adapter = { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
+    diag.adapter = {
+      ok: true,
+      summary: rec ? parts.join(' ') || Object.prototype.toString.call(adapter) : String(adapter),
+      ...(info ? { info } : {}),
+      ...(features ? { features } : {}),
+      ...(probedWebGpuShaderF16 !== null ? { shaderF16: probedWebGpuShaderF16 } : {}),
+      ...(limits ? { limits } : {}),
+    };
+  } catch (err) {
+    probedWebGpuAdapterUsable = false;
+    diag.resolvedExecutionProviders = resolvedOrtExecutionProviders();
+    diag.describe = describeOrtBackendConfig();
+    diag.adapter = { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
   return diag;
 }
@@ -1382,9 +1222,7 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
  * silently degrading.
  */
 async function ensureWebGpuAdapterProbed(requested = requestedOrtExecutionProvider()): Promise<void> {
-  if (probedWebGpuAdapterUsable !== null) return;
-  if (!webgpuAvailable()) return;
-  if (requested === 'wasm' || requested === 'webgpu') return;
+  if (probedWebGpuAdapterUsable !== null || !webgpuAvailable() || requested === 'wasm' || requested === 'webgpu') return;
   try {
     const adapter = await requestOrtWebGpuAdapter();
     probedWebGpuAdapterUsable = !!adapter;
