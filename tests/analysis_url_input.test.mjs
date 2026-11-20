@@ -58,7 +58,7 @@ test('invalid links preserve the saved tree and attach their visible problem to 
 test('linked PGN rejection and backup failure remain visible after fallback status rendering', () => {
   const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
   const restore = source.slice(source.indexOf('function restoreAnalysisWorkspace()'), source.indexOf('let searcher:'));
-  const notice = source.slice(source.indexOf('let pgnImportNotice:'), source.indexOf('/** Labelled run state'));
+  const notice = source.slice(source.indexOf('let pgnImportNotice:'), source.indexOf('function renderAnalysisStatus('));
   for (const pgn of ['not-a-game', '1. d4 d5 *']) {
     const saved = { tree: new GameTree(), headers: { Event: 'Saved' }, result: '*' };
     saved.tree.addUci('e2e4');

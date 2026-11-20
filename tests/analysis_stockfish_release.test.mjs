@@ -66,7 +66,7 @@ async function run(rows, { reviewing = false } = {}) {
   const mark = disposed.length;
   new Function(
     ...Object.keys(dependencies),
-    `${extracted('../src/lc0/analysisBrowser.ts', 'function disposeUnusedEngines(', '// Default: one best-move arrow')}\ndisposeUnusedEngines();`,
+    `${extracted('../src/lc0/analysisBrowser.ts', 'function disposeUnusedEngines(', 'function bestShapes(')}\ndisposeUnusedEngines();`,
   )(...Object.values(dependencies));
   const released = disposed.slice(mark);
 

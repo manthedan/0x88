@@ -162,7 +162,7 @@ test('Analysis retires Small only after its last row is removed (eval bar is cac
     compile(
       `
     let mainEvaluator={dispose:async()=>events.push('main')},searcher={};
-    ${extract(text, 'function disposeUnusedEngines(', '// Default: one best-move arrow')}
+    ${extract(text, 'function disposeUnusedEngines(', 'function bestShapes(')}
     disposeUnusedEngines();
   `,
       {

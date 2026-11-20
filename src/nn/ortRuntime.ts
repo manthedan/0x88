@@ -454,7 +454,6 @@ function normalizeEp(value: string | null | undefined): OrtExecutionProviderPref
   return 'wasm';
 }
 
-/** The EP requested by the URL/env of this document or worker, ignoring per-call overrides. */
 function ambientOrtExecutionProviderParam(): string | null | undefined {
   return (
     browserParam('ortEp') ?? browserParam('ep') ?? browserParam('executionProviders') ?? envValue('TINY_LEELA_ORT_EP') ?? envValue('ORT_EXECUTION_PROVIDERS')
@@ -512,7 +511,6 @@ function selectOrtExecutionProviders(requested: OrtExecutionProviderPreference, 
   return ['wasm'];
 }
 
-/** True when this document/worker was started with an explicit wasm-only EP pin. */
 function explicitWasmOnlyOrtEpPin(): boolean {
   const raw = ambientOrtExecutionProviderParam();
   return raw !== null && raw !== undefined && String(raw).trim() !== '' && normalizeEp(raw) === 'wasm';
@@ -835,7 +833,6 @@ export function subtractOrtWebGpuDiagnosticsSnapshot(after: OrtWebGpuDiagnostics
     profiling: webGpuProfilingSummary(
       after.profiling.enabled,
       after.profiling.eventCount - before.profiling.eventCount,
-      // Null cumulative totals have no events, so contribute nothing to a real-event delta.
       (after.profiling.kernelGpuMsTotal ?? 0) - (before.profiling.kernelGpuMsTotal ?? 0),
       (after.profiling.topPrograms ?? [])
         .map((entry) => {
@@ -1191,8 +1188,6 @@ async function ensureWebGpuAdapterProbed(requested = requestedOrtExecutionProvid
     probedWebGpuAdapterUsable = !!adapter;
     probedWebGpuShaderF16 = gpuAdapterShaderF16(adapter);
     if (probedWebGpuShaderF16 === false) console.info('Centipawn ORT: WebGPU adapter lacks shader-f16; ORT sessions run on WASM.');
-    // gpuAdapterVendor never throws: unreadable metadata means "vendor unknown",
-    // not "adapter unusable".
     if (adapter) probedWebGpuAdapterVendor = (await gpuAdapterVendor(adapter)) ?? '';
   } catch {
     probedWebGpuAdapterUsable = false;
@@ -1415,7 +1410,6 @@ async function createOrtSessionFromSource(takeModel: () => OrtModelInput, option
         discardDequantFold(lastMessage);
         console.warn(`Centipawn: ORT session failed on the dequantize-folded model; retrying with the original bytes. ${lastMessage}`);
       } else {
-        // A separate WASM model is loaded as-is (unfolded), so the fold summary no longer applies.
         if (typeof next.input === 'function') discardDequantFold(lastMessage);
         console.warn(`Centipawn: ORT WebGPU session failed; falling back to WASM. ${lastMessage}`);
       }

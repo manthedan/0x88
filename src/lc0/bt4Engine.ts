@@ -1,5 +1,3 @@
-import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
-
 import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
 import { rankFlipColorSwapBoard, rankFlipMove } from '../chess/boardNormalization.ts';
 import { moveFromUci, moveToUci } from '../chess/moveCodec.ts';
@@ -12,6 +10,7 @@ import {
   requestedOrtExecutionProvider,
   requestedOrtRuntimeDiagnosticOptions,
 } from '../nn/ortRuntime.ts';
+import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
 import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
@@ -302,7 +301,6 @@ export function bigNetOptionState(config: BigNetConfig, backend?: string): { dis
   return { disabled: false, suffix: bigNetCpuWarning(config, backend) ? ' (CPU fallback — slow)' : '' };
 }
 
-/** A memory caution string when the device reports limited RAM, else null. */
 export function bigNetMemoryCaution(config: BigNetConfig = BT4_NET): string | null {
   const mem = (navigator as unknown as { deviceMemory?: number }).deviceMemory;
   if (typeof mem === 'number' && mem > 0 && mem <= 4) {
@@ -421,7 +419,6 @@ export class Bt4WorkerSearcher {
       try {
         await closing;
       } finally {
-        // Report this attempt's cleanup failure, but allow a later explicit retry.
         if (this.closing === closing) this.closing = null;
       }
     }
@@ -549,7 +546,6 @@ export class Bt4WorkerSearcher {
     try {
       await this.init({ evalCacheEntries });
     } catch (error) {
-      // An owner that stopped may retire a net still loading (Arena Stop): that is a cancellation.
       if (signal?.aborted) return cancelled;
       throw error;
     }
@@ -634,7 +630,6 @@ export class Bt4WorkerSearcher {
   /** Retire synchronously; release the detached worker's session/device before termination. */
   dispose(): Promise<void> {
     this.lifecycleGeneration++;
-    // Terminates a cold-load prefetch worker (Stop, seat swap, page hide).
     this.prefetchAbort?.abort();
     this.prefetchAbort = null;
     const worker = this.worker;

@@ -509,9 +509,7 @@ function abortArenaPickerConsent(): void {
   arenaPickerConsentAbort = null;
 }
 async function bigNetFor(key: 'bt4' | 't3', signal: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher }> {
-  // Storage can evict a model that was cached at Start (loading Lc0 Small into a
-  // full cache is enough), so a load not covered by a download approval asks again.
-  // Ask unless the warm session will be reused; preparePhoneBigNet retires one configured differently.
+  // Cache Storage can evict a model between the consent check and the load.
   const evalCacheEntries = arenaCacheEntries();
   const notApproved = () => new Error(`Lc0 ${BIG_NETS[key].name} is no longer cached and its download was not approved.`);
   let cacheOnly = false;
@@ -577,9 +575,6 @@ function initialPerformanceDial(): PerformanceDial {
   }
 }
 
-// Arena turn-taking: the engine on move leases the full CPU budget; the idle
-// side holds zero threads. Threaded SF play stays opt-in via the threads cap
-// input (0 = auto/full broker grant, default 1 preserves rating-lane parity).
 const resourceBroker = new EngineResourceBroker({ policy: 'exclusive', dial: initialPerformanceDial() });
 resourceBroker.register('sf-lite', { ...engineResourceProfile('sf') });
 resourceBroker.register('sf-full', { ...engineResourceProfile('sf') });

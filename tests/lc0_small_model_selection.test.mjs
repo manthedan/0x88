@@ -414,7 +414,7 @@ function playSmallNetPaths(engines, failures, option = { id: 'lc0-small', label:
   };
   const code = `${slice('function playModelRequest(', 'interface PlayEngineOption')}
     ${slice('async function ctxRequestEngineMove(', 'async function ctxVerifySelectedEngineReady(')}
-    ${slice('async function ctxVerifySelectedEngineReady(', '// ---')}
+    ${slice('async function ctxVerifySelectedEngineReady(', 'const THINKING_SHOW_DELAY_MS')}
     return { request: playModelRequest, move: ctxRequestEngineMove, ready: ctxVerifySelectedEngineReady };`;
   const deps = {
     engines,

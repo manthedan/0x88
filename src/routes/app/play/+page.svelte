@@ -224,7 +224,6 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
   }
   .visually-hidden{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0}
 
-  /* ── Board column: opponent strip / board / your strip ── */
   .board-panel{display:flex; flex-direction:column; gap:4px; min-width:0; padding:8px}
   .board-shell{position:relative}
   :global(.play-workspace #ground coords){font-size:12px; font-weight:700; opacity:1}
@@ -265,7 +264,6 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
   .strip-button svg, .game-actions svg, .record-actions svg, .move-nav svg, .cta-link svg{width:16px; height:16px; flex:0 0 16px; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round}
   @keyframes play-spin{to{transform:rotate(360deg)}}
 
-  /* ── Sidebar: one column, two states (setup vs game) driven by data-phase ── */
   .play-workspace .play-sidebar{
     position:static; display:flex; flex-direction:column; min-width:0;
     /* Short tablet boards must not clip setup, confirmations or the game-over actions. */
@@ -292,7 +290,6 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
   :global(#dlProgress progress){width:100%; height:8px; accent-color:var(--accent)}
   :global(#dlProgress .dl-label){margin-top:2px; font-size:12px; color:var(--muted)}
 
-  /* Setup pane */
   .setup-pane{display:flex; flex-direction:column; gap:10px; padding:14px; overflow:auto; overscroll-behavior:contain}
   .play-sidebar .pane-heading{margin:0; font:650 13px/1.3 var(--sans); letter-spacing:0; text-transform:none; color:var(--ink)}
   .field{margin-top:0}
@@ -354,7 +351,6 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
     border:2px solid var(--accent); cursor:pointer; box-shadow:0 2px 6px rgba(80,55,25,.22);
   }
 
-  /* Game pane pieces */
   .opponent-summary{display:flex; align-items:center; gap:9px; min-height:48px; padding:6px 10px 6px 14px; border-bottom:1px solid var(--rule)}
   .summary-copy{flex:1 1 auto; min-width:0; color:var(--muted); font-size:12px}
   .ghost-button{min-height:44px; padding:0 11px; border-radius:7px; background:transparent; color:var(--text); font:600 13px var(--sans)}
@@ -424,7 +420,6 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
   .record-actions :global([data-copied=true]){color:var(--accent-soft-text)}
   .record-actions :global(a[aria-disabled=true]){opacity:.5; pointer-events:none}
 
-  /* Phase visibility */
   .play-workspace:global([data-phase=setup]) :is(.opponent-summary, .moves-block, .nav-row, .record-actions, #takeback, #resign){display:none}
   .play-workspace:global([data-phase=setup]) .setup-pane{flex:0 1 auto; min-height:0}
   .play-workspace:global([data-phase=setup]) .game-actions{grid-template-columns:1fr; padding:0 14px 14px; border-top:0}

@@ -207,7 +207,7 @@ test('once a document has loaded the CPU-only ORT runtime, a later auto request 
     const requestedOrtExecutionProvider = () => ep;
     const webgpuUsableForProviderSelection = () => true;
     const ortRuntimeArtifactKindForCurrentThread = () => lockedOrtRuntimeArtifactKind ?? (ep === 'wasm' ? 'wasm' : 'asyncify');
-    ${slice('export function resolvedOrtExecutionProviders(', '/** True when this document')}
+    ${slice('export function resolvedOrtExecutionProviders(', 'function explicitWasmOnlyOrtEpPin(')}
     ${slice('function lockOrtRuntimeArtifactKind(', 'let lastOrtExecutionProviders')}
     return (next) => {
       ep = next;

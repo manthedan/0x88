@@ -368,9 +368,7 @@ function sameOriginPathParam(names: string[], fallback: string, allowedPrefixes:
     try {
       const url = new URL(raw, location.origin);
       if (url.origin === location.origin && allowedPrefixes.some((prefix) => url.pathname.startsWith(prefix))) return `${url.pathname}${url.search}${url.hash}`;
-    } catch {
-      // Ignore malformed experimental overrides and use the bundled default below.
-    }
+    } catch {}
     console.warn(`[lc0-analysis] ignoring unsafe ${name} override`, raw);
   }
   return fallback;
@@ -461,7 +459,6 @@ function updatePendingAnalysisInput(event: PendingInputEvent): void {
 
 function saveAnalysisWorkspace(): void {
   try {
-    // Validate even an apparently empty tree before deciding to remove its save.
     const snapshot = serializeTree(tree);
     workspaceAutosave?.schedule(
       tree.root.children.length || tree.root.fen !== START_FEN || tree.root.comment || Object.keys(workspaceHeaders).length
@@ -490,7 +487,6 @@ function restoreAnalysisWorkspace(): void {
   el('restorePreviousAnalysis').hidden = !hasPreviousAnalysis();
   if (hasExplicitWorkspaceInput(location.search) || handoffPgn) {
     try {
-      // Decode before touching either saved slot. URL FEN takes precedence over PGN/handoff.
       const linkedFen = analysisUrlFen(params.get('fen'));
       if (linkedFen.error) throw new Error(linkedFen.error);
       const rawPgn = params.get('pgn') ?? handoffPgn;
@@ -541,7 +537,6 @@ function restoreAnalysisWorkspace(): void {
     el('message').textContent = message;
     renderPgnImportNotice(message);
   }
-  // Review export keeps the restored game's headers; the signature still guards its result tag.
   reviewMetadata.set(tree, { tags: workspaceHeaders, result: workspaceResult, signature: reviewSignature() });
   el('analysisRestoreNotice').hidden = false;
   if (linkedInputError) renderPgnImportNotice(linkedInputError);
@@ -591,7 +586,6 @@ let analysisTransitionLog: readonly AnalysisTransitionEntry[] = Object.freeze([]
 let nextAnalysisOperationId = 0;
 const analysisOperations = new Map<number, AbortController>();
 const analysisTimers = new Map<number, ReturnType<typeof setTimeout>>();
-// Observational only; not an admission guard or a cache-key component.
 let analysisBackendGeneration = 0;
 
 let ground: Ground | null = null;
@@ -741,7 +735,6 @@ let lastImportColor = '';
 let pgnTaskBusy = false;
 let explorerMaia: { fen: string; policies: Map<string, number>[] } | null = null;
 const bookCache = new Map<string, OpeningMoveStat[]>();
-// Distinct brush for the opening-book most-played move (not LC0 green / SF blue).
 const BOOK_BRUSH = 'yellow';
 const BOOK_SWATCH = '#e68f00';
 
@@ -758,16 +751,9 @@ function currentBookStats(): OpeningMoveStat[] {
   return stats;
 }
 
-// LC0 analysis runs in a dedicated search worker so navigation never blocks the
-// UI; a new position cancels the in-flight worker search by id.
 let searchWorker: Worker | null = null;
 let workerReady = false;
 let workerBackend = '';
-/**
- * Model the loaded ONNX backend runs: MODEL_URL, or its split-K rewrite on
- * Apple WebGPU. Part of the Lc0 result-cache key so results from the two
- * models are never mixed. Empty until a backend is ready.
- */
 let lc0ServedModelUrl = '';
 let workerRuntime: Lc0AnalysisRuntime | '' = '';
 let workerSeq = 0;
@@ -776,9 +762,7 @@ const workerPending = new Map<
   { resolve: (value: unknown) => void; reject: (error: Error) => void; onProgress?: (progress: WorkerSearchProgress) => void }
 >();
 let activeWorkerSearchId: number | null = null;
-// Hybrid workers initialize lazily inside their first search and cannot act on
-// a cancel until then. Track warmth per worker lifetime, not per search, so a
-// cancel on an initialized worker uses the normal cancel message.
+// A worker loading its first hybrid pack cannot act on a cancel message.
 let workerSearchWarm = false;
 
 interface WorkerSearchResult {
@@ -905,8 +889,7 @@ function resetSearchWorker(reason: string | Error): void {
   const retired = searchWorker;
   searchWorker = null;
   if (retired) {
-    if (reason instanceof Error)
-      terminateEngineWorker(retired); // A broken transport cannot acknowledge release.
+    if (reason instanceof Error) terminateEngineWorker(retired);
     else trackEngineRetirement(disposeOrtWorker(retired));
   }
   workerReady = false;
@@ -1035,7 +1018,6 @@ function renderAnalysisSearchProgress(): void {
   renderStopProgress(items);
 }
 
-/** Live progress on the Stop button, which occupies Analyze's slot while a search runs. */
 function renderStopProgress(items: SearchProgressSnapshot[]): void {
   const stop = maybeEl('stop');
   const label = maybeEl('stopProgress');
@@ -1059,7 +1041,6 @@ function progressKey(runId: number, label: string): string {
 
 function canShowAnalysisSearchProgress(runId: number, fen: string): boolean {
   const { execution, revision } = analysisRunState;
-  // Settings can replace the cards before the previous search releases the engines.
   return (
     !hiddenTab.hidden &&
     !mountAbort.signal.aborted &&
@@ -1147,11 +1128,9 @@ async function workerLc0Lines(
   }
 }
 
-/** Null once the page is gone (progress can settle after teardown). */
 function modelProgressEl(): HTMLElement | null {
   let node = maybeEl('downloadProgress');
   if (node) return node;
-  // Created on demand below, so it is not a registry-owned id.
   const loadProgressId: string = 'modelLoadProgress';
   node = maybeEl(loadProgressId);
   if (!node) {
@@ -1300,7 +1279,6 @@ async function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean, sig
     if (signal?.aborted) return [];
     const next = normalizeDeployEngineRow({ ...row, strength: clampStrengthForRow(row) }, 'analysis', index);
     if (next.family === 'lc0' && isLc0BigNetVariant(next.variant)) {
-      // Read metadata only: declining a saved setup must not acquire a runtime/session.
       const config = BIG_NETS[next.variant];
       const allowed =
         !phoneBigNetBlocked(config.key) &&
@@ -1525,9 +1503,7 @@ let engineRows: EngineRow[] = defaultAnalysisEngineRows();
 const ALL_LINE_ARROWS_STORAGE_KEY = '0x88-analysis-all-line-arrows-v1';
 let showAllLineArrows = false;
 let arrowPreview: { fen: string; uci: string; engine: string } | null = null;
-// Engine strip focus: the chosen engine drives the eval bar (default: first with a result).
 let evalSourceEngine: string | null = null;
-// One top line everywhere; explicit expansion survives navigation and reloads.
 const EXPANDED_LINES_STORAGE_KEY = '0x88-analysis-expanded-lines-v1';
 let expandedEngines = new Set<string>();
 let arrowFocusEngine: string | null = null;
@@ -1911,8 +1887,6 @@ function disposeUnusedEngines(): void {
   engines.releaseUnusedBigNets(engineRows);
   engines.disposeUnusedCentipawnEvaluators();
   const activeRows = activeEngineRows();
-  // The eval bar consumes these rows' cached lines; review/retry are CPU-only.
-  // Neither owns an independent Small search once its last row is gone.
   if (!activeRows.some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant))) {
     resetSearchWorker('Unused Lc0 Small retired');
     const retired = mainEvaluator;
@@ -1920,18 +1894,13 @@ function disposeUnusedEngines(): void {
     searcher = null;
     if (retired) trackEngineRetirement(Promise.resolve(retired.dispose?.()));
   }
-  // Game review always runs SF Lite, so a running review keeps its rows too.
   const stockfishRows = reviewAbort ? [...activeRows, ...reviewEngineRows()] : activeRows;
   engines.disposeUnusedCpuEngines(activeRows, stockfishRows);
   renderRecklessRuntimeInfo();
 }
 
-// Default: one best-move arrow per engine. Opt-in alternatives differ only in
-// opacity, never width. Pointer/keyboard previews temporarily isolate one line.
 function bestShapes(): DrawShape[] {
   if (retry) return retry.answered ? [uciShape(retry.problem.move.bestUci!, 'green')].filter((shape): shape is DrawShape => !!shape) : [];
-  // Result publication also resets default arrows. Keep a keyboard-focused PV
-  // authoritative after its keyed control is restored by patchAnalysisResults.
   const active = document.activeElement as HTMLElement | null;
   const focused = active?.dataset.focusKey?.startsWith(`${tree.current.fen}|`) ? active.closest<HTMLElement>('[data-pv]') : null;
   const preview =
@@ -1946,7 +1915,6 @@ function bestShapes(): DrawShape[] {
   }
   const lines = lineCache.get(tree.current.fen) ?? [];
   const focus = arrowFocusEngine && activeEngineNames().includes(arrowFocusEngine) ? arrowFocusEngine : null;
-  // Pending focused engines intentionally draw nothing, never another engine's recommendation.
   const candidates = analysisArrowCandidates(lines, showAllLineArrows, focus);
   const book = currentBookStats()[0];
   if (book && !focus && !candidates.some((candidate) => candidate.uci.slice(0, 4) === book.uci.slice(0, 4))) {
@@ -1956,7 +1924,6 @@ function bestShapes(): DrawShape[] {
     const shape = uciShape(uci, brush);
     if (!shape) return [];
     if (!shared) return [shape];
-    // Keep attribution beside the tail/midpoint, clear of the destination piece and arrowhead.
     return [
       {
         ...shape,
@@ -1991,7 +1958,6 @@ function renderBoard() {
       },
     },
     lastMove: lastUci ? [lastUci.slice(0, 2) as Key, lastUci.slice(2, 4) as Key] : undefined,
-    // Owner preference: one uniform arrow width (ENGINE_ARROW_WIDTH), including opt-in alternatives.
     drawable: { brushes: ANALYSIS_DRAWABLE_BRUSHES, enabled: !retry },
   };
   // Cast: chessground's DrawBrushes type exposes the built-in keys, but custom
@@ -2024,8 +1990,6 @@ function renderBoard() {
 }
 
 function evalBarLine(lines: AnalysisLine[]): AnalysisLine | undefined {
-  // The engine picked in the strip wins; otherwise the first selected engine with a valid result,
-  // not whichever worker finished first.
   const best = activeEngineRows().flatMap((row) =>
     lines.filter((entry) => analysisEngineName(entry.engine) === analysisEngineName(rowLabel(row)) && entry.multipv === 1 && !entry.error),
   );
@@ -2060,7 +2024,6 @@ function renderEvalBar() {
   el('evalSource').textContent = line ? analysisEngineName(line.engine) : 'Choose engine';
   el('evalSource').dataset.short = line ? evalEngineTag(line.engine) : '';
   el('evalSourceButton').style.setProperty('--engine-color', line ? analysisChipColor(line.engine) : 'var(--muted)');
-  // A readable source selector above the board drives the attached bar.
   const choices = evalSourceChoices(lines);
   const ready = choices.filter((choice) => choice.line).length;
   const ticks = choices.flatMap(({ name, engine, line: result }) =>
@@ -2091,7 +2054,6 @@ function renderEvalBar() {
     if (details.matches(':popover-open')) details.hidePopover();
     details.dataset.fen = tree.current.fen;
   }
-  // The single, stable invoker survives all asynchronous result/source updates.
   patchAnalysisResults(tickContainer, evalMarkerMarkup(ticks, selectedId, { pixels: length, mobile }));
   el('evalDetailsSummary').textContent = 'White’s view';
   if (bar) {
@@ -2134,7 +2096,6 @@ function renderEvalSourceMenu(): void {
 }
 
 function renderLegend() {
-  // Engine names live on each result group; only the independent book needs a key.
   el('engineLegend').hidden = currentBookStats().length === 0;
   el('engineLegend').innerHTML = `<span class="key"><span class="dot" style="background:${BOOK_SWATCH}"></span>Collection frequency</span>`;
 }
@@ -2146,7 +2107,6 @@ function signedPawns(value: number): string {
 
 let pgnImportNotice: { tree: GameTree; node: GameNode; text: string } | null = null;
 
-/** Import losses stay visible through engine updates, until navigation or another load. */
 function renderPgnImportNotice(text?: string): void {
   if (text !== undefined) pgnImportNotice = text ? { tree, node: tree.current, text } : null;
   if (pgnImportNotice && (pgnImportNotice.tree !== tree || pgnImportNotice.node !== tree.current)) pgnImportNotice = null;
@@ -2155,7 +2115,6 @@ function renderPgnImportNotice(text?: string): void {
   if (notice.textContent !== content) notice.textContent = content;
 }
 
-/** Labelled run state beside the turn pip: running, complete, or waiting — never an unexplained glyph. */
 function renderAnalysisStatus(): void {
   renderPgnImportNotice();
   if (retry) return;
@@ -2177,7 +2136,6 @@ function renderAnalysisStatus(): void {
   status.title = title;
   const overview = status.closest<HTMLElement>('.analysis-overview');
   if (overview && overview.dataset.status !== state) overview.dataset.status = state;
-  // The primary action reflects the state: filled "Analyze" when idle, quiet "Re-analyze" once done.
   const label = maybeEl('analyzeLabel');
   const verb = state === 'done' ? 'Re-analyze' : 'Analyze';
   if (label && label.textContent !== verb) label.textContent = verb;
@@ -2187,7 +2145,6 @@ function activeEngineNames(): string[] {
   return [...new Set(activeEngineRows().map((row) => analysisEngineName(rowLabel(row))))];
 }
 
-/** Selection and expansion are separate: changing the bar never opens extra lines. */
 function engineLinesExpanded(name: string): boolean {
   return expandedEngines.has(name);
 }
@@ -2201,29 +2158,22 @@ function toggleEngineLines(name: string): void {
   renderLines();
 }
 
-/**
- * One block per engine: a header row (identity, stats, eval, best-move pill, settings) with that
- * engine's principal variation directly beneath it. Alternatives open in place from the header.
- */
 function renderEngineSummaries(lines: AnalysisLine[]): void {
   renderAnalysisStatus();
   el('enginesTabCount').textContent = String(activeEngineRows().length);
   const best = lines.filter((entry) => entry.multipv === 1 && !entry.error && entry.pvUci[0]);
   const groups = analysisMoveGroups(best);
-  // Only a genuine plurality is marked as "agreed": the most-backed move with 2+ engines and no tie.
   const agreed = groups[0] && groups[0].engines.length >= 2 && (groups[1]?.engines.length ?? 0) < groups[0].engines.length ? groups[0].uci : null;
   patchAnalysisResults(
     el('engineSummaries'),
     activeEngineRows()
       .map((row) => {
-        // Summaries deduplicate engines, but settings controls retain the original row indexes.
         const index = engineRows.findIndex((entry) => entry.family === row.family && entry.variant === row.variant);
         const name = analysisEngineName(rowLabel(row));
         const engineLines = lines.filter((entry) => analysisEngineName(entry.engine) === name);
         const line = engineLines.find((entry) => entry.multipv === 1 && !entry.error);
         const progress = [...searchProgressByEngine.values()].find((entry) => analysisEngineName(entry.label) === name);
         const failure = engineLines.find((entry) => entry.error);
-        // Budget is explicitly labeled; do not present a requested depth/visit count as achieved work.
         const raw = progress
           ? searchProgressText(progress).replace(`${progress.label}: `, '')
           : line
@@ -2231,7 +2181,6 @@ function renderEngineSummaries(lines: AnalysisLine[]): void {
             : failure
               ? 'Unavailable'
               : `Budget · ${row.strength} ${strengthMeta(row.family).unit}`;
-        // One unit in the strip (depth or visits) so it never clips beside the eval; the full string stays in the tooltip.
         const stats =
           progress && hasBoundedSearchProgress(progress)
             ? `${progress.completed}/${progress.requested} ${progress.units}`
@@ -2264,7 +2213,6 @@ function renderEngineSummaries(lines: AnalysisLine[]): void {
   );
 }
 
-/** The engine's PV rows: the top line always, its alternatives when opened. */
 function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLine[], open: boolean): string {
   const sorted = [...engineLines].sort((x, y) => x.multipv - y.multipv);
   const rows = (open ? sorted : sorted.slice(0, 1)).map((line, index) => {
@@ -2275,12 +2223,10 @@ function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLi
     const preview = createPvPreview(tree.current.fen, line.pvUci.slice(0, 12));
     const moves = preview.steps
       .map((step, ply) => {
-        // Standalone preview/accessibility labels keep their number; inline Black moves do not.
         const text = ply > 0 ? step.label.replace(/^\d+… /, '') : step.label;
         return `<button type="button" class="pv-move" data-pv-insert="${ply + 1}" data-focus-key="${key}|move|${ply}" aria-label="${htmlEscape(`Insert ${name} line through ${step.label}`)}" title="${htmlEscape(`Add variation through ${step.label}`)}">${htmlEscape(text)}</button>`;
       })
       .join('');
-    // The header already carries the top line's eval; alternatives show rank + their own eval.
     const lead = index === 0 ? '' : `<span class="line-rank">${line.multipv}</span><span class="score">${htmlEscape(line.scoreText)}</span>`;
     return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv" data-result-scroll-key="${key}">${moves}</span><span class="pv-ellipsis" aria-hidden="true">…</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv} on the board`)}"${preview.steps.length ? '' : ' disabled'} title="Preview this line on the board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7zM4 5v14"/></svg></button></div></li>`;
   });
@@ -2294,14 +2240,11 @@ function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLi
 const GEAR_ICON =
   '<svg class="engine-settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
 
-/** Analysis monograms use darker, hue-matched fills without changing board arrow colours. */
 function engineAvatar(engine: string): string {
   return `<span class="engine-avatar" style="--engine-chip-color:${analysisChipColor(engine)}" aria-hidden="true">${htmlEscape(engineMonogram(engine))}</span>`;
 }
 
-/** Manage-engines dialog only: every logo sits in the same framed box so mixed SVG/PNG assets read as one set. */
 function engineLogoFrame(logo: string, name: string): string {
-  // Engines without a bundled mark (or before the logo probe resolves) get their initial in the same frame.
   const mark =
     logo.includes('engine-logo-placeholder') || name.startsWith('PlentyChess')
       ? `<span class="engine-logo-initial">${htmlEscape(name.trim().charAt(0).toUpperCase())}</span>`
@@ -2322,7 +2265,6 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
     const groups = analysisMoveGroups(bestByEngine);
     const spreadCp = spread ? Number(spread.replace(' cp spread', '')) : Number.NaN;
     const headline = analysisAgreementHeadline(groups, bestByEngine.length);
-    // Spread in pawns, the same unit as every engine evaluation beside it; phrased by size.
     const spreadInfo = Number.isFinite(spreadCp) ? analysisSpreadText(spreadCp) : null;
     const spreadMarkup = spreadInfo
       ? `<span class="insight-spread" data-level="${spreadInfo.level}" title="Highest minus lowest evaluation across engines, in pawns (White’s view)">${htmlEscape(spreadInfo.text)}</span>`
@@ -2361,8 +2303,7 @@ function renderEngineComparison(lines: AnalysisLine[]): void {
   el('engineConsensus').textContent =
     bestByEngine.length === 1
       ? `${analysisEngineName(bestByEngine[0].engine)} ready${status}`
-      : // Pawn units, matching every evaluation on the page.
-        analysisConsensus(bestByEngine).replace(
+      : analysisConsensus(bestByEngine).replace(
           / · (\d+) cp spread$/,
           (_, cp: string) => ` · Eval spread ${(Number(cp) / 100).toFixed(2)} pawns (White’s view)`,
         ) + status;
@@ -2392,11 +2333,9 @@ function renderLines() {
   const lines = lineCache.get(tree.current.fen) ?? [];
   decorateMoveEvals();
   renderLegend();
-  // Each engine's PVs render inside its own block in the engine strip (renderEngineSummaries).
   renderEngineComparison(lines);
 }
 
-/** Show the cached evaluation after each analysed move, as lichess does in its move list. */
 function decorateMoveEvals(): void {
   for (const button of document.querySelectorAll<HTMLButtonElement>('#movelist .mv[data-node]')) {
     const node = nodeIndex.get(Number(button.dataset.node));
@@ -2417,15 +2356,10 @@ function decorateMoveEvals(): void {
   }
 }
 
-/** Height of one move-list row, or 0 when the list holds no uniform pairs. */
 function moveRowHeight(list: HTMLElement): number {
   return list.querySelector<HTMLElement>('.move-pair')?.offsetHeight ?? 0;
 }
 
-/**
- * Desktop: the move list fills the rest of the column, sized to a whole number of rows so the
- * scroller never shows a half move pair (the sub-row remainder stays as plain panel below it).
- */
 function fitMoveList(): void {
   const list = el('movelist');
   const panel = el('historyPanel');
@@ -2603,7 +2537,7 @@ async function setImportedPgn(raw: string, messagePrefix = 'Imported', savedColl
   el('importInfo').textContent =
     `${messagePrefix} ${games.length} playable game${games.length === 1 ? '' : 's'}${batch.skippedGames ? `; skipped ${batch.skippedGames} without moves` : ''}`;
   renderOpening();
-  renderLines(); // refresh the legend so the Book key appears
+  renderLines();
   setShapes(bestShapes());
   return games.length;
 }
@@ -2841,8 +2775,6 @@ async function saveCurrentPgnCollection(): Promise<void> {
   }
   let gameCount = 0;
   try {
-    // Always parse the textarea at save time: users can edit PGN after an
-    // import/load, and the persisted metadata must describe the saved text.
     gameCount = await setImportedPgn(raw);
   } catch (error) {
     el('pgnDbInfo').textContent = `Cannot save invalid PGN: ${(error as Error).message}`;
@@ -3319,7 +3251,6 @@ function startMistakeRetry(): void {
   el('stop').toggleAttribute('disabled', true);
   el('analyze').toggleAttribute('disabled', false);
   selectEl('lc0RuntimeSelect').disabled = false;
-  // Interactive analysis may have unregistered the fallback reviewer since review.
   engines.syncBrokerParticipants([...activeEngineRows(), lastReviewReviewer.row]);
   retryOriginalOrientation = orientation;
   retryOriginalAuto = inputEl('autoAnalyze').checked;
@@ -3331,7 +3262,6 @@ function startMistakeRetry(): void {
   orientation = side === 'w' ? 'white' : 'black';
   arrowPreview = null;
   clearAnalysisSearchProgress();
-  // Quarantine all answer-bearing panels, even those already hidden by the active tab.
   restoreRetryPanels = quarantineRetryPanels([
     ...[
       'reviewStandard',
@@ -3355,7 +3285,6 @@ function startMistakeRetry(): void {
   el('boardAnnouncement').textContent = '';
   renderMistakeRetry();
   el('reviewPanel').scrollTop = 0;
-  // Keep keyboard users on the playable board, not a now-concealed entry button.
   keyboardBoard?.focus(side === 'w' ? 'e2' : 'e7');
 }
 
@@ -3495,8 +3424,6 @@ function exitMistakeRetry(render = true): void {
     // Chessground clears manual shapes when renderBoard supplies a FEN.
     ground?.setShapes(savedShapes);
     renderAnalysisStatus();
-    // A pending Maia load may have completed (or failed) into the empty vault
-    // hosts. Reconcile real controls with current state instead of stale nodes.
     el('maia3Enable').hidden = !!maia3PanelEvaluator;
     (el('maia3Enable') as HTMLButtonElement).disabled = maia3PanelLoading;
     el('maia3Grid').hidden = !maia3PanelEvaluator;
@@ -3533,14 +3460,11 @@ async function runGameReview(): Promise<void> {
     el('analyze').toggleAttribute('disabled', false);
     selectEl('lc0RuntimeSelect').disabled = false;
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
-    // Acquire the reviewer only after the handoff cancelled backend work, which
-    // disposes runtime engines.
     reviewer = reviewEngineChoice();
     clearReviewState();
     cacheKeys = nodes.map((node) => engineAnalysisCacheKey(node.fen, reviewer.row, node, reviewMultiPv));
     engines.syncBrokerParticipants([...activeEngineRows(), reviewer.row]);
   } catch (error) {
-    // Setup failed (e.g. unsupported reviewer) before reviewAbort owns the mode.
     void dispatchAnalysis({ type: 'MODE_EXIT', mode: 'review' });
     throw error;
   }
@@ -3561,7 +3485,6 @@ async function runGameReview(): Promise<void> {
   try {
     const positions: ReviewPosition[] = [];
     for (let i = 0; i < nodes.length; i++) {
-      // Yield even on cache hits so cancellation, navigation and rendering stay responsive.
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       if (controller.signal.aborted || reviewAbort !== controller) break;
       progress.value = i;
@@ -3806,8 +3729,6 @@ function invalidateAnalysisSettings(
     el('message').textContent = request ? ANALYSIS_REFRESH_PENDING_MESSAGE : 'Engine settings changed.';
     renderEngineComparison(lineCache.get(tree.current.fen) ?? []);
   }
-  // The scheduler has queued the new intent. No native init has begun, so
-  // settle the obsolete reclaim wait now instead of holding up the new rows.
   if (isMemoryConstrainedDevice() && analysisReclaimOwner && analysisReclaimOwner === analysisAbort) cancelAnalysisOperation(activeAnalysisRunId);
 }
 
@@ -3827,7 +3748,6 @@ function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnu
 
 function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolean } = {}): void {
   void dispatchAnalysis({ type: 'STOP', preserveMaintenance: options.preserveDeferredMaintenance === true });
-  // Stop drops the queued refresh. Keep any more specific message written by cancellation.
   const message = maybeEl('message');
   if (message?.textContent === ANALYSIS_REFRESH_PENDING_MESSAGE) message.textContent = 'Analysis stopped.';
 }
@@ -3843,14 +3763,13 @@ function cancelAnalysisOperation(operationId: number): void {
   if (current) engines.retireAnalysisRunCentipawnKeys();
   if (reload) {
     analysisReloadAbort = null;
-    disposeRuntimeResources(); // also cancels the worker and big nets, and clears analysisAbort
+    disposeRuntimeResources();
   }
   const stillCurrent = analysisAbort === controller;
   const hybridInit = stillCurrent && activeWorkerSearchId !== null && !!searchWorker && workerRuntime.startsWith('hybrid-') && !workerSearchWarm;
   if (hybridInit) resetSearchWorker('LC0 hybrid worker initialization cancelled');
   else if (stillCurrent && activeWorkerSearchId !== null && searchWorker) searchWorker.postMessage({ type: 'cancel', target: activeWorkerSearchId });
   if (stillCurrent) for (const key of ANALYSIS_BIG_NET_KEYS) peekBigNetSearcher(key)?.cancel();
-  // Progress state outlives the page; the renders skip a page that is gone.
   clearAnalysisSearchProgress();
   hideModelProgress();
   if (mountAbort.signal.aborted) return;
@@ -4141,7 +4060,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     if (controller.signal.aborted || mountAbort.signal.aborted || !analysisCanPrepare(analysisRunState, owner)) return;
     const uninitializedBigNets = engines.bigNetsAwaitingInit(rows).filter((key) => !bigNetInitErrors.has(key));
     if (uninitializedBigNets.length) {
-      activeAnalysisSelectionKey = ''; // no keys yet: navigation during init cancels this run
+      activeAnalysisSelectionKey = '';
       const reclaim =
         constrained &&
         preparePhoneBigNet(uninitializedBigNets[0], ANALYSIS_BIG_NET_SESSION.evalCacheEntries, controller.signal, engines.disposeAnalysisCpuEngines, () => {
@@ -4188,7 +4107,6 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     const admission = applyAnalysisEvent({ type: 'PREPARED', owner, revision: owner.preparationRevision, snapshot });
     if (!admission.some((effect) => effect.type === 'search')) return;
     const { fen, multiPv: analysisMultiPv, selectionKey: selectionCacheKey } = snapshot;
-    // Move generation uses mutable scratch boards; keep the snapshot untouched.
     const analysisPositions = snapshot.positions.map((board) => ({ ...board, squares: [...board.squares] }));
     const cpuPosition = { fen: snapshot.cpuPosition.fen, moves: [...snapshot.cpuPosition.moves] };
     const runRows = [...snapshot.rows];
@@ -4218,7 +4136,6 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         (async () => {
           if (controller.signal.aborted || mountAbort.signal.aborted) return;
           try {
-            // Retire the meter before publishing this engine’s result, even if other engines are still searching.
             const lines = await taskFactory(() => showIndeterminateSearchProgress(runId, fen, label)).finally(() => clearEngineSearchProgress(runId, label));
             if (
               runId !== activeAnalysisRunId ||
@@ -4524,7 +4441,6 @@ function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
     // Queued behind any cancelled search, so that search cannot repopulate the
     // old tree/cache after the reset. Model/runtime changes dispose the worker.
     if (searchWorker) void postWorker({ type: 'resetSearch', clearEvalCache: true }).catch(() => undefined);
-    // The bounded position cache is history/settings keyed and can safely survive a new PGN.
     completeAnalysisKeys.clear();
   }
   const fen = tree.current.fen;
@@ -4549,8 +4465,6 @@ function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
   scheduleMaia3Panel();
   if (inputEl('autoAnalyze').checked && !cached && !reviewAbort && options.reportLines === undefined) void analyzeCurrent();
   else {
-    // A cached position, or auto-analyze off, must not restart the search that
-    // was paused on the position we just left.
     hiddenTab = cancelHiddenTabWork(hiddenTab, 'analysis');
     if (!analysisIsAnalyzing(analysisRunState)) void dispatchAnalysis({ type: 'DROP_REQUEST' });
     renderEvalBar();
@@ -4558,11 +4472,6 @@ function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Human moves · Maia3: rating-conditioned move predictions for the current
-// position. One batched evaluateConditions run per navigation (≈50ms on
-// WebGPU for the whole grid), so it can follow the board live.
-// ---------------------------------------------------------------------------
 const MAIA3_PANEL_RATINGS = [1100, 1300, 1500, 1700, 1900, 2200];
 let maia3PanelEvaluator: Maia3BrowserEvaluator | null = null;
 let maia3PanelLoading = false;
@@ -4593,7 +4502,6 @@ function unloadMaia3Panel(message: string): void {
   hideModelProgress();
 }
 
-/** Detach the panel's pending or loaded Maia3 owner to the retirement barrier. */
 function retireMaia3Panel(): void {
   maia3PanelLoadGeneration += 1;
   maia3PanelAbort?.abort();
@@ -4627,7 +4535,6 @@ async function enableMaia3Panel(): Promise<void> {
   try {
     maia3PanelStatus('Loading Maia3…');
     showModelProgress('Maia3', undefined, undefined, 'Preparing');
-    // A completed or stopped run may still own a pooled large net.
     if (isMemoryConstrainedDevice()) for (const key of ANALYSIS_BIG_NET_KEYS) releaseBigNetSearcher(key, 0);
     await awaitEngineRetirements();
     if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) return;
@@ -4689,7 +4596,6 @@ async function enableMaia3Panel(): Promise<void> {
 
 function scheduleMaia3Panel(): void {
   const task = maia3PanelTask;
-  // Invalidate on navigation, not only when the debounce eventually dispatches.
   task?.invalidate();
   if (maia3PanelTimer) clearTimeout(maia3PanelTimer);
   maia3PanelTimer = null;
@@ -4708,7 +4614,6 @@ function scheduleMaia3Panel(): void {
   }, 120);
 }
 
-/** Best engine move for the current position, for the agreement marks. */
 function bestEngineUci(fen: string): string | null {
   const lines = lineCache.get(fen) ?? [];
   const first = lines.find((line) => line.multipv === 1) ?? lines[0];
@@ -4769,7 +4674,6 @@ async function onUserMove(from: Key, to: Key, fromKeyboard = false) {
   const inputIsCurrent = () =>
     retryModeGeneration === modeGeneration && retry === activeRetry && (retry?.tree ?? tree) === inputTree && inputTree.current === inputNode;
   const play = (move: Move): boolean => {
-    // Promotion callbacks can outlive navigation or a retry-mode transition.
     if (!inputIsCurrent()) return false;
     if (activeRetry) void submitRetryMove(moveToUci(move));
     else {
@@ -4784,7 +4688,6 @@ async function onUserMove(from: Key, to: Key, fromKeyboard = false) {
     return;
   }
   if (matching.length > 1) {
-    // Promotion: let the user pick instead of silently auto-queening.
     showPromotionOverlay({
       boardContainer: el('ground'),
       orientation,
@@ -4834,7 +4737,6 @@ function loadPgn() {
   if (!raw) return;
   renderPgnImportNotice('');
   try {
-    // Parse (and reject empty or non-PGN text) before the saved workspace is cleared.
     const { game, gameCount } = parseFirstPgnGame(raw);
     const { tree: parsed, tags, result, warnings } = game;
     clearAnalysisWorkspace();
@@ -4996,8 +4898,6 @@ function wirePvPreview(): void {
 }
 
 function hoverLine(pvUci: string[], engine: string) {
-  // Only the line's first move: the rest of the PV is from future positions, so
-  // drawing every ply on the current board is misleading clutter.
   arrowPreview = pvUci[0] ? { fen: tree.current.fen, uci: pvUci[0], engine } : null;
   setShapes(bestShapes());
 }
@@ -5036,7 +4936,6 @@ function wireEvents() {
   el('retryRating').addEventListener('change', () => {
     void showRetryHumanLikelihood();
   });
-  // Board moves, board orientation and the retry sub-area are the only live controls.
   document.querySelector('.analysis-workspace')?.addEventListener(
     'click',
     (event) => {
@@ -5047,7 +4946,6 @@ function wireEvents() {
     },
     { capture: true, signal: mountAbort.signal },
   );
-  // Keep routine completion quiet without concealing loading, errors or import feedback.
   const message = el('message');
   const updateMessageState = () => {
     message.dataset.routine = String(
@@ -5062,7 +4960,6 @@ function wireEvents() {
   for (const id of ['stop', 'analyze']) statusObserver.observe(el(id), { attributes: true, attributeFilter: ['disabled'] });
   mountAbort.signal.addEventListener('abort', () => statusObserver.disconnect(), { once: true });
   renderAnalysisStatus();
-  // The shared header is sticky and can resize with fonts/zoom; keep mobile tabs below it.
   const siteHeader = document.querySelector<HTMLElement>('.site-header');
   if (siteHeader) {
     const syncHeaderHeight = () =>
@@ -5074,7 +4971,6 @@ function wireEvents() {
     syncHeaderHeight();
     mountAbort.signal.addEventListener('abort', () => headerObserver.disconnect(), { once: true });
   }
-  // The always-visible history resizes as engine results stream in; keep the current move in view.
   const historyObserver = new ResizeObserver(() => {
     fitMoveList();
     keepCurrentMoveInView();
@@ -5129,7 +5025,6 @@ function wireEvents() {
     },
     { signal: mountAbort.signal },
   );
-  // On phones the engine results are the first thing to show (the product's main result); Moves is one tap away.
   if (narrow.matches) setView(el('enginesTab') as HTMLButtonElement);
   const flashCopied = (button: HTMLElement) => {
     button.dataset.copied = 'true';
@@ -5141,7 +5036,6 @@ function wireEvents() {
     copyFen();
     flashCopied(el('copyFen'));
   });
-  // Plain disclosure: native buttons use Tab, and Escape returns to the trigger.
   const copyDisclosure = mountAnalysisDisclosure({ root: el('copyTools'), trigger: el('copyMenuButton'), panel: el('copyMenu'), signal: mountAbort.signal });
   const mobileTools = matchMedia('(max-width: 600px)');
   const toolsDisclosure = mountAnalysisDisclosure({
@@ -5199,7 +5093,6 @@ function wireEvents() {
       return;
     }
     cancelActiveAnalysisRun();
-    // No persistent URL marker: a later reload must be eligible for saved-game restore.
     location.assign('/app/play/');
   });
   let linkFeedbackTimer: ReturnType<typeof setTimeout> | undefined;
@@ -5239,7 +5132,6 @@ function wireEvents() {
   } catch {
     expandedEngines = new Set();
   }
-  // Eval-bar source: the bar's own label opens a small engine menu (the one source control).
   const evalMenu = el('evalSourceMenu');
   const evalButton = el('evalSourceButton');
   const closeEvalMenu = (refocus: boolean) => {
@@ -5316,7 +5208,6 @@ function wireEvents() {
     }
     if (target?.dataset.engineSettings !== undefined) openEngineManager(Number(target.dataset.engineSettings));
     else if (target?.dataset.engineToggle !== undefined) {
-      // A second click restores the all-engine overview, retaining the bar source.
       evalSourceEngine = target.dataset.engineToggle;
       arrowFocusEngine = arrowFocusEngine === evalSourceEngine ? null : evalSourceEngine;
       renderEvalBar();
@@ -5326,11 +5217,9 @@ function wireEvents() {
   });
   wirePvPreview();
   const positionTools = el('positionTools') as HTMLDetailsElement;
-  // "Load" goes to the one paste box when it is on screen (empty game); otherwise it opens the full panel.
   const openLoadForm = () => {
     const quick = el('movelist').querySelector<HTMLTextAreaElement>('[data-quick-pgn]');
     if (quick && !positionTools.open) {
-      // Explorer is a Moves subview that conceals the list, even on an empty game.
       (el('openingExplorer') as HTMLDetailsElement).open = false;
       setView(el('movesTab') as HTMLButtonElement);
       quick.focus({ preventScroll: true });
@@ -5343,7 +5232,6 @@ function wireEvents() {
   el('openPosition').addEventListener('click', openLoadForm);
   el('emptyLoadGame').addEventListener('click', openLoadForm);
   positionTools.addEventListener('toggle', () => el('openPosition').setAttribute('aria-expanded', String(positionTools.open)));
-  // The empty move list doubles as a paste box; FEN or PGN is detected and fed to the same load paths.
   const loadQuickPgn = () => {
     const raw = el('movelist').querySelector<HTMLTextAreaElement>('[data-quick-pgn]')?.value.trim();
     if (!raw) {
@@ -5466,7 +5354,6 @@ function wireEvents() {
       renderEngineList();
     } else if (target.classList.contains('row-var')) {
       if (engineRows[i].family === 'lc0' && isLc0BigNetVariant(target.value)) {
-        // Consent and cancellation must not acquire a worker or start a download.
         const selectedVariant = target.value;
         const config = BIG_NETS[selectedVariant];
         target.value = engineRows[i].variant;
@@ -5558,7 +5445,6 @@ function wireEvents() {
     deferAnalysisSettingsRefresh();
     prefetchAnalysisAssetsForAddedRow(engineRows[engineRows.length - 1]);
   };
-  // The inline row under the engine summaries and the manager dialog add engines identically.
   el('addEngine').addEventListener('click', addEngineRow);
   el('addEngineInManager').addEventListener('click', addEngineRow);
   el('lc0RuntimeSelect').addEventListener('change', () => {
@@ -5600,8 +5486,6 @@ function wireEvents() {
         unloadMaia3Panel('Maia3 unloaded to make room for the comparison.');
         for (const key of ANALYSIS_BIG_NET_KEYS) releaseBigNetSearcher(key, 0);
       }
-      // Go through the busy guard so interrupted debounces/inference are hidden
-      // and replayed, even when the board does not move during the report.
       scheduleMaia3Panel();
       el('message').textContent = 'Position analysis paused for critical-moment comparison.';
       el('stop').toggleAttribute('disabled', true);
@@ -5701,7 +5585,6 @@ function wireEvents() {
     const uci = button?.getAttribute('data-uci');
     if (uci && tree.addUci(uci)) afterNavigation();
   });
-  // Pointer and keyboard previews share the same arrow/highlight association.
   for (const container of [compareBody, el('engineSummaries')]) {
     const preview = (event: Event) => {
       const target = (event.target as HTMLElement).closest<HTMLElement>('[data-pv]');
@@ -5844,7 +5727,6 @@ function wireEvents() {
   if (analysisKeydownHandler) document.removeEventListener('keydown', analysisKeydownHandler);
   analysisKeydownHandler = (event: KeyboardEvent) => {
     if (retry || el('evalCompareDetails').matches(':popover-open')) return;
-    // Results and evaluation details own arrow keys; scrolling must never change the game.
     if (
       event.defaultPrevented ||
       (event.target as HTMLElement).closest('#keyboardBoard, #engineSummaries, #evalCompareDetails, dialog[open]') ||
@@ -5995,8 +5877,6 @@ async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal
     el('message').textContent = 'Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.';
     return true;
   } catch (workerError) {
-    // resetSearchWorker rejects pending init with AbortError when a newer load
-    // disposed this worker; that load owns the backend now, so do not fall back.
     if (loadCancelled() || (workerError as Error).name === 'AbortError') return false;
     if (runtime !== 'onnx' && runtime !== LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
       selectEl('lc0RuntimeSelect').disabled = false;
@@ -6004,7 +5884,6 @@ async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal
       hideModelProgress();
       return false;
     }
-    // Fall back to a main-thread evaluator (analysis will block the UI, but works).
     console.warn('LC0 worker init failed; falling back to the main thread.', workerError);
     try {
       let nextEvaluator: Lc0EvaluationProvider | null = null;
@@ -6096,8 +5975,6 @@ async function reloadLc0Backend(
   criticalPanel?.invalidate();
   disposeRuntimeResources();
   if (operationSignal?.aborted) return false;
-  // Settings invalidate the old backend, not permission to allocate an unused
-  // one. A later admitted Small run requests the backend through NEEDS_BACKEND.
   if (!automaticAnalysisAllowed() || !activeEngineRows().some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant))) return true;
   reconcileActiveRuntimeFallbackWarning();
   renderRecklessRuntimeInfo();
@@ -6183,8 +6060,6 @@ async function init(mountSignal: AbortSignal) {
   void refreshBigNetAvailability();
   if (!isV0DeployProfile()) void refreshCentipawnHybridManifestStatus();
   const smallLc0 = activeEngineRows().some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant));
-  // Read Auto-analyze only now: it may have been turned off during the startup asset checks.
-  // A Small backend still loads; loadLc0Backend applies the checkbox itself.
   if (!automaticAnalysisAllowed() || (!smallLc0 && !inputEl('autoAnalyze').checked)) {
     el('analyze').toggleAttribute('disabled', false);
     selectEl('lc0RuntimeSelect').disabled = false;
@@ -6319,7 +6194,6 @@ export function mountAnalysisBrowser(): () => void {
   smokeGlobal.__analysisSetHidden = setHiddenHook;
   const pvResize = new ResizeObserver(() => fitAnalysisPvRows(el('engineSummaries')));
   pvResize.observe(el('engineSummaries'));
-  // Recheck the optional endpoint-label clearance when the rail rotates/resizes.
   const evalResize = new ResizeObserver(() => renderEvalBar());
   evalResize.observe(el('evalWhite').parentElement!);
   const rail = el('evalWhite').parentElement!;
@@ -6399,8 +6273,6 @@ export function mountAnalysisBrowser(): () => void {
       if (mountAbort === controller) {
         disposePageResources();
       }
-      // Only clear the test hook if it is still ours (a newer mount may have
-      // installed its own).
       if (smokeGlobal.__analysisUserMove === hook) delete smokeGlobal.__analysisUserMove;
       if (smokeGlobal.__analysisSchedulingState === schedulingStateHook) delete smokeGlobal.__analysisSchedulingState;
       if (smokeGlobal.__analysisTransitionLog === transitionLogHook) delete smokeGlobal.__analysisTransitionLog;
