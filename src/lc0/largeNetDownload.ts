@@ -1,4 +1,4 @@
-import { type OrtExecutionProviderPreference, resolveOrtSessionPlacement } from '../nn/ortRuntime.ts';
+import { type OrtExecutionProviderPreference, requestedOrtExecutionProvider, resolveFreshWorkerOrtSessionPlacement } from '../nn/ortRuntime.ts';
 import type { BigNetConfig } from './bt4Engine.ts';
 import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryClass.ts';
 import { awaitWorkerReclaim, terminateEngineWorker } from './engineRetirement.ts';
@@ -6,7 +6,11 @@ import { lc0SplitKUrl, selectLc0OrtModelUrl } from './lc0SmallModelSelection.ts'
 import { inspectLc0ModelDownload, type Lc0ModelDownloadState, type Lc0ModelLoadResult, lc0ModelCacheEntryExists, untilAborted } from './modelCache.ts';
 import type { ModelPrefetchReply, ModelPrefetchRequest } from './modelPrefetchWorker.ts';
 
-const defaultDeps = { placement: resolveOrtSessionPlacement, inspect: inspectLc0ModelDownload };
+export function largeNetWorkerEp(): 'wasm' | 'auto' {
+  return requestedOrtExecutionProvider() === 'wasm' ? 'wasm' : 'auto';
+}
+
+const defaultDeps = { placement: () => resolveFreshWorkerOrtSessionPlacement(largeNetWorkerEp()), inspect: inspectLc0ModelDownload };
 
 export type LargeNetDownloadState = Lc0ModelDownloadState & { mayDownloadFallback?: boolean; downloadBytesIncomplete?: boolean };
 
