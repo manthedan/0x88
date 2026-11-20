@@ -14,7 +14,6 @@ import {
   setRequestedOrtWasmArtifactForCurrentThread,
   setRequestedOrtWasmThreadsForCurrentThread,
 } from '../nn/ortRuntime.ts';
-import type { CpuctSchedule, FpuStrategy, SearchBatchCollisionMode, SearchEarlyStop } from '../search/puct.ts';
 import type { Lc0WebEncoderKernelVariant, Lc0WebExecutionFootprint, Lc0WebHybridLegalPriorsBackend } from './hybridEvaluator.ts';
 import { createLc0OnnxEvaluatorFromUrl, DEFAULT_LC0_ORT_EVALUATOR_DEPS } from './lc0SmallModelSelection.ts';
 import { describeLc0ModelLoad, type Lc0ModelLoadResult } from './modelCache.ts';
@@ -86,27 +85,8 @@ type SearchMessage = {
   type: 'search';
   id: number;
   input: Lc0EvaluatorInput;
-  visits?: number;
-  movetimeMs?: number;
-  batchSize?: number;
-  batchCollisionMode?: SearchBatchCollisionMode;
-  batchPipelineDepth?: number;
-  traceSearchVisits?: boolean;
-  multiPv?: number;
-  reuseTree?: boolean;
-  earlyStop?: SearchEarlyStop;
-  cpuct?: number;
-  fpu?: number;
-  cpuctSchedule?: CpuctSchedule;
-  fpuStrategy?: FpuStrategy;
-  fpuReduction?: number;
-  temperature?: number;
-  drawScore?: number;
-  contemptElo?: number;
-  searchContemptLimit?: number;
   reportProgress?: boolean;
-  progressEveryMs?: number;
-};
+} & Omit<Lc0SearchOptions, 'onProgress' | 'signal' | 'yieldEveryMs' | 'root' | 'rootMoves'>;
 
 type ResetSearchMessage = {
   type: 'resetSearch';
@@ -155,25 +135,23 @@ type SearchWorkerResult = Omit<Lc0SearchResult, 'search'> & {
   gpuBufferAllocation?: WebGpuBufferAllocationTelemetry;
 };
 
-type SearchWorkerProgress = Lc0SearchProgress;
+type ReadyPayload = {
+  backend: string;
+  modelCache: string;
+  ortWasm?: OrtRuntimeDiagnostics['wasm'];
+  ortFallback?: OrtRuntimeDiagnostics['fallback'];
+  ortRuntime?: OrtSessionDiagnostics;
+  /** ONNX runtime only: the model the session runs (differs from modelUrl when the split-K model was selected). */
+  servedModelUrl?: string;
+  /** ONNX runtime only: the ORT IO mode in use (a requested GPU mode may have fallen back to 'cpu'). */
+  ortIoMode?: Lc0OrtIoMode;
+};
 
 type WorkerResponse =
-  | {
-      type: 'ready';
-      id: number;
-      backend: string;
-      modelCache: string;
-      ortWasm?: OrtRuntimeDiagnostics['wasm'];
-      ortFallback?: OrtRuntimeDiagnostics['fallback'];
-      ortRuntime?: OrtSessionDiagnostics;
-      /** ONNX runtime only: the model the session runs (differs from modelUrl when the split-K model was selected). */
-      servedModelUrl?: string;
-      /** ONNX runtime only: the ORT IO mode in use (a requested GPU mode may have fallen back to 'cpu'). */
-      ortIoMode?: Lc0OrtIoMode;
-    }
+  | ({ type: 'ready'; id: number } & ReadyPayload)
   | { type: 'evaluationResult'; id: number; result: Lc0Evaluation }
   | { type: 'evaluationBatchResult'; id: number; result: Lc0Evaluation[] }
-  | { type: 'searchProgress'; id: number; progress: SearchWorkerProgress }
+  | { type: 'searchProgress'; id: number; progress: Lc0SearchProgress }
   | { type: 'searchResult'; id: number; result: SearchWorkerResult }
   | { type: 'searchReset'; id: number }
   | { type: 'disposed'; id: number }
@@ -200,7 +178,7 @@ type HybridEvaluatorFactory = (options: {
 
 let hybridEvaluatorFactory: HybridEvaluatorFactory | undefined;
 
-const webGpuBufferAllocationTelemetry: WebGpuBufferAllocationTelemetry = {
+const gpuBufferTelemetry: WebGpuBufferAllocationTelemetry = {
   installed: false,
   createBufferCount: 0,
   createBufferBytes: 0,
@@ -209,88 +187,55 @@ const webGpuBufferAllocationTelemetry: WebGpuBufferAllocationTelemetry = {
   byUsage: {},
   note: 'GPUDevice.createBuffer request telemetry only; counts allocation requests visible to this worker monkeypatch, not live GPU residency.',
 };
-const patchedAdapters = new WeakSet<object>();
-const patchedDevices = new WeakSet<object>();
+const patchedWebGpuObjects = new WeakSet<object>();
 
-function recordWebGpuBufferAllocation(descriptor: unknown): void {
-  const maybeDescriptor = descriptor as { size?: unknown; usage?: unknown } | undefined;
-  const size = typeof maybeDescriptor?.size === 'bigint' ? Number(maybeDescriptor.size) : Number(maybeDescriptor?.size ?? 0);
-  const bytes = Number.isFinite(size) && size > 0 ? Math.floor(size) : 0;
-  const usage = String(maybeDescriptor?.usage ?? 'unknown');
-  webGpuBufferAllocationTelemetry.createBufferCount += 1;
-  webGpuBufferAllocationTelemetry.createBufferBytes += bytes;
-  webGpuBufferAllocationTelemetry.maxBufferBytes = Math.max(webGpuBufferAllocationTelemetry.maxBufferBytes, bytes);
-  const bucket = webGpuBufferAllocationTelemetry.byUsage[usage] ?? { count: 0, bytes: 0 };
-  bucket.count += 1;
-  bucket.bytes += bytes;
-  webGpuBufferAllocationTelemetry.byUsage[usage] = bucket;
-}
-
-function patchWebGpuDevice(device: unknown): void {
-  if (!device || (typeof device !== 'object' && typeof device !== 'function')) return;
-  const target = device as { createBuffer?: (...args: unknown[]) => unknown };
-  if (patchedDevices.has(target) || typeof target.createBuffer !== 'function') return;
-  const originalCreateBuffer = target.createBuffer;
-  patchedDevices.add(target);
-  target.createBuffer = function patchedCreateBuffer(this: unknown, descriptor: unknown, ...rest: unknown[]) {
-    try {
-      recordWebGpuBufferAllocation(descriptor);
-    } catch {
-      webGpuBufferAllocationTelemetry.failures += 1;
-    }
-    return originalCreateBuffer.call(this, descriptor, ...rest);
-  };
-}
-
-function patchWebGpuAdapter(adapter: unknown): void {
-  if (!adapter || (typeof adapter !== 'object' && typeof adapter !== 'function')) return;
-  const target = adapter as { requestDevice?: (...args: unknown[]) => Promise<unknown> };
-  if (patchedAdapters.has(target) || typeof target.requestDevice !== 'function') return;
-  const originalRequestDevice = target.requestDevice;
-  patchedAdapters.add(target);
-  target.requestDevice = async function patchedRequestDevice(this: unknown, ...args: unknown[]) {
-    const device = await originalRequestDevice.apply(this, args);
-    patchWebGpuDevice(device);
-    return device;
-  };
-}
-
-function installWebGpuBufferAllocationProbe(): void {
-  try {
-    const gpu = (globalThis.navigator as { gpu?: { requestAdapter?: (...args: unknown[]) => Promise<unknown> } } | undefined)?.gpu;
-    if (!gpu || typeof gpu.requestAdapter !== 'function') return;
+try {
+  const gpu = (globalThis.navigator as { gpu?: { requestAdapter?: (...args: unknown[]) => Promise<unknown> } } | undefined)?.gpu;
+  if (gpu && typeof gpu.requestAdapter === 'function') {
     const originalRequestAdapter = gpu.requestAdapter;
     gpu.requestAdapter = async function patchedRequestAdapter(this: unknown, ...args: unknown[]) {
-      const adapter = await originalRequestAdapter.apply(this, args);
-      patchWebGpuAdapter(adapter);
+      const adapter = (await originalRequestAdapter.apply(this, args)) as { requestDevice?: (...args: unknown[]) => Promise<unknown> } | null | undefined;
+      if (adapter && typeof adapter.requestDevice === 'function' && !patchedWebGpuObjects.has(adapter)) {
+        patchedWebGpuObjects.add(adapter);
+        const originalRequestDevice = adapter.requestDevice;
+        adapter.requestDevice = async function patchedRequestDevice(this: unknown, ...args: unknown[]) {
+          const device = (await originalRequestDevice.apply(this, args)) as { createBuffer?: (...args: unknown[]) => unknown } | null | undefined;
+          if (device && typeof device.createBuffer === 'function' && !patchedWebGpuObjects.has(device)) {
+            patchedWebGpuObjects.add(device);
+            const originalCreateBuffer = device.createBuffer;
+            device.createBuffer = function patchedCreateBuffer(this: unknown, descriptor: unknown, ...rest: unknown[]) {
+              try {
+                const desc = descriptor as { size?: unknown; usage?: unknown } | undefined;
+                const size = Number(desc?.size ?? 0);
+                const bytes = Number.isFinite(size) && size > 0 ? Math.floor(size) : 0;
+                const usage = String(desc?.usage ?? 'unknown');
+                gpuBufferTelemetry.createBufferCount += 1;
+                gpuBufferTelemetry.createBufferBytes += bytes;
+                gpuBufferTelemetry.maxBufferBytes = Math.max(gpuBufferTelemetry.maxBufferBytes, bytes);
+                const bucket = gpuBufferTelemetry.byUsage[usage] ?? { count: 0, bytes: 0 };
+                bucket.count += 1;
+                bucket.bytes += bytes;
+                gpuBufferTelemetry.byUsage[usage] = bucket;
+              } catch {
+                gpuBufferTelemetry.failures += 1;
+              }
+              return originalCreateBuffer.call(this, descriptor, ...rest);
+            };
+          }
+          return device;
+        };
+      }
       return adapter;
     };
-    webGpuBufferAllocationTelemetry.installed = true;
-  } catch {
-    webGpuBufferAllocationTelemetry.failures += 1;
+    gpuBufferTelemetry.installed = true;
   }
+} catch {
+  gpuBufferTelemetry.failures += 1;
 }
-
-function currentWebGpuBufferAllocationTelemetry(): WebGpuBufferAllocationTelemetry {
-  return {
-    ...webGpuBufferAllocationTelemetry,
-    byUsage: Object.fromEntries(Object.entries(webGpuBufferAllocationTelemetry.byUsage).map(([usage, stats]) => [usage, { ...stats }])),
-  };
-}
-
-installWebGpuBufferAllocationProbe();
 
 let evaluator: WorkerEvaluator | null = null;
 let searcher: Lc0PuctSearcher | null = null;
-let configuredModelUrl: string | null = null;
-let configuredOrtIoMode: Lc0OrtIoMode | undefined;
-let configuredServedModelUrl: string | undefined;
-let configuredInitKey: string | null = null;
-let configuredBackend = '';
-let configuredModelCacheStatus = '';
-let configuredOrtWasm: OrtRuntimeDiagnostics['wasm'] | undefined;
-let configuredOrtFallback: OrtRuntimeDiagnostics['fallback'];
-let configuredOrtRuntime: OrtSessionDiagnostics | undefined;
+let configured: ({ initKey: string } & ReadyPayload) | null = null;
 /** In-flight search abort controllers keyed by request id, so cancel messages can stop them. */
 const activeSearches = new Map<number, AbortController>();
 /** The running model load. Disposal aborts it so release need not wait out a large download. */
@@ -313,12 +258,9 @@ function post(message: WorkerResponse): void {
 
 const deviceLossMonitor = createOrtDeviceLossMonitor((loss) => post({ type: 'deviceLost', loss }));
 
-function enqueueModelOperation(work: () => Promise<void>): Promise<void> {
-  return operationQueue.run(work);
-}
-
 async function handleInit(message: InitMessage): Promise<void> {
   const selectedModelUrl = message.prefetchedModel?.url;
+  const physicalBatchMode = message.physicalBatchMode === 'logical' ? 'logical' : 'declared';
   const initKey = JSON.stringify({
     runtime: message.runtime ?? 'onnx',
     modelUrl: message.modelUrl,
@@ -345,22 +287,13 @@ async function handleInit(message: InitMessage): Promise<void> {
     dequantFold: message.dequantFold ?? null,
     ortWasmArtifact: message.ortWasmArtifact ?? null,
     ortWasmThreads: message.ortWasmThreads ?? null,
-    physicalBatchMode: message.physicalBatchMode === 'logical' ? 'logical' : 'declared',
+    physicalBatchMode,
     ortIoMode: message.ortIoMode ?? null,
     ortFreeDimensionOverrides: message.ortFreeDimensionOverrides ?? null,
   });
-  if (evaluator && configuredInitKey === initKey) {
-    post({
-      type: 'ready',
-      id: message.id,
-      backend: configuredBackend,
-      modelCache: `${configuredModelCacheStatus} · reused existing worker session`,
-      ortWasm: configuredOrtWasm,
-      ortFallback: configuredOrtFallback,
-      ortRuntime: configuredOrtRuntime,
-      ...(configuredServedModelUrl ? { servedModelUrl: configuredServedModelUrl } : {}),
-      ...(configuredOrtIoMode ? { ortIoMode: configuredOrtIoMode } : {}),
-    });
+  if (evaluator && configured?.initKey === initKey) {
+    const { initKey: _key, ...ready } = configured;
+    post({ type: 'ready', id: message.id, ...ready, modelCache: `${configured.modelCache} · reused existing worker session` });
     return;
   }
 
@@ -371,36 +304,28 @@ async function handleInit(message: InitMessage): Promise<void> {
   setOrtDequantFoldForCurrentThread(message.dequantFold ?? null);
   setRequestedOrtWasmArtifactForCurrentThread(message.ortWasmArtifact ?? null);
   setRequestedOrtWasmThreadsForCurrentThread(message.ortWasmThreads ?? null);
+
+  let baseEvaluator: WorkerEvaluator;
+  let nextEvaluator: WorkerEvaluator;
+  let nextSearcher: Lc0PuctSearcher;
+  let ready: ReadyPayload;
+  const isOnnx = message.runtime !== 'whole-onnx-webgpu' && message.runtime !== 'hybrid';
+
   if (message.runtime === 'whole-onnx-webgpu') {
     if (!message.wholeModelManifestUrl) throw new Error('whole-model LC0 worker init requires manifest URL');
-    const baseEvaluator: WorkerEvaluator = await Lc0WholeOnnxWebgpuEvaluator.create({
+    baseEvaluator = await Lc0WholeOnnxWebgpuEvaluator.create({
       manifestUrl: message.wholeModelManifestUrl,
       batch: message.wholeModelBatch,
       fetchTensorCache: message.wholeModelTensorCache,
       logger: (line) => console.info('[lc0 whole-model worker]', line),
     });
-    const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0 ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries }) : baseEvaluator;
-    const previousEvaluator = evaluator;
-    evaluator = nextEvaluator;
-    searcher = new Lc0PuctSearcher(nextEvaluator);
-    configuredModelUrl = message.wholeModelManifestUrl;
-    configuredInitKey = initKey;
-    deviceLossMonitor.stop();
-    configuredOrtRuntime = undefined;
-    configuredBackend = 'whole-onnx-webgpu';
-    configuredModelCacheStatus = `whole-model-webgpu${cacheLabel}`;
-    configuredOrtWasm = undefined;
-    configuredOrtFallback = undefined;
-    configuredServedModelUrl = undefined;
-    configuredOrtIoMode = undefined;
-    await previousEvaluator?.dispose?.();
-    post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
-    return;
-  }
-  if (message.runtime === 'hybrid') {
+    nextEvaluator = evalCacheEntries > 0 ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries }) : baseEvaluator;
+    nextSearcher = new Lc0PuctSearcher(nextEvaluator);
+    ready = { backend: 'whole-onnx-webgpu', modelCache: `whole-model-webgpu${cacheLabel}` };
+  } else if (message.runtime === 'hybrid') {
     if (!message.packUrl) throw new Error('hybrid LC0 worker init requires packUrl');
     if (!hybridEvaluatorFactory) throw new Error('hybrid LC0 runtime requires the dedicated hybrid search worker');
-    const baseEvaluator = hybridEvaluatorFactory({
+    baseEvaluator = hybridEvaluatorFactory({
       packUrl: message.packUrl,
       layers: message.layers,
       verifyShards: message.verifyShards,
@@ -410,145 +335,97 @@ async function handleInit(message: InitMessage): Promise<void> {
       legalPriorsBackend: message.legalPriorsBackend,
       encoderKernelVariant: message.encoderKernelVariant,
     });
-    const nextEvaluator: WorkerEvaluator = evalCacheEntries > 0 ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries }) : baseEvaluator;
-    const previousEvaluator = evaluator;
-    evaluator = nextEvaluator;
-    searcher = new Lc0PuctSearcher(nextEvaluator);
-    configuredModelUrl = message.packUrl;
-    configuredInitKey = initKey;
-    deviceLossMonitor.stop();
-    configuredOrtRuntime = undefined;
-    configuredBackend = message.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads';
-    configuredModelCacheStatus = `hybrid-pack-lazy${cacheLabel}`;
-    configuredOrtWasm = undefined;
-    configuredOrtFallback = undefined;
-    configuredServedModelUrl = undefined;
-    configuredOrtIoMode = undefined;
-    await previousEvaluator?.dispose?.();
-    post({ type: 'ready', id: message.id, backend: configuredBackend, modelCache: configuredModelCacheStatus });
-    return;
-  }
-  // Throttle progress posts to ~2MB steps so a large net does not flood the
-  // main thread with one message per network chunk.
-  let lastReportedBytes = -Infinity;
-  const physicalBatchMode = message.physicalBatchMode === 'logical' ? 'logical' : 'declared';
-  const initAbort = new AbortController();
-  activeInit = initAbort;
-  let prefetchedLoad = message.prefetchedModel?.load;
-  message.prefetchedModel = undefined;
-  const deps = prefetchedLoad && {
-    ...DEFAULT_LC0_ORT_EVALUATOR_DEPS,
-    load: (url: string, options: Parameters<typeof DEFAULT_LC0_ORT_EVALUATOR_DEPS.load>[1]) => {
-      const load = url === selectedModelUrl ? prefetchedLoad : undefined;
-      prefetchedLoad = undefined;
-      return load ? Promise.resolve(load) : DEFAULT_LC0_ORT_EVALUATOR_DEPS.load(url, options);
-    },
-  };
-  const created = await createLc0OnnxEvaluatorFromUrl(
-    message.modelUrl,
-    {
-      deviceSelection: message.deviceModelSelection === true,
-      selectedModelUrl,
-      evaluator: {
-        physicalBatchMode,
-        ioMode: message.ortIoMode ?? defaultLc0OrtIoMode(message.deviceModelSelection === true),
-        freeDimensionOverrides: message.ortFreeDimensionOverrides,
-      },
-      load: {
-        cache: message.cacheModel,
-        allowUnverified: message.allowUnverifiedModel,
-        requestPersistentStorage: message.requestPersistentModelStorage,
-        minimumFreeBytesAfterCache: message.minimumFreeBytesAfterModelCache,
-        noDownload: message.noModelDownload,
-        signal: initAbort.signal,
-        onProgress: message.reportDownloadProgress
-          ? (loadedBytes, totalBytes) => {
-              if (loadedBytes - lastReportedBytes < 2_000_000 && loadedBytes !== totalBytes) return;
-              lastReportedBytes = loadedBytes;
-              post({ type: 'downloadProgress', id: message.id, loadedBytes, totalBytes });
-            }
-          : undefined,
-      },
-    },
-    deps,
-  ).finally(() => {
-    if (activeInit === initAbort) activeInit = null;
-  });
-  const baseEvaluator = created.evaluator;
-  const modelLoad = created.modelLoad;
-  let nextEvaluator: WorkerEvaluator;
-  let nextSearcher: Lc0PuctSearcher;
-  let diagnostics: OrtRuntimeDiagnostics;
-  let nextModelCacheStatus: string;
-  try {
     nextEvaluator = evalCacheEntries > 0 ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries }) : baseEvaluator;
     nextSearcher = new Lc0PuctSearcher(nextEvaluator);
-    diagnostics = await collectOrtRuntimeDiagnostics();
-    nextModelCacheStatus = `${describeLc0ModelLoad(modelLoad)}${cacheLabel}`;
-  } catch (error) {
-    await baseEvaluator.dispose?.();
-    throw error;
+    ready = {
+      backend: message.headBackend === 'wgsl' ? 'lc0web-wgsl-encoder-wgsl-heads' : 'lc0web-wgsl-encoder-ort-heads',
+      modelCache: `hybrid-pack-lazy${cacheLabel}`,
+    };
+  } else {
+    // Throttle progress posts to ~2MB steps so a large net does not flood the
+    // main thread with one message per network chunk.
+    let lastReportedBytes = -Infinity;
+    const initAbort = new AbortController();
+    activeInit = initAbort;
+    let prefetchedLoad = message.prefetchedModel?.load;
+    message.prefetchedModel = undefined;
+    const deps = prefetchedLoad && {
+      ...DEFAULT_LC0_ORT_EVALUATOR_DEPS,
+      load: (url: string, options: Parameters<typeof DEFAULT_LC0_ORT_EVALUATOR_DEPS.load>[1]) => {
+        const load = url === selectedModelUrl ? prefetchedLoad : undefined;
+        prefetchedLoad = undefined;
+        return load ? Promise.resolve(load) : DEFAULT_LC0_ORT_EVALUATOR_DEPS.load(url, options);
+      },
+    };
+    const created = await createLc0OnnxEvaluatorFromUrl(
+      message.modelUrl,
+      {
+        deviceSelection: message.deviceModelSelection === true,
+        selectedModelUrl,
+        evaluator: {
+          physicalBatchMode,
+          ioMode: message.ortIoMode ?? defaultLc0OrtIoMode(message.deviceModelSelection === true),
+          freeDimensionOverrides: message.ortFreeDimensionOverrides,
+        },
+        load: {
+          cache: message.cacheModel,
+          allowUnverified: message.allowUnverifiedModel,
+          requestPersistentStorage: message.requestPersistentModelStorage,
+          minimumFreeBytesAfterCache: message.minimumFreeBytesAfterModelCache,
+          noDownload: message.noModelDownload,
+          signal: initAbort.signal,
+          onProgress: message.reportDownloadProgress
+            ? (loadedBytes, totalBytes) => {
+                if (loadedBytes - lastReportedBytes < 2_000_000 && loadedBytes !== totalBytes) return;
+                lastReportedBytes = loadedBytes;
+                post({ type: 'downloadProgress', id: message.id, loadedBytes, totalBytes });
+              }
+            : undefined,
+        },
+      },
+      deps,
+    ).finally(() => {
+      if (activeInit === initAbort) activeInit = null;
+    });
+    const onnxEvaluator = created.evaluator;
+    baseEvaluator = onnxEvaluator;
+    try {
+      nextEvaluator = evalCacheEntries > 0 ? new CachedLc0Evaluator(baseEvaluator, { maxEntries: evalCacheEntries }) : baseEvaluator;
+      nextSearcher = new Lc0PuctSearcher(nextEvaluator);
+      const diagnostics = await collectOrtRuntimeDiagnostics();
+      ready = {
+        backend: diagnostics.describe,
+        modelCache: `${describeLc0ModelLoad(created.modelLoad)}${cacheLabel}`,
+        ortWasm: diagnostics.wasm,
+        ortFallback: diagnostics.fallback,
+        ortRuntime: {
+          graphOptimizationLevel: diagnostics.graphOptimizationLevel,
+          ioMode: onnxEvaluator.ioMode,
+          fixedBatchSize: onnxEvaluator.fixedBatchSize,
+          dequantFoldEnabled: diagnostics.dequantFoldEnabled,
+          dequantFold: diagnostics.dequantFold,
+        },
+        servedModelUrl: created.servedUrl,
+        ortIoMode: onnxEvaluator.ioMode,
+      };
+    } catch (error) {
+      await baseEvaluator.dispose?.();
+      throw error;
+    }
   }
+
   // Keep the working session if replacement creation or diagnostics fail.
   const previousEvaluator = evaluator;
   evaluator = nextEvaluator;
   searcher = nextSearcher;
-  configuredModelUrl = message.modelUrl;
-  configuredServedModelUrl = created.servedUrl;
-  configuredOrtIoMode = baseEvaluator.ioMode;
-  configuredInitKey = initKey;
-  configuredBackend = diagnostics.describe;
-  configuredModelCacheStatus = nextModelCacheStatus;
-  configuredOrtWasm = diagnostics.wasm;
-  configuredOrtFallback = diagnostics.fallback;
-  configuredOrtRuntime = {
-    graphOptimizationLevel: diagnostics.graphOptimizationLevel,
-    ioMode: baseEvaluator.ioMode,
-    fixedBatchSize: baseEvaluator.fixedBatchSize,
-    dequantFoldEnabled: diagnostics.dequantFoldEnabled,
-    dequantFold: diagnostics.dequantFold,
-  };
-  deviceLossMonitor.refresh();
+  configured = { initKey, ...ready };
+  if (isOnnx) {
+    deviceLossMonitor.refresh();
+  } else {
+    deviceLossMonitor.stop();
+  }
   await previousEvaluator?.dispose?.();
-  post({
-    type: 'ready',
-    id: message.id,
-    backend: configuredBackend,
-    modelCache: configuredModelCacheStatus,
-    ortWasm: configuredOrtWasm,
-    ortFallback: configuredOrtFallback,
-    ortRuntime: configuredOrtRuntime,
-    servedModelUrl: configuredServedModelUrl,
-    ortIoMode: configuredOrtIoMode,
-  });
-}
-
-async function handleEvaluate(message: EvaluateMessage): Promise<void> {
-  if (!evaluator) throw new Error('LC0 search worker evaluator is not initialized');
-  post({ type: 'evaluationResult', id: message.id, result: await evaluator.evaluate(message.input) });
-}
-
-async function handleEvaluateBatch(message: EvaluateBatchMessage): Promise<void> {
-  if (!evaluator) throw new Error('LC0 search worker evaluator is not initialized');
-  post({ type: 'evaluationBatchResult', id: message.id, result: await evaluator.evaluateBatch(message.inputs) });
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
-}
-
-function currentExecutionFootprint(): Lc0WebExecutionFootprint | undefined {
-  const direct = evaluator?.executionFootprint?.();
-  if (direct) return direct;
-  const inner = (evaluator as { inner?: { executionFootprint?: () => Lc0WebExecutionFootprint | undefined } } | null)?.inner;
-  return inner?.executionFootprint?.();
-}
-
-function currentCacheFootprint(): Lc0EvaluationCacheFootprint | undefined {
-  const direct = evaluator?.cacheFootprint?.();
-  if (direct) return direct;
-  const inner = (evaluator as { inner?: { cacheFootprint?: () => Lc0EvaluationCacheFootprint | undefined } } | null)?.inner;
-  return inner?.cacheFootprint?.();
+  post({ type: 'ready', id: message.id, ...ready });
 }
 
 async function handleSearch(message: SearchMessage): Promise<void> {
@@ -565,52 +442,33 @@ async function handleSearch(message: SearchMessage): Promise<void> {
   const controller = new AbortController();
   activeSearches.set(message.id, controller);
   try {
-    const searchOptions: Lc0SearchOptions = {
-      visits: message.visits,
-      movetimeMs: message.movetimeMs,
-      batchSize: message.batchSize ?? 1,
-      batchCollisionMode: message.batchCollisionMode,
-      batchPipelineDepth: message.batchPipelineDepth,
-      traceSearchVisits: message.traceSearchVisits,
-      multiPv: message.multiPv,
-      reuseTree: message.reuseTree,
-      earlyStop: message.earlyStop,
-      cpuct: message.cpuct,
-      fpu: message.fpu,
-      cpuctSchedule: message.cpuctSchedule,
-      fpuStrategy: message.fpuStrategy,
-      fpuReduction: message.fpuReduction,
-      temperature: message.temperature,
-      drawScore: message.drawScore,
-      contemptElo: message.contemptElo,
-      searchContemptLimit: message.searchContemptLimit,
-      progressEveryMs: message.progressEveryMs,
-      onProgress: message.reportProgress ? (progress) => post({ type: 'searchProgress', id: message.id, progress }) : undefined,
+    const { type: _type, id, input, reportProgress, ...rest } = message;
+    const { search, ...summary } = await searcher.search(input, {
+      ...rest,
+      batchSize: rest.batchSize ?? 1,
+      onProgress: reportProgress ? (progress) => post({ type: 'searchProgress', id, progress }) : undefined,
       signal: controller.signal,
       yieldEveryMs: 16,
-    };
-    const result = await searcher.search(message.input, searchOptions);
+    });
+    const innerEvaluator = (evaluator as { inner?: WorkerEvaluator } | null)?.inner;
     post({
       type: 'searchResult',
-      id: message.id,
+      id,
       result: {
-        fen: result.fen,
-        move: result.move,
-        visits: result.visits,
-        value: result.value,
-        children: result.children,
-        pv: result.pv,
-        multiPv: result.multiPv,
-        stats: result.search.stats,
+        ...summary,
+        stats: search.stats,
         elapsedMs: nowMs() - started,
         cancelled: controller.signal.aborted,
-        executionFootprint: currentExecutionFootprint(),
-        cacheFootprint: currentCacheFootprint(),
-        gpuBufferAllocation: currentWebGpuBufferAllocationTelemetry(),
+        executionFootprint: evaluator?.executionFootprint?.() ?? innerEvaluator?.executionFootprint?.(),
+        cacheFootprint: evaluator?.cacheFootprint?.() ?? innerEvaluator?.cacheFootprint?.(),
+        gpuBufferAllocation: {
+          ...gpuBufferTelemetry,
+          byUsage: Object.fromEntries(Object.entries(gpuBufferTelemetry.byUsage).map(([usage, stats]) => [usage, { ...stats }])),
+        },
       },
     });
   } catch (error) {
-    if (!isAbortError(error)) throw error;
+    if (!(error instanceof Error && error.name === 'AbortError')) throw error;
     // Cancellation discards the partial tree; report an empty cancelled result.
     post({
       type: 'searchResult',
@@ -622,11 +480,11 @@ async function handleSearch(message: SearchMessage): Promise<void> {
   }
 }
 
-function handleCancel(message: CancelMessage): void {
-  if (message.target !== undefined) {
-    const controller = activeSearches.get(message.target);
+function cancelRequests(target?: number): void {
+  if (target !== undefined) {
+    const controller = activeSearches.get(target);
     if (controller) controller.abort();
-    else noteSearchCancel(pendingSearchCancels, message.target);
+    else noteSearchCancel(pendingSearchCancels, target);
     return;
   }
   for (const controller of activeSearches.values()) controller.abort();
@@ -641,16 +499,16 @@ export function startSearchWorker(options: { createHybridEvaluator?: HybridEvalu
     // Cancellation is synchronous and must not be wrapped in the error reporter,
     // so an abort never posts a spurious error for the cancel request itself.
     if (message.type === 'cancel') {
-      handleCancel(message);
+      cancelRequests(message.target);
       return;
     }
     // Seal admission immediately, but release only behind already admitted model work.
     if (retiring) return;
     if (message.type === 'dispose') {
       retiring = true;
-      handleCancel({ type: 'cancel', id: message.id });
+      cancelRequests();
     }
-    void enqueueModelOperation(async () => {
+    void operationQueue.run(async () => {
       try {
         // Work queued before dispose would only delay release (an init would start a
         // fresh download that the 1.5 s disposal timeout then waits on).
@@ -661,26 +519,25 @@ export function startSearchWorker(options: { createHybridEvaluator?: HybridEvalu
           evaluator = null;
           searcher?.resetTree();
           searcher = null;
-          configuredModelUrl = null;
-          configuredInitKey = null;
+          configured = null;
           pendingSearchCancels.length = 0;
           await releaseOrtWorkerResources(async () => {
             await previous?.dispose?.();
           });
           post({ type: 'disposed', id: message.id });
-        } else if (message.type === 'init') await handleInit(message);
-        else if (message.type === 'evaluate') {
-          if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
-          await handleEvaluate(message);
-        } else if (message.type === 'evaluateBatch') {
-          if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
-          await handleEvaluateBatch(message);
+        } else if (message.type === 'init') {
+          await handleInit(message);
         } else if (message.type === 'resetSearch') {
           searcher?.resetTree();
           if (message.clearEvalCache) (evaluator as CachedLc0Evaluator | null)?.clearCache?.();
           post({ type: 'searchReset', id: message.id });
+        } else if (!configured || !evaluator) {
+          throw new Error('LC0 search worker missing model URL');
+        } else if (message.type === 'evaluate') {
+          post({ type: 'evaluationResult', id: message.id, result: await evaluator.evaluate(message.input) });
+        } else if (message.type === 'evaluateBatch') {
+          post({ type: 'evaluationBatchResult', id: message.id, result: await evaluator.evaluateBatch(message.inputs) });
         } else if (message.type === 'search') {
-          if (!configuredModelUrl) throw new Error('LC0 search worker missing model URL');
           await handleSearch(message);
         }
       } catch (error) {
