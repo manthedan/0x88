@@ -496,6 +496,49 @@ test('shared quantized inputs preserve the old folded-before-original ordering a
   assert.deepEqual(folded.bytes, expected);
 });
 
+test('typed-array dequant fast paths match reference across odd/even offsets, negative zero, overflow, and axis layouts', () => {
+  const qVals = Array.from({ length: 256 }, (_, i) => i - 128);
+  const scales = [-0.5, 0.0, 0.0001220703125, 1000.0];
+  for (const outName of ['W', 'W1', 'W12', 'W123']) {
+    // Per-column (axis=1, inner=1) f16 output with f16 scales
+    const colBytes = model({
+      nodes: [node('DequantizeLinear', ['Wq', 'Ws'], [outName], [attrInt('axis', 1)])],
+      initializers: [encodeTensorProto('Wq', ONNX_INT8, [64, 4], int8Bytes(qVals)), encodeTensorProto('Ws', ONNX_FLOAT16, [4], f16Bytes(scales))],
+      inputs: [],
+      outputs: [valueInfo(outName, ONNX_FLOAT16, [64, 4])],
+    });
+    const decodedScales = scales.map((s) => f16BitsToF32(f32ToF16Bits(s)));
+    const expectedCol = f16Bytes(qVals.map((v, i) => v * decodedScales[i % 4]));
+    assert.deepEqual(foldedRaw(foldOnnxDequantizeLinear(colBytes).bytes, outName), expectedCol, `col f16 ${outName}`);
+
+    // Per-column (axis=1, inner=1) f32 output
+    const colF32Bytes = model({
+      nodes: [node('DequantizeLinear', ['Wq', 'Ws'], [outName], [attrInt('axis', 1), attrInt('output_dtype', ONNX_FLOAT)])],
+      initializers: [encodeTensorProto('Wq', ONNX_INT8, [64, 4], int8Bytes(qVals)), encodeTensorProto('Ws', ONNX_FLOAT, [4], f32Bytes(scales))],
+      inputs: [],
+      outputs: [valueInfo(outName, ONNX_FLOAT, [64, 4])],
+    });
+    const expectedColF32 = f32Bytes(qVals.map((v, i) => v * Math.fround(scales[i % 4])));
+    assert.deepEqual(foldedRaw(foldOnnxDequantizeLinear(colF32Bytes).bytes, outName), expectedColF32, `col f32 ${outName}`);
+
+    // Per-row (axis=0, inner=64) with zero point and f32->f16 rounding
+    const zp = [1, -2, 0, 5];
+    const rowScales = [1 / 3, -0.0003, 512.0, 1 + 2 ** -11];
+    const rowBytes = model({
+      nodes: [node('DequantizeLinear', ['Wq', 'Ws', 'Wz'], [outName], [attrInt('axis', 0), attrInt('output_dtype', ONNX_FLOAT16)])],
+      initializers: [
+        encodeTensorProto('Wq', ONNX_INT8, [4, 64], int8Bytes(qVals)),
+        encodeTensorProto('Ws', ONNX_FLOAT, [4], f32Bytes(rowScales)),
+        encodeTensorProto('Wz', ONNX_INT8, [4], int8Bytes(zp)),
+      ],
+      inputs: [],
+      outputs: [valueInfo(outName, ONNX_FLOAT16, [4, 64])],
+    });
+    const expectedRow = f16Bytes(qVals.map((v, i) => (v - zp[i >> 6]) * Math.fround(rowScales[i >> 6])));
+    assert.deepEqual(foldedRaw(foldOnnxDequantizeLinear(rowBytes).bytes, outName), expectedRow, `row f16 ${outName}`);
+  }
+});
+
 const QDQ8 = process.env.LC0_QDQ8_MODEL ?? '../models/lc0-bestnets/onnx/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8.onnx';
 test('shipped LC0 QDQ8 model folds completely and evaluates like the in-graph version', { skip: skipUnlessAssets(QDQ8) }, async () => {
   const bytes = readFileSync(QDQ8);
