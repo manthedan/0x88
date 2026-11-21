@@ -7,7 +7,7 @@ import {
   loadLc0ModelForOrt,
   untilAborted,
 } from './modelCache.ts';
-import { Lc0OnnxEvaluator, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
+import { defaultLc0OrtIoMode, Lc0OnnxEvaluator, type Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
 import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
 
 /** The shipped Lc0 Small model: batch-1 f16 export with weight-only int8 QDQ. */
@@ -207,6 +207,7 @@ export async function createLc0OnnxEvaluatorFromUrl(
     input ??= await reloadPrimary();
     const creating = deps.createEvaluator(input, {
       ...options.evaluator,
+      ioMode: options.evaluator?.ioMode ?? defaultLc0OrtIoMode(options.deviceSelection === true),
       signal: loadOptions.signal,
       ...(wasmFallbackModel ? { wasmFallbackModel } : {}),
       ...(modelLoad?.info.sha256Valid === true ? { reloadModel: reloadPrimary } : {}),

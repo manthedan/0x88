@@ -185,6 +185,23 @@ test('explicit-URL callers (no deviceSelection) get exactly the URL they named',
   assert.equal(result.servedUrl, ORIGINAL);
 });
 
+test('createLc0OnnxEvaluatorFromUrl defaults ioMode from deviceSelection unless overridden', async () => {
+  const observed = [];
+  const makeDeps = () => {
+    const fake = fakeDeps({ providers: ['webgpu', 'wasm'], adapterVendor: 'nvidia' });
+    const create = fake.deps.createEvaluator;
+    fake.deps.createEvaluator = (input, options) => {
+      observed.push(options.ioMode);
+      return create(input, options);
+    };
+    return fake.deps;
+  };
+  await createLc0OnnxEvaluatorFromUrl(ORIGINAL, { deviceSelection: true }, makeDeps());
+  await createLc0OnnxEvaluatorFromUrl(ORIGINAL, {}, makeDeps());
+  await createLc0OnnxEvaluatorFromUrl(ORIGINAL, { deviceSelection: true, evaluator: { ioMode: 'cpu' } }, makeDeps());
+  assert.deepEqual(observed, ['gpu-capture', 'cpu', 'cpu']);
+});
+
 test('WebGPU session failure: the WASM fallback loads and runs the ORIGINAL URL', async () => {
   const fake = fakeDeps(APPLE_WEBGPU, { sessionFails: true });
   const result = await createLc0OnnxEvaluatorFromUrl(ORIGINAL, { deviceSelection: true }, fake.deps);
