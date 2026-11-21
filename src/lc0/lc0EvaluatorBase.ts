@@ -169,11 +169,11 @@ export function legalPolicyPriors(
   policyTemperature: number,
   prepared?: readonly Lc0PreparedLegalMove[],
   policyOffset = 0,
+  f16Bits = false,
 ): Lc0LegalPrior[] {
-  const f16 = logits instanceof Uint16Array;
   const logitAt = (index: number) => {
     const value = logits[policyOffset + index];
-    return (f16 && value !== undefined ? f16BitsToF32(value) : Number(value)) / policyTemperature;
+    return (f16Bits && value !== undefined ? f16BitsToF32(value) : Number(value)) / policyTemperature;
   };
   const moveTransform = board.turn === 'b' ? LC0_MIRROR_TRANSFORM : 0;
   const legal = (prepared ?? legalMoves(board)).map((entry) => {

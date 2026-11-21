@@ -98,9 +98,15 @@ export function defaultLc0OrtIoMode(deviceModelSelection: boolean): Lc0OrtIoMode
   return deviceModelSelection ? 'gpu-capture' : 'cpu';
 }
 
-function outputValue(data: ArrayLike<number>, index: number): number {
-  const value = data[index];
-  return data instanceof Uint16Array && value !== undefined ? f16BitsToF32(value) : Number(value);
+type Lc0Output = { data: ArrayLike<number>; f16Bits: boolean };
+
+function outputData(type: string | undefined, data: ArrayLike<number>): Lc0Output {
+  return { data, f16Bits: type === 'float16' && data instanceof Uint16Array };
+}
+
+function outputValue(output: Lc0Output, index: number): number {
+  const value = output.data[index];
+  return output.f16Bits && value !== undefined ? f16BitsToF32(value) : Number(value);
 }
 
 async function tensorDataTimed(
@@ -108,12 +114,12 @@ async function tensorDataTimed(
   name: string,
   timingKey: string,
   timing: Record<string, number>,
-): Promise<ArrayLike<number>> {
+): Promise<Lc0Output> {
   const tensor = outputs[name];
   if (!tensor) throw new Error(`LC0 ONNX output ${name} missing`);
   const started = ort.tinyLeelaNowMs();
   try {
-    return (await ort.ortTensorData(tensor)) as ArrayLike<number>;
+    return outputData(tensor.type, (await ort.ortTensorData(tensor)) as ArrayLike<number>);
   } finally {
     timing[`${timingKey}GetDataMs`] = ort.tinyLeelaNowMs() - started;
   }
@@ -125,10 +131,10 @@ function sessionInputMetadata(session: ort.InferenceSession): { type?: string; s
     | undefined;
 }
 
-function gpuIoOutput(outputs: OrtGpuIoOutputs, name: string): ArrayLike<number> {
+function gpuIoOutput(outputs: OrtGpuIoOutputs, binding: OrtGpuIoBinding, name: string): Lc0Output {
   const data = outputs[name];
   if (!data) throw new Error(`LC0 ONNX output ${name} missing`);
-  return data;
+  return outputData(binding.outputs.find((spec) => spec.name === name)?.type, data);
 }
 
 /**
@@ -394,18 +400,18 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     const webgpuBefore = ort.getOrtWebGpuDiagnosticsSnapshot();
     const ortRunStarted = ort.tinyLeelaNowMs();
     const downloadTiming: Record<string, number> = {};
-    let policy: ArrayLike<number>;
-    let wdlRaw: ArrayLike<number>;
-    let mlhRaw: ArrayLike<number> | undefined;
+    let policy: Lc0Output;
+    let wdlRaw: Lc0Output;
+    let mlhRaw: Lc0Output | undefined;
     let ortRunMs: number;
     let allGetDataMs: number;
     if (this.gpuIo) {
       const gpuOutputs = await this.gpuIo.run(encodedPlanes);
       ortRunMs = ort.tinyLeelaNowMs() - ortRunStarted;
       const allGetDataStarted = ort.tinyLeelaNowMs();
-      policy = gpuIoOutput(gpuOutputs, LC0_ONNX_OUTPUT_POLICY);
-      wdlRaw = gpuIoOutput(gpuOutputs, LC0_ONNX_OUTPUT_WDL);
-      mlhRaw = gpuOutputs[LC0_ONNX_OUTPUT_MLH];
+      policy = gpuIoOutput(gpuOutputs, this.gpuIo, LC0_ONNX_OUTPUT_POLICY);
+      wdlRaw = gpuIoOutput(gpuOutputs, this.gpuIo, LC0_ONNX_OUTPUT_WDL);
+      mlhRaw = LC0_ONNX_OUTPUT_MLH in gpuOutputs ? gpuIoOutput(gpuOutputs, this.gpuIo, LC0_ONNX_OUTPUT_MLH) : undefined;
       allGetDataMs = ort.tinyLeelaNowMs() - allGetDataStarted;
     } else {
       const inputTensor = encodedPlanes instanceof Uint16Array
@@ -464,7 +470,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       const legalPriorsStarted = ort.tinyLeelaNowMs();
       const wdlOffset = i * LC0_WDL_SIZE;
       const wdl: [number, number, number] = [outputValue(wdlRaw, wdlOffset), outputValue(wdlRaw, wdlOffset + 1), outputValue(wdlRaw, wdlOffset + 2)];
-      const legalPriors = legalPolicyPriors(current.board, policy, this.policyTemperature, current.preparedLegalMoves, i * LC0_POLICY_SIZE);
+      const legalPriors = legalPolicyPriors(current.board, policy.data, this.policyTemperature, current.preparedLegalMoves, i * LC0_POLICY_SIZE, policy.f16Bits);
       const legalPriorsMs = ort.tinyLeelaNowMs() - legalPriorsStarted;
       return {
         fen: current.fen,

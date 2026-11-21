@@ -75,6 +75,26 @@ test('f16 batches preserve exact input bits and legal outputs, lease distinct co
   await evaluator.dispose();
 });
 
+test('uint16 ONNX outputs remain integers rather than being decoded as float16 bits', async () => {
+  const board = currentBoardAndFen(START_FEN).board;
+  const policy = new Uint16Array(1858).fill(36);
+  policy[legalPolicyPriors(board, policy, 1)[0].index] = 37;
+  const evaluator = new Lc0OnnxEvaluator({
+    async run() {
+      return {
+        '/output/policy': { type: 'uint16', data: policy },
+        '/output/wdl': { type: 'uint16', data: Uint16Array.of(1, 0, 0) },
+        '/output/mlh': { type: 'uint16', data: Uint16Array.of(36) },
+      };
+    },
+  }, { policyTemperature: 1 });
+  const result = await evaluator.evaluate(START_FEN);
+  assert.deepEqual(result.legalPriors, legalPolicyPriors(board, Float32Array.from(policy), 1));
+  assert.deepEqual(result.wdl, [1, 0, 0]);
+  assert.equal(result.mlh, 36);
+  await evaluator.dispose();
+});
+
 const skipIfMissing = skipUnlessAssets;
 
 async function compareBatchArtifact(path, size) {
