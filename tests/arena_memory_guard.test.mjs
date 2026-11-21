@@ -4,6 +4,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { ARENA_BIG_NET_MEMORY_REASON, arenaBigNetPairingBlocked, arenaBigNetSeatBlocked } from '../src/lc0/arenaMemoryGuard.ts';
 import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
+import { arenaCpuOnlyPool } from '../src/lc0/arenaScheduleRunner.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
 import { PHONE_LARGE_NET_REASON, phoneSafeEngineVariant } from '../src/lc0/phoneLargeNetPolicy.ts';
 
@@ -43,6 +44,17 @@ function extract(start, end, wrap = (text) => text) {
   assert.ok(from >= 0 && to > from);
   return stripTypeScriptTypes(wrap(source.slice(from, to)));
 }
+
+test('constrained Arena reuses the shared workers even with a one-thread CPU pool', () => {
+  let constrained = true;
+  const isolatedCpuPool = new Function(
+    'activeSeatRows', 'arenaCpuOnlyPool', 'stockfishThreadsPlanned', 'isMemoryConstrainedDevice',
+    `${extract('function isolatedCpuPool(', 'function selectedArenaConcurrency(')}\nreturn isolatedCpuPool;`,
+  )(() => [cpu, cpu], arenaCpuOnlyPool, () => 1, () => constrained);
+  assert.equal(isolatedCpuPool(), false);
+  constrained = false;
+  assert.equal(isolatedCpuPool(), true, 'desktop can still use private workers');
+});
 
 test('Arena start entry blocks restored/URL/programmatic pairings before acquiring assets or searchers', async () => {
   const nodes = new Map();

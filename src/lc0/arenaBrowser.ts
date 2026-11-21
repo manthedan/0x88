@@ -2089,6 +2089,7 @@ function refreshSeatControls(): void {
 }
 
 function isolatedCpuPool(): boolean {
+  if (isMemoryConstrainedDevice()) return false;
   return (
     arenaCpuOnlyPool(activeSeatRows().map((row) => row.family)) && (!activeSeatRows().some((row) => row.family === 'sf') || stockfishThreadsPlanned() === 1)
   );
@@ -2105,7 +2106,7 @@ function selectedArenaConcurrency(): number {
 function refreshArenaConcurrencyNote(): void {
   el('arenaConcurrencyNote').textContent = isolatedCpuPool()
     ? `${selectedArenaConcurrency()} game(s) at once · private workers, Threads=1, Hash=64 MiB per engine. Board follows the earliest active game.`
-    : 'One game at a time for neural pools or threaded Stockfish.';
+    : 'One game at a time with shared engine workers.';
 }
 
 function arenaBudgetMode(): 'fixed' | 'movetime' {
