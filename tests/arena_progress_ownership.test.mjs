@@ -155,12 +155,12 @@ for (const operation of ['warmup', 'move']) {
 }
 
 for (const approved of [false, true]) {
-  test(`Arena asks before retrying a lost move with an evicted WASM net (approved=${approved})`, async (t) => {
+  test(`Arena does not inherit a warm worker's prior download approval during recovery (approved=${approved})`, async (t) => {
     const prevWorker = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
     const inits = [];
     const searches = [];
     const prompts = [];
-    const arenaRunDownloads = new Set();
+    const arenaRunDownloads = new Set(['bt4']);
     globalThis.Worker = class extends EventTarget {
       postMessage(message) {
         const emit = (data) => this.dispatchEvent(new MessageEvent('message', { data: { id: message.id, ...data } }));
@@ -187,7 +187,8 @@ for (const approved of [false, true]) {
       if (prevWorker) Object.defineProperty(globalThis, 'Worker', prevWorker);
       else delete globalThis.Worker;
     });
-    await searcher.init({ evalCacheEntries: 2048, noDownload: true });
+    await searcher.init({ evalCacheEntries: 2048 });
+    arenaRunDownloads.clear();
     const deps = {
       BIG_NETS: { bt4: BT4_NET },
       LC0_MODEL_DOWNLOAD_NOT_APPROVED,
@@ -226,7 +227,7 @@ for (const approved of [false, true]) {
     assert.deepEqual(prompts, [{ cached: false }]);
     assert.deepEqual(
       inits.map(({ ep, noModelDownload }) => [ep, noModelDownload]),
-      [['auto', true], ['auto', true], ['wasm', true], ...(approved ? [['wasm', undefined]] : [])],
+      [['auto', undefined], ['auto', true], ['wasm', true], ...(approved ? [['wasm', undefined]] : [])],
     );
     assert.deepEqual(
       searches,

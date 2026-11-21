@@ -524,6 +524,8 @@ function abortArenaPickerConsent(): void {
 async function bigNetFor(key: 'bt4' | 't3', signal: AbortSignal) {
   const config = BIG_NETS[key];
   const evalCacheEntries = arenaCacheEntries();
+  const constrained = isMemoryConstrainedDevice();
+  const recoveryNoDownload = () => constrained && !arenaRunDownloads.has(key);
   const notApproved = () => new Error(`Lc0 ${config.name} is no longer cached and its download was not approved.`);
   const approveRecoveryDownload = async () => {
     signal.throwIfAborted();
@@ -536,7 +538,7 @@ async function bigNetFor(key: 'bt4' | 't3', signal: AbortSignal) {
     arenaRunDownloads.add(key);
   };
   let cacheOnly = false;
-  if (isMemoryConstrainedDevice() && !arenaRunDownloads.has(key) && !peekBigNetSearcher(key)?.isInitializedFor({ evalCacheEntries })) {
+  if (recoveryNoDownload() && !peekBigNetSearcher(key)?.isInitializedFor({ evalCacheEntries })) {
     const consent = await requestLargeNetDownloadConsent(config, signal);
     signal.throwIfAborted();
     if (!consent) throw notApproved();
@@ -544,7 +546,7 @@ async function bigNetFor(key: 'bt4' | 't3', signal: AbortSignal) {
     cacheOnly = consent === 'cached';
   }
   const reclaim =
-    isMemoryConstrainedDevice() &&
+    constrained &&
     preparePhoneBigNet(
       key,
       evalCacheEntries,
@@ -581,7 +583,7 @@ async function bigNetFor(key: 'bt4' | 't3', signal: AbortSignal) {
       await approveRecoveryDownload();
     }
   }
-  return { config, searcher, approveRecoveryDownload };
+  return { config, searcher, recoveryNoDownload, approveRecoveryDownload };
 }
 let runtimeIsolation = globalThis.crossOriginIsolated === true;
 let runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
@@ -3038,7 +3040,7 @@ function buildEngines() {
   const lc0BigNetMove =
     (engineId: string, row: EngineRow, key: 'bt4' | 't3'): ArenaEngine['move'] =>
     async (positions, signal) => {
-      const { config, searcher, approveRecoveryDownload } = await bigNetFor(key, signal);
+      const { config, searcher, recoveryNoDownload, approveRecoveryDownload } = await bigNetFor(key, signal);
       // A stopped move gives up its progress display at once; its late download
       // callbacks and finally must not touch the next operation's display.
       const onAbort = () => {
@@ -3062,6 +3064,7 @@ function buildEngines() {
             batchPipelineDepth: config.recommendedPipelineDepth,
             evalCacheEntries: arenaCacheEntries(),
             signal,
+            recoveryNoDownload,
             approveRecoveryDownload,
             onProgress: (progress) => setArenaVisitProgress(engineId, label, progress),
           },
@@ -3220,7 +3223,7 @@ function buildEngines() {
     renderCacheInfo();
   };
   const lc0BigNetWarmup = (variant: 'bt4' | 't3') => async (signal: AbortSignal) => {
-    const { config, searcher, approveRecoveryDownload } = await bigNetFor(variant, signal);
+    const { config, searcher, recoveryNoDownload, approveRecoveryDownload } = await bigNetFor(variant, signal);
     // Same ownership as a move: Stop hides this warmup's display immediately.
     const onAbort = () => hideDownloadProgress();
     signal.addEventListener('abort', onAbort, { once: true });
@@ -3236,6 +3239,7 @@ function buildEngines() {
           batchPipelineDepth: config.recommendedPipelineDepth,
           evalCacheEntries: arenaCacheEntries(),
           signal,
+          recoveryNoDownload,
           approveRecoveryDownload,
         },
       );

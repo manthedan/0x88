@@ -136,6 +136,7 @@ export interface Bt4SearchProgress extends Bt4SearchResult {
 export interface Bt4SearchOptions {
   visits?: number | ((backend: string) => number);
   retryOnDeviceLoss?: boolean;
+  recoveryNoDownload?: () => boolean;
   approveRecoveryDownload?: () => Promise<void>;
   movetimeMs?: number;
   multiPv?: number;
@@ -586,7 +587,7 @@ export class Bt4WorkerSearcher {
     const { onProgress, signal, swapColors, evalCacheEntries, visits } = options;
     if (signal?.aborted) return cancelled;
     let backend: string;
-    const noDownload = !!this.deviceFailure && this.cacheOnly;
+    const noDownload = !!this.deviceFailure && (options.recoveryNoDownload?.() ?? this.cacheOnly);
     try {
       try {
         backend = await this.init({ evalCacheEntries, noDownload, signal });
