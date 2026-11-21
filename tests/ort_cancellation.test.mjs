@@ -92,7 +92,7 @@ test('model preparation cannot change a session’s admitted fallback policy', a
     }),
     session,
   );
-  assert.deepEqual(attempts, [['webgpu', 'wasm'], ['wasm']]);
+  assert.deepEqual(attempts, [['webgpu'], ['wasm']]);
   await ort.releaseOrtSession(session);
 });
 

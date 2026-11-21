@@ -1244,7 +1244,7 @@ async function webGpuAdapterVendor(): Promise<string | undefined> {
 }
 
 export type OrtSessionPlacement = {
-  /** Providers the next createOrtSession call will request, in order. */
+  /** Primary provider followed by any fallback provider for the next createOrtSession call. */
   providers: string[];
   /** Lower-cased GPUAdapterInfo.vendor ('apple', 'nvidia', ...); only probed when providers include webgpu. */
   adapterVendor?: string;
@@ -1303,15 +1303,8 @@ export type CreateOrtSessionOptions = {
 };
 
 /**
- * Attempt order: folded model on the requested providers; the unfolded model on
- * the same providers if ORT rejected the folded rewrite; then, when the
- * requested provider preference allows it, WASM on `wasmFallbackModel` or else
- * the unfolded model. Exported for tests.
- *
- * With `wasmFallbackModel` the primary attempts request WebGPU only. Given
- * ['webgpu', 'wasm'], ORT itself drops WebGPU when its backend init fails and
- * resolves a WASM session on the primary (WebGPU-specific) bytes, so the WASM
- * model would never be used.
+ * Given ['webgpu', 'wasm'], ORT silently drops WebGPU if its backend fails to
+ * initialize and returns a WASM session without exposing that fallback.
  */
 export function planOrtSessionAttempts(
   prepared: { input: OrtModelInput; original?: OrtModelSource },
@@ -1319,8 +1312,7 @@ export function planOrtSessionAttempts(
   wasmFallback: boolean,
   options: CreateOrtSessionOptions = {},
 ): OrtSessionAttemptPlan[] {
-  const primaryProviders =
-    options.wasmFallbackModel && wasmFallback && providers.includes('webgpu') ? providers.filter((provider) => provider !== 'wasm') : providers;
+  const primaryProviders = wasmFallback ? ['webgpu'] : providers;
   const attempts: OrtSessionAttemptPlan[] = [{ input: prepared.input, providers: primaryProviders, kind: 'primary', note: () => describeDequantFold() }];
   if (prepared.original !== undefined) {
     attempts.push({

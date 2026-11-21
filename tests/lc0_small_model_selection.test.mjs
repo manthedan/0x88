@@ -216,8 +216,6 @@ test('an aborted split-K load is not retried with the original', async () => {
 test('createOrtSession attempt plan: split-K attempts are WebGPU-only and the WASM attempt uses wasmFallbackModel', async () => {
   const prepared = { input: 'folded-splitk', original: 'raw-splitk' };
   const withModel = planOrtSessionAttempts(prepared, ['webgpu', 'wasm'], true, { wasmFallbackModel: async () => 'raw-original' });
-  // Not ['webgpu', 'wasm']: with wasm listed, ORT drops a WebGPU backend that fails
-  // to init and resolves a WASM session on the split-K bytes, so the fallback never runs.
   assert.deepEqual(
     withModel.map((a) => a.providers),
     [['webgpu'], ['webgpu'], ['wasm']],
@@ -230,9 +228,11 @@ test('createOrtSession attempt plan: split-K attempts are WebGPU-only and the WA
   assert.equal(withModel[1].input, 'raw-splitk');
   assert.equal(typeof withModel[2].input, 'function');
   assert.equal(await withModel[2].input(), 'raw-original');
-  // Without the option the existing behaviour is unchanged: ['webgpu', 'wasm'], then WASM on the unfolded primary bytes.
   const plain = planOrtSessionAttempts(prepared, ['webgpu', 'wasm'], true);
-  assert.deepEqual(plain[0].providers, ['webgpu', 'wasm']);
+  assert.deepEqual(
+    plain.map((a) => a.providers),
+    [['webgpu'], ['webgpu'], ['wasm']],
+  );
   assert.equal(plain[2].input, 'raw-splitk');
   // Strict ep=webgpu has no WASM attempt at all.
   assert.equal(planOrtSessionAttempts(prepared, ['webgpu'], false, { wasmFallbackModel: async () => 'x' }).length, 2);
