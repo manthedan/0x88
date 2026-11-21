@@ -80,6 +80,45 @@ test('Emscripten passes only verified WASM and preload bytes to the factory', as
   assert.equal(env.imports(), 1);
   assert.equal(env.messages.at(-1)?.type, 'ready');
 });
+test('Emscripten starts all asset fetches before the binaries finish and clears its preloads after init', async () => {
+  const env = sandbox();
+  const binaryGate = Promise.withResolvers();
+  const factoryGate = Promise.withResolvers();
+  const requested = [];
+  let module;
+  let consumed;
+  const fetch = env.context.fetch;
+  env.context.fetch = async (url) => {
+    const name = new URL(url).pathname;
+    requested.push(name);
+    if (name.endsWith('.wasm') || name.endsWith('.data')) await binaryGate.promise;
+    return fetch(url);
+  };
+  env.context.importScripts = () => {
+    env.context.Factory = async (options) => {
+      module = options;
+      consumed = options.getPreloadedPackage();
+      assert.throws(() => options.getPreloadedPackage(), /Missing verified/);
+      await factoryGate.promise;
+      return options;
+    };
+  };
+  vm.runInNewContext(withPins(emscriptenUciWorkerScript({ label: 'Fixture', factoryGlobal: 'Factory' })), env.context);
+  env.context.onmessage({ data: { type: 'init', id: 1, jsUrl: '/fixture/engine.js', trustedJsUrl: true } });
+  await new Promise(setImmediate);
+  assert.deepEqual(requested.sort(), ['/fixture/engine.data', '/fixture/engine.js', '/fixture/engine.wasm']);
+  assert.equal(module, undefined);
+  binaryGate.resolve();
+  await flush();
+  assert.deepEqual(new Uint8Array(consumed), files['/fixture/engine.data']);
+  assert.deepEqual(module.wasmBinary, files['/fixture/engine.wasm']);
+  factoryGate.resolve();
+  await flush();
+  assert.equal(env.messages.at(-1)?.type, 'ready');
+  assert.equal('wasmBinary' in module, false);
+  assert.equal('getPreloadedPackage' in module, false);
+});
+
 test('Emscripten default constructors verify the sibling preload requested by glue', async () => {
   const env = sandbox();
   vm.runInNewContext(withPins(emscriptenUciWorkerScript({ label: 'Fixture', factoryGlobal: 'Factory' })), env.context);
