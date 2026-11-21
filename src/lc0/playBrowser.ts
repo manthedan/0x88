@@ -1007,7 +1007,7 @@ function ctxSubmitTypedMove(ctx: PlayContext): void {
   ctxApplyHumanMove(ctx, move);
 }
 
-function ctxNewGame(ctx: PlayContext): void {
+function ctxNewGame(ctx: PlayContext, prepareOpponent = true): void {
   ctxUpdatePendingInput(ctx, { type: 'discarded' });
   ctx.autosave?.clear();
   ctx.restoredGame = false;
@@ -1029,7 +1029,7 @@ function ctxNewGame(ctx: PlayContext): void {
   ctxDisarmNewGame(ctx);
   ctxRestoreSelectedRuntimeWarning(ctx);
   ctxRender(ctx);
-  ctxPrepareOrStartEngine(ctx);
+  if (prepareOpponent) ctxPrepareOrStartEngine(ctx);
 }
 
 function ctxTakeback(ctx: PlayContext): void {
@@ -1641,7 +1641,7 @@ function ctxRestoreOpponentControls(ctx: PlayContext): void {
   ctxRenderEngineCaution(ctx);
 }
 
-function ctxMaybeQueueRestart(ctx: PlayContext): void {
+function ctxMaybeQueueRestart(ctx: PlayContext, prepareOpponent = true): void {
   const gameInProgress = !ctxGameIsFresh(ctx) && !ctx.gameOver;
   ctxSetOpponent(
     ctx,
@@ -1654,7 +1654,7 @@ function ctxMaybeQueueRestart(ctx: PlayContext): void {
   ctxRestoreOpponentControls(ctx);
   ctxPersistPlayPreferences(ctx);
   if (!gameInProgress) {
-    ctxNewGame(ctx);
+    ctxNewGame(ctx, prepareOpponent);
     return;
   }
   ctxRender(ctx);
@@ -2004,7 +2004,9 @@ function ctxInit(ctx: PlayContext): void {
   });
   ctx.scope.listen(ctx.dom.el('confirmRestart'), 'click', () => ctxConfirmRestart(ctx));
   ctx.scope.listen(ctx.dom.el('dismissRestart'), 'click', () => ctxDismissRestart(ctx));
-  ctx.scope.listen(ctx.dom.selectEl('colorSelect'), 'change', () => ctxMaybeQueueRestart(ctx));
+  ctx.scope.listen(ctx.dom.selectEl('colorSelect'), 'change', () =>
+    ctxMaybeQueueRestart(ctx, ctx.started || ctx.restoredGame || ctx.engineReady || ctx.preparingEngine || ctx.engineThinking),
+  );
   ctx.scope.listen(window, PHONE_LARGE_NET_CHANGE_EVENT, () => ctxRevokePhoneLargeNets(ctx));
   ctx.scope.listen(ctx.dom.selectEl('engineSelect'), 'change', async () => {
     const resumeFallback = !!ctx.pendingPreferredEngineId || !!ctx.pickerConsent?.resumeFallback;
@@ -2108,7 +2110,7 @@ function ctxInit(ctx: PlayContext): void {
       ctxRender(ctx);
       ctxPrepareOrStartEngine(ctx);
     }, 10_000);
-  } else if (!ctx.gameOver) ctxPrepareOrStartEngine(ctx);
+  } else if (!ctx.gameOver && (ctx.restoredGame || startupOpponent.family !== 'maia3')) ctxPrepareOrStartEngine(ctx);
 }
 
 function hasPlayBrowserDom(root: HTMLElement): boolean {

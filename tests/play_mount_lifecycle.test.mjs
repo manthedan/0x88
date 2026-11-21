@@ -484,6 +484,36 @@ test('v0 Play waits for picker intent before probing its optional opponents', as
   assert.equal(refreshed.at(-1), false, 'the probe refresh enables BT4');
 });
 
+test('an incidental Play visit and a fresh side choice do not boot Maia before the opponent is picked', () => {
+  const play = readFileSync('src/lc0/playBrowser.ts', 'utf8');
+  const slice = (start, end) => play.slice(play.indexOf(start), play.indexOf(end, play.indexOf(start)));
+  const mount = slice('  ctxRender(ctx);\n  if (ctx.pendingPreferredEngineId)', '\nfunction hasPlayBrowserDom');
+  const side = slice(
+    "  ctx.scope.listen(ctx.dom.selectEl('colorSelect'), 'change', () => ctxMaybeQueueRestart",
+    '  ctx.scope.listen(window, PHONE_LARGE_NET_CHANGE_EVENT',
+  );
+  const calls = [];
+  const ctx = { dom: { selectEl() {} }, scope: { listen: (_el, _event, fn) => fn() } };
+  const run = new Function(
+    'calls',
+    'ctx',
+    stripTypeScriptTypes(`
+    const ctxRender = () => {}, ctxPrepareOrStartEngine = () => calls.push('load');
+    const ctxMaybeQueueRestart = (_ctx, prepare = true) => { if (prepare) ctxPrepareOrStartEngine(); };
+    function mount(startupOpponent) { ${mount}
+    function side() { ${side} }
+    return { mount, side };
+  `),
+  )(calls, ctx);
+  run.mount({ family: 'maia3' });
+  run.side();
+  assert.deepEqual(calls, []);
+  ctx.restoredGame = true;
+  run.mount({ family: 'maia3' });
+  run.side();
+  assert.deepEqual(calls, ['load', 'load']);
+});
+
 test('a failed opening-index fetch is retried by a later mount', async () => {
   const play = readFileSync('src/lc0/playBrowser.ts', 'utf8');
   const code = play.slice(play.indexOf('let openingIndex:'), play.indexOf('function ctxOpeningAt('));
