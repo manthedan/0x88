@@ -240,10 +240,10 @@ function growPreopenBuffer(bytes: Uint8Array<ArrayBufferLike>, requiredBytes: nu
   return grown;
 }
 
-export async function fetchPreopenBytes(url: string, rawExpectedBytes?: number): Promise<ArrayBuffer> {
+export async function fetchPreopenBytes(url: string, rawExpectedBytes?: number, cache = true): Promise<ArrayBuffer> {
   const expectedBytes = validatedExpectedBytes(url, rawExpectedBytes);
   const dedupeKey = preopenDedupeKey(url, expectedBytes);
-  const cached = cachedPreopenBytes(dedupeKey);
+  const cached = cache ? cachedPreopenBytes(dedupeKey) : undefined;
   if (cached) {
     post({ type: 'preopen-progress', url, loadedBytes: cached.byteLength, totalBytes: expectedBytes ?? cached.byteLength });
     return cached;
@@ -292,7 +292,7 @@ export async function fetchPreopenBytes(url: string, rawExpectedBytes?: number):
       const buffer = bytes.buffer as ArrayBuffer;
       return loadedBytes === bytes.byteLength ? buffer : buffer.slice(0, loadedBytes);
     });
-    if (cacheable) cacheVerifiedPreopenBytes(dedupeKey, verified);
+    if (cache && cacheable) cacheVerifiedPreopenBytes(dedupeKey, verified);
     return verified;
   })();
   inFlightPreopenBytes.set(dedupeKey, request);
@@ -303,15 +303,32 @@ export async function fetchPreopenBytes(url: string, rawExpectedBytes?: number):
   }
 }
 
-async function buildPreopenDirectory(preopenFiles: PreopenFileSpec[] | undefined): Promise<PreopenDirectory> {
+// The external Reckless NNUE is read once into its native OnceLock (build_reckless_wasi.mjs).
+class PersistentNnueFile extends File {
+  override path_open(...args: Parameters<File['path_open']>): ReturnType<File['path_open']> {
+    const opened = super.path_open(...args);
+    if (opened.fd_obj) {
+      opened.fd_obj.fd_close = () => {
+        this.data = new Uint8Array(0);
+        return wasi.ERRNO_SUCCESS;
+      };
+    }
+    return opened;
+  }
+}
+
+async function buildPreopenDirectory(preopenFiles: PreopenFileSpec[] | undefined, persistent = false): Promise<PreopenDirectory> {
   const entries = new Map<string, File>();
   for (const spec of preopenFiles ?? []) {
-    entries.set(spec.name, new File(await fetchPreopenBytes(spec.url, spec.expectedBytes), { readonly: true }));
+    const readOnce = persistent && spec.name === 'reckless.nnue';
+    const FileType = readOnce ? PersistentNnueFile : File;
+    entries.set(spec.name, new FileType(await fetchPreopenBytes(spec.url, spec.expectedBytes, !persistent), { readonly: true }));
   }
   return new PreopenDirectory('.', entries);
 }
 
 export const recklessWasiWorkerInternalsForTests = {
+  buildPreopenDirectory,
   compileModule,
   resetPreopenByteCache(byteBudget = PREOPEN_BYTE_CACHE_BUDGET): void {
     if (!Number.isSafeInteger(byteBudget) || byteBudget < 0) throw new Error(`invalid preopen byte cache budget: ${String(byteBudget)}`);
@@ -364,7 +381,7 @@ async function runPersistentWasiUci(
       new SharedStdin(inputBuffer),
       lineCollector(null, (line) => post({ type: 'persistent-line', stream: 'stdout', line }), isUsefulUciStdoutLine),
       lineCollector(null, (line) => post({ type: 'persistent-line', stream: 'stderr', line })),
-      await buildPreopenDirectory(preopenFiles),
+      await buildPreopenDirectory(preopenFiles, true),
       ...(stopBuffer ? [new SharedStopFlag(stopBuffer)] : []),
     ],
     { debug: false },

@@ -51,6 +51,29 @@ function resetPreopenState(worker, byteBudget) {
   worker.recklessWasiWorkerInternalsForTests.resetPreopenByteCache(byteBudget);
 }
 
+test('persistent Reckless serves the verified NNUE once and releases the file bytes on close', async (t) => {
+  const previousSelf = globalThis.self;
+  t.after(() => { globalThis.self = previousSelf; });
+  const worker = await loadWorkerModule([]);
+  resetPreopenState(worker);
+  const { buildPreopenDirectory, preopenByteCacheState } = worker.recklessWasiWorkerInternalsForTests;
+  const bytes = Uint8Array.of(1, 2, 3, 4);
+  t.mock.method(engineArtifacts, 'bytes', async (_url, read) => read(new Response(bytes)));
+  const specs = [{ name: 'reckless.nnue', url: '/reckless/test.nnue', expectedBytes: bytes.length }];
+  const open = (dir) => dir.path_open(0, 'reckless.nnue', 0, 0n, 0n, 0).fd_obj;
+  const persistent = open(await buildPreopenDirectory(specs, true));
+  assert.deepEqual(persistent.fd_read(bytes.length).data, bytes);
+  assert.equal(preopenByteCacheState().totalBytes, 0);
+  assert.equal(persistent.fd_close(), 0);
+  assert.equal(persistent.file.data.byteLength, 0);
+
+  const oneShot = open(await buildPreopenDirectory(specs));
+  assert.deepEqual(oneShot.fd_read(bytes.length).data, bytes);
+  assert.equal(oneShot.fd_close(), 0);
+  assert.equal(oneShot.file.data.byteLength, bytes.length);
+  assert.equal(preopenByteCacheState().totalBytes, bytes.length);
+});
+
 test('WASI compiles a single verified buffer and caches concurrent/sequential loads', async () => {
   const previousSelf = globalThis.self;
   const previousFetch = globalThis.fetch;
