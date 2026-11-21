@@ -17,8 +17,8 @@
 //
 // Everything lives in one cache per build. src/lib/pwa/register.ts registers
 // /sw.js?v=<SvelteKit build version>; a new version is a new script URL, so
-// each deploy installs a fresh worker whose activate step deletes every older
-// build's cache instead of letting hashed chunks accumulate forever.
+// each deploy installs a fresh worker. The browser keeps it waiting until
+// the previous worker controls no clients, then activate removes old caches.
 //
 // The prefix changes whenever cached pages from earlier builds would break
 // under this script. A worker registered at an old ?v= URL can reinstall
@@ -104,17 +104,18 @@ async function precacheShell() {
   await Promise.all(shellSubresourceUrls(html, new URL(APP_SHELL_FALLBACK, self.location.origin).href).map((url) => cache.add(url).catch(() => undefined)));
 }
 
-async function cacheFirst(request) {
+async function cacheFirst(request, waitUntil) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request);
   if (cached) return cached;
   const response = await fetch(request);
-  if (cacheable(response)) cache.put(request, response.clone()).catch(() => undefined);
+  if (cacheable(response)) waitUntil(cache.put(request, response.clone()).catch(() => undefined));
   return response;
 }
 
 async function cachedNavigation(request, cache) {
-  return (await cache.match(request)) ?? (request.mode === 'navigate' ? await cache.match(APP_SHELL_FALLBACK) : undefined);
+  if (request.mode !== 'navigate') return cache.match(request);
+  return (await cache.match(request, { ignoreSearch: true })) ?? (await cache.match(APP_SHELL_FALLBACK));
 }
 
 /**
@@ -156,7 +157,7 @@ async function networkFirst(request, { timeoutMs = NAVIGATION_TIMEOUT_MS, waitUn
 }
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(precacheShell().then(() => self.skipWaiting()));
+  event.waitUntil(precacheShell());
 });
 
 self.addEventListener('activate', (event) => {
@@ -167,9 +168,6 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   const route = routeFor(event.request, url);
   if (!route) return;
-  if (route === 'immutable') {
-    event.respondWith(cacheFirst(event.request));
-    return;
-  }
-  event.respondWith(networkFirst(event.request, { waitUntil: (promise) => event.waitUntil(promise) }));
+  const waitUntil = (promise) => event.waitUntil(promise);
+  event.respondWith(route === 'immutable' ? cacheFirst(event.request, waitUntil) : networkFirst(event.request, { waitUntil }));
 });

@@ -14,8 +14,10 @@ class FakeCache {
   key(request) {
     return new URL(typeof request === 'string' ? request : request.url, `${ORIGIN}/sw.js`).href;
   }
-  async match(request) {
-    return this.entries.get(this.key(request))?.clone();
+  async match(request, { ignoreSearch } = {}) {
+    const key = this.key(request);
+    if (!ignoreSearch) return this.entries.get(key)?.clone();
+    return [...this.entries].find(([url]) => url.split('?')[0] === key.split('?')[0])?.[1].clone();
   }
   async put(request, response) {
     this.entries.set(this.key(request), response);
@@ -146,13 +148,17 @@ test('the cache is named after the build version from the script URL', () => {
 
 // '0x88-app-200' is what a worker registered at ?v=200 before the prefix bump left behind: its
 // pages link stylesheets this script no longer serves, so reinstalling under ?v=200 must drop it.
-test('activate deletes earlier builds and the legacy shell caches, never the model cache', async () => {
+test('an update waits for old clients; only activation removes earlier build and legacy caches', async () => {
   const worker = loadWorker({ version: '200', fetch: async () => basic(SHELL_HTML, { contentType: 'text/html' }) });
   for (const name of ['0x88-app-shell-v2', 'lc0-app-shell-v1', '0x88-app-100', '0x88-app-200', '0x88-app2-100', 'lc0-browser-models-v1', 'other-cache']) {
     await worker.caches.open(name);
   }
+  const oldCache = await worker.caches.open('0x88-app2-100');
+  const oldChunk = '/_app/immutable/chunks/old.js';
+  await oldCache.put(oldChunk, basic('old build'));
   await dispatchLifecycle(worker, 'install');
-  assert.equal(worker.state.skipped, true);
+  assert.equal(worker.state.skipped, false);
+  assert.equal(await (await oldCache.match(oldChunk)).text(), 'old build');
   await dispatchLifecycle(worker, 'activate');
   assert.deepEqual(await worker.caches.keys(), ['lc0-browser-models-v1', 'other-cache', '0x88-app2-200']);
 });
@@ -183,7 +189,6 @@ test('the shell page is precached with its build chunks and shell files', async 
       new URL(input, `${ORIGIN}/sw.js`).pathname === '/app/play/' ? basic(SHELL_HTML, { contentType: 'text/html; charset=UTF-8' }) : basic('x'),
   });
   await dispatchLifecycle(worker, 'install');
-  assert.equal(worker.state.skipped, true);
   const cache = worker.caches.stores.get('0x88-app2-300');
   assert.deepEqual([...cache.entries.keys()].sort(), [
     `${ORIGIN}/_app/immutable/assets/2.Cd.css`,
@@ -256,7 +261,6 @@ test('linked chunk precaching is best-effort once the essential navigation shell
     },
   });
   await dispatchLifecycle(worker, 'install');
-  assert.equal(worker.state.skipped, true);
   const cache = await worker.caches.open(worker.context.CACHE_NAME);
   assert.equal(await (await cache.match('/app/play/')).text(), SHELL_HTML);
 });
@@ -276,6 +280,8 @@ test('hashed build output is served cache first', async () => {
     const event = fetchEvent(request('/_app/immutable/chunks/a.js'));
     worker.listeners.fetch(event);
     assert.equal(await (await event.response).text(), 'chunk');
+    assert.equal(event.pending.length, i === 0 ? 1 : 0);
+    await Promise.all(event.pending);
   }
   assert.deepEqual(worker.state.fetches, [`${ORIGIN}/_app/immutable/chunks/a.js`]);
 });
@@ -366,6 +372,9 @@ test('an offline navigation falls back to the page, then to the app shell', asyn
   });
   const cache = await worker.caches.open(worker.context.CACHE_NAME);
   await cache.put(`${ORIGIN}/app/play/`, basic('shell', { contentType: 'text/html' }));
+  await cache.put(`${ORIGIN}/app/analysis/?fen=old`, basic('analysis', { contentType: 'text/html' }));
+  const analysis = await worker.context.networkFirst(request('/app/analysis/?fen=new', { mode: 'navigate' }));
+  assert.equal(await analysis.text(), 'analysis');
   const response = await worker.context.networkFirst(request('/app/arena/', { mode: 'navigate' }));
   assert.equal(await response.text(), 'shell');
   await assert.rejects(worker.context.networkFirst(request('/favicon.svg')), /offline/);
