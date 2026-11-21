@@ -9,7 +9,7 @@ import {
   type Lc0EvaluationProvider,
   type Lc0EvaluatorInput,
   legalPolicyPriors,
-} from './onnxEvaluator.ts';
+} from './lc0EvaluatorBase.ts';
 import { WholeOnnxRuntimeManifestSchema } from './wholeOnnxRuntimeManifestSchema.ts';
 
 const STAGED_RUNTIME_PREFIX = '/runtimes/lc0-' + 'tvm' + 'js-webgpu/';

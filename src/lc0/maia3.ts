@@ -2,7 +2,7 @@ import { type BoardState, boardToFen, type Piece, type PieceRole, parseFen } fro
 import { moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
-import { type OrtSessionDiagnostics, ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
+import { type OrtSessionDiagnostics, ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortConfig.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import { terminateEngineWorker } from './engineRetirement.ts';

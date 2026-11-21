@@ -8,11 +8,10 @@ import {
   type Lc0EvaluationCacheMetrics,
   type Lc0EvaluationProvider,
   type Lc0EvaluatorInput,
-  Lc0OnnxEvaluator,
-  type Lc0OnnxEvaluatorOptions,
   type Lc0PreparedEvaluatorInput,
   prepareLc0EvaluatorInput,
-} from './onnxEvaluator.ts';
+} from './lc0EvaluatorBase.ts';
+import type { Lc0OnnxEvaluatorOptions } from './onnxEvaluator.ts';
 
 export interface Lc0SearchOptions extends Omit<SearchOptions, 'onProgress'> {
   /** Fixed PUCT visit budget. */
@@ -169,6 +168,7 @@ export class Lc0PuctSearcher {
   }
 
   static async create(modelPath: string | Uint8Array | ArrayBuffer, options: Lc0OnnxEvaluatorOptions = {}): Promise<Lc0PuctSearcher> {
+    const { Lc0OnnxEvaluator } = await import('./onnxEvaluator.ts');
     return new Lc0PuctSearcher(await Lc0OnnxEvaluator.create(modelPath, options));
   }
 

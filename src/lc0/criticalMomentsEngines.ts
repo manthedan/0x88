@@ -1,7 +1,7 @@
 import { boardToFen, parseFen } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
-import { ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
+import { ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortConfig.ts';
 import { type Lc0SearchLike, lc0AnalysisLines, stockfishAnalysisLines } from './analysisFormat.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { type CriticalLane, type CriticalMoment, type CriticalProvenance, type CriticalResult } from './criticalMoments.ts';
@@ -9,7 +9,7 @@ import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { cpuEngineHashMbForSurface } from './engineProvision.ts';
 import { awaitEngineRetirements, terminateEngineWorker, trackEngineRetirement } from './engineRetirement.ts';
 import { withEngineTimeout } from './engineTimeout.ts';
-import { LC0_SMALL_BATCH1_QDQ8_PATH } from './lc0SmallModelSelection.ts';
+import { LC0_SMALL_BATCH1_QDQ8_PATH } from './lc0ModelUrls.ts';
 import { MAIA3_DEFAULT_MODEL_URL, Maia3BrowserEvaluator } from './maia3.ts';
 import { untilAborted } from './modelCache.ts';
 import type { EngineResourceBroker } from './resourceBroker.ts';
