@@ -105,6 +105,41 @@ test('Small retains its gpu-capture default and fixed-shape models still attempt
   await evaluator.dispose();
 });
 
+test('verified model bytes survive the default capture failure and reach WASM offline', async (t) => {
+  ort.setRequestedOrtExecutionProviderForCurrentThread('auto');
+  ort.setOrtDequantFoldForCurrentThread(false);
+  t.after(() => {
+    ort.setRequestedOrtExecutionProviderForCurrentThread(null);
+    ort.setOrtDequantFoldForCurrentThread(null);
+    ort.resetWebGpuAdapterProbeForTests();
+  });
+  t.mock.getter(globalThis, 'navigator', () => ({
+    gpu: { requestAdapter: async () => ({ features: new Set(['shader-f16']) }) },
+  }));
+  t.mock.method(console, 'warn', () => {});
+  const bytes = model();
+  const calls = [];
+  t.mock.method(ort.InferenceSession, 'create', async (input, { executionProviders, enableGraphCapture }) => {
+    assert.equal(input, bytes);
+    calls.push({ executionProviders, enableGraphCapture });
+    if (enableGraphCapture || executionProviders.includes('webgpu')) throw new Error('WebGPU backend init failed');
+    return { async release() {} };
+  });
+  const reloadModel = t.mock.fn(async () => {
+    throw new Error('Network unavailable');
+  });
+
+  const evaluator = await Lc0OnnxEvaluator.create(bytes, { ioMode: defaultLc0OrtIoMode(true), reloadModel });
+  assert.deepEqual(calls, [
+    { executionProviders: [{ name: 'webgpu' }], enableGraphCapture: true },
+    { executionProviders: ['webgpu'], enableGraphCapture: undefined },
+    { executionProviders: ['wasm'], enableGraphCapture: undefined },
+  ]);
+  assert.equal(reloadModel.mock.callCount(), 0);
+  assert.equal(evaluator.ioMode, 'cpu');
+  await evaluator.dispose();
+});
+
 for (const [net, input, expected] of [
   ['LQO', ['batch', 112, 8, 8], 'cpu'],
   ['t3', [8, 112, 8, 8], 'gpu-capture'],

@@ -1289,7 +1289,7 @@ export type CreateOrtSessionOptions = {
    * on WASM; the default reuses the primary model's unfolded bytes.
    */
   wasmFallbackModel?: () => Promise<OrtModelInput>;
-  /** Reacquire the same model through its verified loader, only if an unfolded/provider fallback needs it. */
+  /** Reacquire the unfolded model through its verified loader if folding was rejected. */
   reloadModel?: () => Promise<OrtModelInput>;
   /**
    * Extra session options for the WebGPU attempts only (never the WASM
@@ -1324,7 +1324,7 @@ export function planOrtSessionAttempts(
   }
   if (wasmFallback) {
     attempts.push({
-      input: options.wasmFallbackModel ?? prepared.original ?? options.reloadModel ?? prepared.input,
+      input: options.wasmFallbackModel ?? prepared.original ?? prepared.input,
       providers: ['wasm'],
       kind: 'wasm-fallback',
       note: (message) => `fallback after WebGPU failure${options.wasmFallbackModel ? ' (WASM model)' : ''}: ${message}`,
@@ -1364,11 +1364,13 @@ async function createOrtSessionFromSource(takeModel: () => OrtModelInput, option
   let lastMessage: string | null = null;
   for (let i = 0; i < attempts.length; i++) {
     const attempt = attempts[i];
+    const next = attempts[i + 1];
     const t0 = typeof performance === 'undefined' ? Date.now() : performance.now();
     try {
       let source: OrtModelSource | undefined = attempt.input;
       attempt.input = undefined as never; // Consumed records must not pin an input through later attempts.
       let input: OrtModelInput | undefined = typeof source === 'function' ? await untilAborted(source(), options.signal) : source;
+      if (typeof source === 'function' && next?.input === source) next.input = input;
       source = undefined;
       options.signal?.throwIfAborted();
       const extra = attempt.providers.includes('webgpu') ? options.webgpuSessionOptions : undefined;
@@ -1393,7 +1395,6 @@ async function createOrtSessionFromSource(takeModel: () => OrtModelInput, option
       lastMessage = ortErrorMessage(err);
       recordSessionAttempt(attempt.providers, false, t1 - t0, lastMessage);
       const rejectParse = typeof options.rejectModelParseErrors === 'function' ? options.rejectModelParseErrors() : options.rejectModelParseErrors;
-      const next = attempts[i + 1];
       if (!next || (rejectParse && isOnnxModelParseError(err))) {
         throw firstMessage === undefined ? err : new OrtSessionFallbackError(firstMessage, err);
       }

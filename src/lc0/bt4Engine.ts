@@ -132,7 +132,7 @@ export interface Bt4SearchProgress extends Bt4SearchResult {
 }
 
 export interface Bt4SearchOptions {
-  visits?: number;
+  visits?: number | ((backend: string) => number);
   movetimeMs?: number;
   multiPv?: number;
   reuseTree?: boolean;
@@ -280,9 +280,13 @@ export function bigNetSelectable(config: BigNetConfig): boolean {
   return bigNetAssetStatusSync(config) === 'present';
 }
 
+export function bigNetBackendUsesWasm(backend: string): boolean {
+  return /^(?:[^>]+->)?wasm(?:\[|$)/.test(backend);
+}
+
 export function bigNetCpuWarning(config: BigNetConfig, backend?: string): string {
   if (phoneBigNetBlocked(config.key) || (!backend && !bigNetSelectable(config))) return '';
-  const cpu = backend ? /^(?:[^>]+->)?wasm(?:\[|$)/.test(backend) : supportedCached === false;
+  const cpu = backend ? bigNetBackendUsesWasm(backend) : supportedCached === false;
   if (!cpu) return '';
   if (config.key === 'lqo') return 'Lc0 Queen Odds: CPU fallback — expect several seconds per move.';
   return `Lc0 ${config.name}: CPU fallback — slow (about ${config.key === 't3' ? '1.1' : '1.5'} s/eval).`;
@@ -542,10 +546,11 @@ export class Bt4WorkerSearcher {
 
   async search(input: Lc0EvaluatorInput, options: Bt4SearchOptions): Promise<Bt4SearchResult> {
     const cancelled: Bt4SearchResult = { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
-    const { onProgress, signal, swapColors, evalCacheEntries } = options;
+    const { onProgress, signal, swapColors, evalCacheEntries, visits } = options;
     if (signal?.aborted) return cancelled;
+    let backend: string;
     try {
-      await this.init({ evalCacheEntries });
+      backend = await this.init({ evalCacheEntries });
     } catch (error) {
       if (signal?.aborted) return cancelled;
       throw error;
@@ -562,7 +567,7 @@ export class Bt4WorkerSearcher {
         {
           type: 'search',
           input: swapColors ? swapColorsInput(input) : input,
-          visits: options.visits,
+          visits: typeof visits === 'function' ? visits(backend) : visits,
           movetimeMs: options.movetimeMs,
           multiPv: options.multiPv,
           batchSize: Math.max(1, Math.floor(Number(options.batchSize ?? this.config.recommendedBatchSize) || this.config.recommendedBatchSize)),
