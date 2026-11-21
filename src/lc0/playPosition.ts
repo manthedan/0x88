@@ -1,4 +1,4 @@
-import { type BoardState, parseFen } from '../chess/board.ts';
+import type { BoardState } from '../chess/board.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
 import { gameOutcome } from './engineBattle.ts';
