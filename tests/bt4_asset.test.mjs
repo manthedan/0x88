@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { setRequestedOrtExecutionProviderForCurrentThread } from '../src/nn/ortConfig.ts';
 import {
   BT4_NET,
   bigNetAssetStatusSync,
@@ -12,6 +11,7 @@ import {
   renderBigNetCpuWarning,
   T3_NET,
 } from '../src/lc0/bt4Engine.ts';
+import { setRequestedOrtExecutionProviderForCurrentThread } from '../src/nn/ortConfig.ts';
 
 function testConfig(modelUrl) {
   return { ...BT4_NET, modelUrl };

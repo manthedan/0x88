@@ -116,11 +116,16 @@ test('Play tells users to reload instead of letting Retry loop on a failed evalu
   const button = { hidden: true, disabled: false, textContent: '' };
   const note = t.mock.fn();
   const ctx = { dom: { buttonEl: () => button } };
-  const setFailure = new Function('ctx', 'EvaluatorImportError', 'ctxSetEngineNote', `
+  const setFailure = new Function(
+    'ctx',
+    'EvaluatorImportError',
+    'ctxSetEngineNote',
+    `
     ${stripTypeScriptTypes(failures)}
     const ctxSelectedEngine = () => ({ label: 'Lc0 Small' });
     return (error) => ctxSetEngineFailure(ctx, error);
-  `)(ctx, EvaluatorImportError, note);
+  `,
+  )(ctx, EvaluatorImportError, note);
   const error = new EvaluatorImportError('The app was updated. Reload this page to load this engine.');
   setFailure(error);
   assert.deepEqual(note.mock.calls[0].arguments, [ctx, error.message, true]);
@@ -136,7 +141,10 @@ test('Arena mount renders basic runtime status without importing ORT', async () 
   const details = { open: false };
   const badge = { isConnected: true, closest: () => details, classList: { toggle() {} }, textContent: '' };
   let ortImports = 0;
-  const render = new Function('badge', 'collectOrtRuntimeDiagnostics', `
+  const render = new Function(
+    'badge',
+    'collectOrtRuntimeDiagnostics',
+    `
     let runtimeIsolation = false, runtimeSharedArrayBuffer = false;
     const maybeEl = () => badge;
     const isV0DeployProfile = () => false;
@@ -145,7 +153,8 @@ test('Arena mount renders basic runtime status without importing ORT', async () 
     const centipawnHybridManifestStatusText = () => '';
     ${stripTypeScriptTypes(badgeSource)}
     return renderRuntimeBadge;
-  `)(badge, async () => {
+  `,
+  )(badge, async () => {
     ortImports++;
     return { describe: 'auto->wasm', wasm: { numThreads: 1 }, sessions: { active: 0 }, webgpuAvailable: false };
   });
@@ -165,13 +174,17 @@ test('Arena benchmark diagnostics include a used hybrid ORT head or worker big n
   const diagnosticsSource = source.slice(source.indexOf('async function safeOrtRuntimeDiagnostics('), source.indexOf('function fixedSuiteFensFromParams('));
   const diagnostics = { sessions: { active: 1 } };
   const collect = t.mock.fn(async () => diagnostics);
-  const collectFor = new Function('Lc0WebHybridEvaluator', 'collectOrtRuntimeDiagnostics', `
+  const collectFor = new Function(
+    'Lc0WebHybridEvaluator',
+    'collectOrtRuntimeDiagnostics',
+    `
     const ortRuntime = undefined, centipawnUsedOrt = false;
     return async (lc0Cache, bt4Telemetry = new Map()) => {
       ${stripTypeScriptTypes(diagnosticsSource)}
       return safeOrtRuntimeDiagnostics();
     };
-  `)(Lc0WebHybridEvaluator, collect);
+  `,
+  )(Lc0WebHybridEvaluator, collect);
   const createRuntime = async () => ({ evaluate: async () => {}, executionFootprint: () => ({}) });
   const wgsl = new Lc0WebHybridEvaluator({ packUrl: '/pack', headBackend: 'wgsl' }, { createRuntime });
   const ort = new Lc0WebHybridEvaluator({ packUrl: '/pack', headBackend: 'ort' }, { createRuntime });
