@@ -109,6 +109,7 @@ import {
 type PgnDatabaseSearchResult = Awaited<ReturnType<typeof searchPgnCollectionsByPosition>>[number];
 
 import { routeDom } from '../features/dom.ts';
+import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import {
   analysisAgreementHeadline,
@@ -298,6 +299,16 @@ import {
   viridithasVariantFromParams,
 } from './viridithasVariants.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
+import {
+  rejectAllWorkerRequests,
+  rejectWorkerRequest,
+  retryWorkerDeviceLoss,
+  showWorkerDeviceWarning,
+  WorkerDeviceLostError,
+  WorkerDeviceRecovery,
+  type WorkerPendingRequest,
+  workerBackendUsesWebGpu,
+} from './workerDeviceRecovery.ts';
 
 const collectOrtRuntimeDiagnostics: typeof CollectOrtRuntimeDiagnostics = async (...args) =>
   (await import('../nn/ortRuntime.ts')).collectOrtRuntimeDiagnostics(...args);
@@ -569,6 +580,7 @@ const engines = createAnalysisEngines({
     live: () => !mountAbort.signal.aborted,
     loading: (id, item) => (item ? showLoadingProgressItem(id, item) : hideLoadingProgressItem(id)),
     runtimeInfoChanged: () => renderRecklessRuntimeInfo(),
+    deviceWarning: showAnalysisDeviceWarning,
   },
   dial: initialPerformanceDial(),
   centipawn: {
@@ -762,14 +774,17 @@ function currentBookStats(): OpeningMoveStat[] {
 
 let searchWorker: Worker | null = null;
 let workerReady = false;
+const smallWorkerRecovery = new WorkerDeviceRecovery();
+const maia3PanelRecovery = new WorkerDeviceRecovery();
+
+function showAnalysisDeviceWarning(warning: string): void {
+  showWorkerDeviceWarning(el('deviceLossWarning'), warning);
+}
 let workerBackend = '';
 let lc0ServedModelUrl = '';
 let workerRuntime: Lc0AnalysisRuntime | '' = '';
 let workerSeq = 0;
-const workerPending = new Map<
-  number,
-  { resolve: (value: unknown) => void; reject: (error: Error) => void; onProgress?: (progress: WorkerSearchProgress) => void }
->();
+const workerPending = new Map<number, WorkerPendingRequest & { onProgress?: (progress: WorkerSearchProgress) => void; inference: boolean }>();
 let activeWorkerSearchId: number | null = null;
 // A worker loading its first hybrid pack cannot act on a cancel message.
 let workerSearchWarm = false;
@@ -853,7 +868,7 @@ function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown>
     memoryConstrained: isMemoryConstrainedDevice(),
     modelUrl: MODEL_URL,
     deviceModelSelection: LC0_DEVICE_MODEL_SELECTION,
-    ep: requestedEp(),
+    ep: smallWorkerRecovery.provider(requestedEp()),
     ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(),
     dequantFold: ortDequantFoldEnabled(),
     cacheModel: true,
@@ -888,7 +903,7 @@ function postWorker<T>(message: Record<string, unknown>, onId?: (id: number) => 
   const id = ++workerSeq;
   onId?.(id);
   return new Promise<T>((resolve, reject) => {
-    workerPending.set(id, { resolve: resolve as (value: unknown) => void, reject, onProgress });
+    workerPending.set(id, { resolve: resolve as (value: unknown) => void, reject, onProgress, inference: message.type === 'search' });
     searchWorker!.postMessage({ ...message, id });
   });
 }
@@ -907,8 +922,7 @@ function resetSearchWorker(reason: string | Error): void {
   workerRuntime = '';
   lc0ServedModelUrl = '';
   const error = typeof reason === 'string' ? new DOMException(reason, 'AbortError') : reason;
-  for (const pending of workerPending.values()) pending.reject(error);
-  workerPending.clear();
+  rejectAllWorkerRequests(workerPending, error);
 }
 
 async function initWorker(operationSignal?: AbortSignal): Promise<string> {
@@ -921,8 +935,14 @@ async function initWorker(operationSignal?: AbortSignal): Promise<string> {
   const worker = searchWorker;
   worker.addEventListener('message', (event: MessageEvent) => {
     if (searchWorker !== worker) return;
-    const message = event.data as { id?: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number };
-    if (message.type === 'deviceLost' || typeof message.id !== 'number') return;
+    const message = event.data as { id?: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number; loss?: OrtDeviceLoss };
+    if (message.type === 'deviceLost') {
+      const error = smallWorkerRecovery.lost(message.loss!);
+      resetSearchWorker(error);
+      showAnalysisDeviceWarning(error.warning('Lc0 Small'));
+      return;
+    }
+    if (typeof message.id !== 'number') return;
     if (message.type === 'downloadProgress') {
       showModelProgress('Lc0 small net', message.loadedBytes ?? 0, message.totalBytes, 'Downloading');
       return;
@@ -934,9 +954,18 @@ async function initWorker(operationSignal?: AbortSignal): Promise<string> {
       pending.onProgress?.((message as unknown as { progress: WorkerSearchProgress }).progress);
       return;
     }
+    if (message.type === 'error') {
+      rejectWorkerRequest(
+        workerPending,
+        message.id,
+        pending,
+        new Error(message.error ?? 'worker error'),
+        pending.inference && workerBackendUsesWebGpu(workerBackend),
+      );
+      return;
+    }
     workerPending.delete(message.id);
-    if (message.type === 'error') pending.reject(new Error(message.error ?? 'worker error'));
-    else pending.resolve(message);
+    pending.resolve(message);
   });
   worker.addEventListener('error', (event) => {
     if (searchWorker === worker) resetSearchWorker(new Error(event.message || 'LC0 worker crashed'));
@@ -4151,6 +4180,10 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       if (controller.signal.aborted || mountAbort.signal.aborted) return;
     }
     if (!analysisCanPrepare(analysisRunState, owner)) return;
+    if (needsSmallLc0Backend && !workerReady && !searcher) {
+      void dispatchAnalysis({ type: 'NEEDS_BACKEND', owner });
+      return;
+    }
     renderBigNetWarning();
     engines.snapshotBigNetServedModels(rows);
     const snapshot = captureAnalysisRun({
@@ -4193,6 +4226,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     else renderEngineComparison([]);
     const tasks: Promise<void>[] = [];
     let hadTaskFailure = false;
+    let retryAfterDeviceLoss = false;
     const pushTask = (index: number, label: string, taskFactory: (beginSearch: () => void) => Promise<AnalysisLine[]>) => {
       tasks.push(
         (async () => {
@@ -4214,6 +4248,10 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
           } catch (error) {
             if (controller.signal.aborted || mountAbort.signal.aborted || (error as Error).name === 'AbortError') throw error;
             hadTaskFailure = true;
+            if (error instanceof WorkerDeviceLostError && error.retry) {
+              retryAfterDeviceLoss = true;
+              return;
+            }
             const errMsg = (error as Error)?.message ?? String(error);
             console.warn(`${label} analysis failed`, error);
             if (runId === activeAnalysisRunId && analysisAbort === controller && analysisIsAnalyzing(analysisRunState)) {
@@ -4453,6 +4491,10 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     }
     await Promise.all(tasks);
     if (controller.signal.aborted || mountAbort.signal.aborted) return;
+    if (retryAfterDeviceLoss && !analysisRunState.wanted && analysisRunState.revision === owner.preparationRevision) {
+      void dispatchAnalysis({ type: 'REQUEST', intent: analysisIntent(intent.force), delayMs: 0 });
+      return;
+    }
     publishLines();
     if (!hadTaskFailure) {
       completeAnalysisKeys.add(selectionCacheKey);
@@ -4608,6 +4650,8 @@ async function enableMaia3Panel(): Promise<void> {
     maia3PanelPending = Maia3BrowserEvaluator.create({
       signal: loadAbort.signal,
       onInitCleanup: trackEngineRetirement,
+      deviceRecovery: maia3PanelRecovery,
+      onDeviceLossWarning: showAnalysisDeviceWarning,
       onFailure: (error) => {
         if (isStaleMount(mountSignal) || generation !== maia3PanelLoadGeneration) return;
         maia3PanelTask?.dispose();
@@ -4622,6 +4666,10 @@ async function enableMaia3Panel(): Promise<void> {
         const enable = el('maia3Enable') as HTMLButtonElement;
         enable.hidden = false;
         enable.disabled = false;
+        if (error instanceof WorkerDeviceLostError && error.retry) {
+          void enableMaia3Panel();
+          return;
+        }
         maia3PanelStatus(`Maia3 failed: ${error.message}. Enable Maia3 to retry.`);
       },
       onProgress: (loaded, total) => {
@@ -5927,7 +5975,7 @@ async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal
   if (!duringAnalysis) el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)} in a worker…`;
   showModelProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
   try {
-    const backend = await initWorker(operationSignal);
+    const backend = await retryWorkerDeviceLoss(() => initWorker(operationSignal), operationSignal);
     if (loadCancelled()) return false;
     el('backend').textContent = backend;
     hideModelProgress();
@@ -5939,7 +5987,7 @@ async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal
     return true;
   } catch (workerError) {
     if (loadCancelled() || (workerError as Error).name === 'AbortError') return false;
-    if (runtime !== 'onnx' && runtime !== LC0_WHOLE_MODEL_WEBGPU_RUNTIME) {
+    if ((runtime !== 'onnx' && runtime !== LC0_WHOLE_MODEL_WEBGPU_RUNTIME) || smallWorkerRecovery.provider(undefined) === 'wasm') {
       selectEl('lc0RuntimeSelect').disabled = false;
       el('message').textContent = `LC0 ${lc0RuntimeLabel(runtime)} load failed: ${(workerError as Error).message}`;
       hideModelProgress();

@@ -492,7 +492,7 @@ async function handleSearch(message: SearchMessage): Promise<void> {
       },
     });
   } catch (error) {
-    if (!(error instanceof Error && error.name === 'AbortError')) throw error;
+    if (!controller.signal.aborted || !(error instanceof Error && error.name === 'AbortError')) throw error;
     // Cancellation discards the partial tree; report an empty cancelled result.
     post({
       type: 'searchResult',

@@ -3,10 +3,12 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { parseFen, START_FEN } from '../src/chess/board.ts';
-import { Bt4WorkerSearcher, LQO_NET } from '../src/lc0/bt4Engine.ts';
+import { BT4_NET, Bt4WorkerSearcher, LQO_NET } from '../src/lc0/bt4Engine.ts';
+import { LC0_MODEL_DOWNLOAD_NOT_APPROVED } from '../src/lc0/modelCache.ts';
 
 // Execute the production closures, not a reimplementation; UI sinks are spies.
 const source = readFileSync(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8');
+const slice = (from, to) => stripTypeScriptTypes(source.slice(source.indexOf(from), source.indexOf(to, source.indexOf(from))));
 for (const operation of ['warmup', 'move']) {
   for (const cancelled of [true, false]) {
     test(`Arena ${operation} progress stays with its ${cancelled ? 'cancelled' : 'live'} operation`, async (t) => {
@@ -130,7 +132,6 @@ for (const operation of ['warmup', 'move']) {
       clearArenaSearchProgress: () => {},
       renderBigNetWarning: () => {},
     };
-    const slice = (from, to) => stripTypeScriptTypes(source.slice(source.indexOf(from), source.indexOf(to, source.indexOf(from))));
     const name = operation === 'warmup' ? 'lc0BigNetWarmup' : 'lc0BigNetMove';
     const closure = slice(`  const ${name} =`, operation === 'warmup' ? '  const centipawnWarmup =' : '  const centipawnMove =');
     const factory = new Function(
@@ -150,5 +151,102 @@ for (const operation of ['warmup', 'move']) {
     assert.equal(prefetchSignal.aborted, true, 'the prefetch is cancelled');
     assert.equal(pooled, null, 'the cold searcher is retired from the pool');
     assert.equal(workers.length, 0, 'no session worker initializes after Stop');
+  });
+}
+
+for (const approved of [false, true]) {
+  test(`Arena reclaims phone memory and checks current consent before recovering a warm worker (approved=${approved})`, async (t) => {
+    const prevWorker = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
+    const inits = [];
+    const searches = [];
+    const prompts = [];
+    const reclaim = Promise.withResolvers();
+    let cpuRetirements = 0;
+    const arenaRunDownloads = new Set(['bt4']);
+    globalThis.Worker = class extends EventTarget {
+      postMessage(message) {
+        const emit = (data) => this.dispatchEvent(new MessageEvent('message', { data: { id: message.id, ...data } }));
+        if (message.type === 'init') {
+          inits.push(message);
+          this.ep = message.ep;
+          if (message.ep === 'wasm' && message.noModelDownload) {
+            queueMicrotask(() => emit({ type: 'error', error: LC0_MODEL_DOWNLOAD_NOT_APPROVED }));
+          } else {
+            if (!message.noModelDownload) assert.equal(arenaRunDownloads.has('bt4'), true, 'network loading requires approval');
+            queueMicrotask(() => emit({ type: 'ready', backend: message.ep === 'wasm' ? 'wasm' : 'auto->webgpu' }));
+          }
+        } else if (message.type === 'search') {
+          searches.push(message.input);
+          if (this.ep !== 'wasm') queueMicrotask(() => emit({ type: 'deviceLost', loss: { reason: 'unknown', message: 'reset' } }));
+          else queueMicrotask(() => emit({ type: 'searchResult', result: { move: 'e2e4' } }));
+        } else if (message.type === 'dispose') queueMicrotask(() => emit({ type: 'disposed' }));
+      }
+      terminate() {}
+    };
+    const searcher = new Bt4WorkerSearcher(BT4_NET, () => undefined);
+    t.after(async () => {
+      await searcher.dispose();
+      if (prevWorker) Object.defineProperty(globalThis, 'Worker', prevWorker);
+      else delete globalThis.Worker;
+    });
+    await searcher.init({ evalCacheEntries: 2048 });
+    arenaRunDownloads.clear();
+    const deps = {
+      BIG_NETS: { bt4: BT4_NET },
+      LC0_MODEL_DOWNLOAD_NOT_APPROVED,
+      arenaRunDownloads,
+      isMemoryConstrainedDevice: () => true,
+      arenaCacheEntries: () => 2048,
+      peekBigNetSearcher: () => searcher,
+      preparePhoneBigNet: (key, entries, _signal, retireCpu, _onWait, exclusive) => {
+        assert.deepEqual([key, entries, exclusive], ['bt4', 2048, true]);
+        if (searcher.loaded) return;
+        retireCpu();
+        return reclaim.promise;
+      },
+      disposeArenaCpuEngines() {
+        cpuRetirements++;
+      },
+      acquireBigNetSearcherAsync: async () => searcher,
+      inspectLargeNetDownload: async () => ({ cached: true }),
+      requestLargeNetDownloadConsent: async (config, _signal, _warn, _notice, inspect) => {
+        prompts.push(await inspect(config));
+        return approved ? 'download' : false;
+      },
+      el: () => ({}),
+      showWorkerDeviceWarning() {},
+      engines: new Map(),
+      arenaBudgetMode: () => 'visits',
+      renderBigNetWarning() {},
+      recordBt4SearchOutput() {},
+      hideDownloadProgress() {},
+      clearArenaSearchProgress() {},
+    };
+    const factory = new Function(
+      'deps',
+      `const { ${Object.keys(deps)} } = deps;
+      ${slice('async function bigNetFor(', 'let runtimeIsolation')}
+      ${slice('  const lc0BigNetMove =', '  const centipawnMove =')}
+      return lc0BigNetMove;`,
+    )(deps);
+    const positions = [parseFen(START_FEN)];
+    const move = factory('seat-1', { variant: 'bt4', strength: 10 }, 'bt4')(positions, new AbortController().signal);
+    const outcome = approved ? move : assert.rejects(move, /no longer cached and its download was not approved/);
+    await new Promise(setImmediate);
+    assert.equal(cpuRetirements, 1, 'loss runs the same reclaim step as a cold load');
+    assert.equal(inits.length, 1, 'replacement waits for reclaim before initializing');
+    reclaim.resolve();
+    if (approved) assert.equal(await outcome, 'e2e4');
+    else await outcome;
+    assert.equal(cpuRetirements, 2, 'both device losses reclaim before initializing a replacement');
+    assert.deepEqual(prompts, [{ cached: false }]);
+    assert.deepEqual(
+      inits.map(({ ep, noModelDownload }) => [ep, noModelDownload]),
+      [['auto', undefined], ['auto', true], ['wasm', true], ...(approved ? [['wasm', undefined]] : [])],
+    );
+    assert.deepEqual(
+      searches,
+      Array.from({ length: approved ? 3 : 2 }, () => ({ positions })),
+    );
   });
 }

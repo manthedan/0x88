@@ -278,6 +278,7 @@ test('Analysis cancels a pending Maia panel load, awaits terminal cleanup, and r
     `
     let maia3PanelLoadGeneration=0,maia3PanelTask=null,maia3PanelTimer=null,maia3PanelPending=null;
     let maia3PanelEvaluator=null,maia3PanelLoading=false,maia3PanelAbort=null,explorerMaia=null,maia3PanelBlockedByRun=null;
+    const maia3PanelRecovery = {}, showAnalysisDeviceWarning = () => {};
     ${extract(text, 'function unloadMaia3Panel(', 'function scheduleMaia3Panel(')}
     return {enable:enableMaia3Panel,unload:unloadMaia3Panel};
   `,

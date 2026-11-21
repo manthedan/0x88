@@ -15,6 +15,7 @@ import { createCriticalEngines } from './criticalMomentsEngines.ts';
 import { criticalReportMarkup } from './criticalMomentsPresentation.ts';
 import type { GameReview } from './gameReview.ts';
 import type { EngineResourceBroker } from './resourceBroker.ts';
+import { showWorkerDeviceWarning } from './workerDeviceRecovery.ts';
 
 interface PanelOptions {
   dom: Pick<BrowserDom, 'el' | 'inputEl' | 'selectEl'>;
@@ -129,7 +130,9 @@ export function mountCriticalMomentsPanel(options: PanelOptions) {
       const current = new AbortController();
       controller = current;
       const rating = inputEl('criticalMaia').checked ? Number(selectEl('criticalRating').value) : undefined;
-      const engines = createCriticalEngines(options.broker, rating, current.signal);
+      const engines = createCriticalEngines(options.broker, rating, current.signal, (warning) => {
+        if (!current.signal.aborted) showWorkerDeviceWarning(el('deviceLossWarning'), warning);
+      });
       viewedIndex = undefined;
       viewedLinesSignature = '';
       report = createCriticalReport(signature(), baseline.source, moments, engines.lanes);

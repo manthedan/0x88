@@ -3,6 +3,7 @@
 // nothing reads it back from the DOM.
 import type { RootDom } from '../browserDom.ts';
 import { hideLoadingProgress, renderLoadingProgress } from '../loadingProgress.ts';
+import { showWorkerDeviceWarning } from '../workerDeviceRecovery.ts';
 import type { EngineUiPort } from './playEngines.ts';
 
 export interface PlayEngineUiState {
@@ -53,6 +54,9 @@ export function createEngineUiPort(state: PlayEngineUiState): EngineUiPort {
     mounted: () => !state.disposed,
     note: (text, warn) => {
       if (!state.disposed) setEngineNote(state, text, warn);
+    },
+    deviceWarning: (text) => {
+      if (!state.disposed) showWorkerDeviceWarning(state.dom.el('deviceLossWarning'), text);
     },
     clearNote: (text) => {
       if (!state.disposed && state.engineNote === text) setEngineNote(state, '');

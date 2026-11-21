@@ -146,6 +146,54 @@ test('worker search ignores rootMoves supplied in a message', async (t) => {
   assert.ok(search.result.move, 'the starting position still has a playable move');
 });
 
+test('a readback AbortError is an inference failure unless the search was cancelled', async (t) => {
+  const originalSelf = Object.getOwnPropertyDescriptor(globalThis, 'self');
+  const worker = new EventTarget();
+  let reply;
+  let entered;
+  let evaluation;
+  worker.postMessage = (message) => reply.resolve(message);
+  Object.defineProperty(globalThis, 'self', { configurable: true, value: worker });
+  t.after(() => {
+    if (originalSelf) Object.defineProperty(globalThis, 'self', originalSelf);
+    else delete globalThis.self;
+  });
+  startSearchWorker({
+    createHybridEvaluator: () => ({
+      evaluate: () => {
+        entered.resolve();
+        return evaluation.promise;
+      },
+    }),
+  });
+  const emit = (data) => worker.dispatchEvent(new MessageEvent('message', { data }));
+  const send = (data) => {
+    reply = Promise.withResolvers();
+    emit(data);
+    return reply.promise;
+  };
+  const ready = await send({ type: 'init', id: 1, runtime: 'hybrid', modelUrl: 'readback-test', packUrl: 'unused', ep: 'wasm', cacheModel: false });
+  assert.equal(ready.type, 'ready', ready.error);
+  for (const [id, cancelled] of [
+    [2, false],
+    [3, true],
+  ]) {
+    entered = Promise.withResolvers();
+    evaluation = Promise.withResolvers();
+    const search = send({ type: 'search', id, input: START_FEN, visits: 2, reuseTree: false });
+    await entered.promise;
+    if (cancelled) emit({ type: 'cancel', target: id });
+    evaluation.reject(new DOMException('GPUBuffer.mapAsync failed', 'AbortError'));
+    const result = await search;
+    if (cancelled) {
+      assert.equal(result.type, 'searchResult');
+      assert.equal(result.result.cancelled, true);
+    } else {
+      assert.deepEqual(result, { type: 'error', id, error: 'GPUBuffer.mapAsync failed' });
+    }
+  }
+});
+
 test('worker disposes a replacement after diagnostics fail and keeps its working evaluator', async (t) => {
   const descriptors = new Map(['self', 'navigator', 'fetch'].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   let handleMessage;

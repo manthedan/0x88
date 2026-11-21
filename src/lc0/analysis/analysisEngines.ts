@@ -47,6 +47,7 @@ export interface AnalysisEnginePort {
   live(): boolean;
   loading(id: string, item: LoadingProgressItem | null): void;
   runtimeInfoChanged(): void;
+  deviceWarning?(warning: string): void;
 }
 
 export interface AnalysisCentipawnConfig {
@@ -244,7 +245,11 @@ export function createAnalysisEngines(deps: AnalysisEngineDeps) {
   }
 
   async function bigNetFor(key: AnalysisBigNetKey, signal?: AbortSignal): Promise<{ config: BigNetConfig; searcher: Bt4WorkerSearcher; cacheOnly: boolean }> {
-    return { config: BIG_NETS[key], searcher: await bigNets.acquire(key, signal), cacheOnly: cacheOnlyBigNets.has(key) };
+    const searcher = await bigNets.acquire(key, signal);
+    searcher.onDeviceLossWarning = (warning) => {
+      if (port.live()) port.deviceWarning?.(warning);
+    };
+    return { config: BIG_NETS[key], searcher, cacheOnly: cacheOnlyBigNets.has(key) };
   }
 
   async function bigNetLines(
@@ -260,7 +265,7 @@ export function createAnalysisEngines(deps: AnalysisEngineDeps) {
     const { config, searcher } = await bigNetFor(variant, signal);
     const label = `Lc0 ${config.name}`;
     if (!searcher.isInitializedFor(ANALYSIS_BIG_NET_SESSION) || searcher.servedModelUrl !== servedModelUrl) {
-      throw new Error(`${label} session changed during analysis; analyze again`);
+      throw searcher.deviceFailure ?? new Error(`${label} session changed during analysis; analyze again`);
     }
     const cancelled = () => signal?.aborted === true || !port.live();
     searcher.onDownloadProgress = (loaded, total) => {
@@ -273,6 +278,7 @@ export function createAnalysisEngines(deps: AnalysisEngineDeps) {
           visits,
           multiPv: requestedMultiPv,
           evalCacheEntries: ANALYSIS_BIG_NET_SESSION.evalCacheEntries,
+          retryOnDeviceLoss: false,
           batchSize: config.recommendedBatchSize,
           batchPipelineDepth: config.recommendedPipelineDepth,
           signal,

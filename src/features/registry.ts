@@ -216,6 +216,7 @@ export const FEATURES = [
       'status',
       'engineNote',
       'runtimeWarning',
+      'deviceLossWarning',
       'bigNetCpuWarning',
       'retryEngine',
       'dlProgress',
@@ -457,6 +458,7 @@ export const FEATURES = [
       'analysisSearchProgress',
       'downloadProgress',
       'runtimeWarning',
+      'deviceLossWarning',
       'bigNetCpuWarning',
       'runtimeAudit',
       'manageEngines',
@@ -712,6 +714,7 @@ export const FEATURES = [
     ids: [
       'message',
       'runtimeWarning',
+      'deviceLossWarning',
       'bigNetCpuWarning',
       'engineWarmupStatus',
       'engineWarmupTitle',

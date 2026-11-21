@@ -5,6 +5,7 @@ import ts from 'typescript';
 import { LatestOnlyTask } from '../src/lc0/latestOnlyTask.ts';
 import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
 import { DEFAULT_PLAY_PREFERENCES } from '../src/lc0/playPreferences.ts';
+import { WorkerDeviceLostError, WorkerDeviceRecovery } from '../src/lc0/workerDeviceRecovery.ts';
 
 function extracted(path, start, end) {
   const source = readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -45,6 +46,7 @@ test('Analysis Maia failure removes the failed owner, settles task ownership and
     `
     let maia3PanelEvaluator = null, maia3PanelLoading = false, maia3PanelLoadGeneration = 0, maia3PanelPending = null, maia3PanelAbort = null, maia3PanelBlockedByRun = null;
     const awaitEngineRetirements = async () => {}, trackEngineRetirement = () => {};
+    const maia3PanelRecovery = new WorkerDeviceRecovery(), showAnalysisDeviceWarning = () => {};
     let maia3PanelTask = null, maia3PanelTimer = null, explorerMaia = null;
     const elements = new Map();
     const el = (id) => { if (!elements.has(id)) elements.set(id, {}); return elements.get(id); };
@@ -55,8 +57,8 @@ test('Analysis Maia failure removes the failed owner, settles task ownership and
     ${extracted('../src/lc0/analysisBrowser.ts', 'async function enableMaia3Panel(', 'function scheduleMaia3Panel(')}
     return { enableMaia3Panel, el, snapshot: () => ({ evaluator: maia3PanelEvaluator, task: maia3PanelTask }) };
   `,
-    ['Maia3BrowserEvaluator', 'LatestOnlyTask'],
-    [Maia, LatestOnlyTask],
+    ['Maia3BrowserEvaluator', 'LatestOnlyTask', 'WorkerDeviceRecovery', 'WorkerDeviceLostError'],
+    [Maia, LatestOnlyTask, WorkerDeviceRecovery, WorkerDeviceLostError],
   );
   await api.enableMaia3Panel();
   const first = api.snapshot().evaluator;

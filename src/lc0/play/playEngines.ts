@@ -18,6 +18,7 @@ import type { createLc0OnnxEvaluatorFromUrl } from '../lc0SmallModelSelection.ts
 import { Maia3BrowserEvaluator, maia3ModelFallbackUrls } from '../maia3.ts';
 import { Lc0PuctSearcher } from '../search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from '../stockfishEngine.ts';
+import { retryWorkerDeviceLoss, WorkerDeviceRecovery } from '../workerDeviceRecovery.ts';
 
 export type PlayFamily = 'maia3' | EngineFamily;
 
@@ -43,6 +44,7 @@ export interface EngineUiPort {
   /** False once the page mount that owns this port is disposed. */
   mounted(): boolean;
   note(text: string, warn?: boolean): void;
+  deviceWarning?(text: string): void;
   /** Clear the note only while it still shows `text`. */
   clearNote(text: string): void;
   progress(label: string, loadedBytes?: number, totalBytes?: number): void;
@@ -103,6 +105,7 @@ export function createPlayEngines(deps: PlayEngineDeps) {
   let lc0SmallOwner: { evaluator: CachedLc0Evaluator | null; abort: AbortController } = { evaluator: null, abort: new AbortController() };
   /** The request the cached Lc0 Small searcher was built from; a remount may ask for another (?model=). */
   let lc0SmallModel: Lc0SmallModel | null = null;
+  const maia3DeviceRecovery = new WorkerDeviceRecovery();
   let maia3Abort: AbortController | null = null;
   let maia3Promise: Promise<Maia3BrowserEvaluator> | null = null;
   /** The model URLs the cached Maia3 was loaded from; a remount may resolve them against another asset base. */
@@ -165,17 +168,22 @@ export function createPlayEngines(deps: PlayEngineDeps) {
     for (const id of cpuEnginePromises.keys()) disposeCpuEngine(id, true);
   }
 
-  function acquireBigNet(key: BigNetKey, signal: AbortSignal, ui: EngineUiPort) {
+  async function acquireBigNet(key: BigNetKey, signal: AbortSignal, ui: EngineUiPort) {
+    const current = ui.current();
     const reclaim = preparePhoneBigNet(key, 2048, signal, disposeAllCpuEngines, () => ui.note(RECLAIM_NOTE));
-    if (!reclaim) return acquireBigNetSearcherAsync(key, false, signal);
-    return reclaim.then(
-      () => acquireBigNetSearcherAsync(key, false, signal),
-      (error: unknown) => {
-        // A cancelled wait (resign, new game, opponent change) must not leave the note on the next screen.
+    if (reclaim) {
+      try {
+        await reclaim;
+      } catch (error) {
         ui.clearNote(RECLAIM_NOTE);
         throw error;
-      },
-    );
+      }
+    }
+    const searcher = await acquireBigNetSearcherAsync(key, false, signal);
+    searcher.onDeviceLossWarning = (warning) => {
+      if (current()) ui.deviceWarning?.(warning);
+    };
+    return searcher;
   }
 
   function ensureLc0Small(model: Lc0SmallModel, ui: EngineUiPort): Promise<Lc0PuctSearcher> {
@@ -287,6 +295,10 @@ export function createPlayEngines(deps: PlayEngineDeps) {
         oppoElo: elo,
         signal: owner.signal,
         onInitCleanup: trackEngineRetirement,
+        deviceRecovery: maia3DeviceRecovery,
+        onDeviceLossWarning: (warning) => {
+          if (owner === maia3Abort && ui.mounted()) ui.deviceWarning?.(warning);
+        },
         onProgress: (loaded, total) => {
           if (current()) ui.progress('Maia3', loaded, total);
         },
@@ -310,6 +322,20 @@ export function createPlayEngines(deps: PlayEngineDeps) {
       throw error;
     });
     return maia3Promise;
+  }
+
+  function maia3Move(
+    elo: number,
+    ui: EngineUiPort,
+    modelUrls: readonly string[],
+    signal: AbortSignal,
+    ...args: Parameters<Maia3BrowserEvaluator['chooseMove']>
+  ) {
+    return retryWorkerDeviceLoss(async () => {
+      const evaluator = await ensureMaia3(elo, ui, modelUrls);
+      signal.throwIfAborted();
+      return evaluator.chooseMove(...args);
+    }, signal);
   }
 
   function cpuEngineFor(option: PlayEngineSpec, ui: EngineUiPort): Promise<CpuEngine> {
@@ -374,6 +400,7 @@ export function createPlayEngines(deps: PlayEngineDeps) {
     ensureLc0Small,
     ensureCentipawn,
     ensureMaia3,
+    maia3Move,
     cpuEngineFor,
     cpuEngineForMove,
     maia3Status: (): string | null => maia3Status,

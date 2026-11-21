@@ -9,6 +9,15 @@ import { terminateEngineWorker } from './engineRetirement.ts';
 import { MAIA3_ORT_DEFAULTS } from './maia3RuntimeConfig.ts';
 import { clearLc0ModelCacheEntry, type Lc0ModelLoadInfo, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
 import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
+import {
+  rejectAllWorkerRequests,
+  rejectWorkerRequest,
+  retryWorkerDeviceLoss,
+  WorkerDeviceLostError,
+  WorkerDeviceRecovery,
+  type WorkerPendingRequest,
+  workerBackendUsesWebGpu,
+} from './workerDeviceRecovery.ts';
 
 const MAIA3_MODEL_CACHE_NAME = 'maia3-browser-models-v1';
 
@@ -113,11 +122,6 @@ export interface Maia3Choice {
 }
 
 export type Maia3EvaluateInput = BoardState | string | { board?: BoardState; fen?: string; positions?: BoardState[]; fens?: string[] };
-
-type PendingRequest = {
-  resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
-};
 
 function clampElo(elo: number): number {
   if (!Number.isFinite(elo)) return MAIA3_DEFAULT_ELO;
@@ -242,8 +246,10 @@ export interface Maia3BrowserEvaluatorOptions {
   onInitCleanup?: (cleanup: Promise<void>) => void;
   /** Optional owner-supplied CPU reservation; ordinary Human/Play defaults are unchanged. */
   wasmThreads?: number;
-  /** Fatal transport failure, including when no inference is in flight. */
+  /** Fatal worker failure, including when no inference is in flight. */
   onFailure?: (error: Error) => void;
+  deviceRecovery?: WorkerDeviceRecovery;
+  onDeviceLossWarning?: (warning: string) => void;
   modelUrl?: string;
   /** Load order when `modelUrl` is not given; defaults to maia3ModelFallbackUrls() at create time. */
   fallbackUrls?: readonly string[];
@@ -257,7 +263,7 @@ export interface Maia3BrowserEvaluatorOptions {
 export class Maia3BrowserEvaluator {
   private readonly worker: Worker;
   private nextId = 1;
-  private readonly pending = new Map<number, PendingRequest>();
+  private readonly pending = new Map<number, WorkerPendingRequest>();
   readonly modelLoad: Lc0ModelLoadResult;
   readonly selfElo: number;
   readonly oppoElo: number;
@@ -270,6 +276,7 @@ export class Maia3BrowserEvaluator {
   private abortCleanup?: () => void;
   private terminated = false;
   private readonly onFailure?: (error: Error) => void;
+  private readonly loseDevice: (loss: OrtDeviceLoss) => WorkerDeviceLostError;
   private terminalError: Error | null = null;
   private readonly messageListener = (event: MessageEvent) => this.onMessage(event);
   private readonly errorListener = (event: ErrorEvent) => this.fail(new Error(event.message || 'Maia3 worker crashed'));
@@ -286,10 +293,12 @@ export class Maia3BrowserEvaluator {
     selfElo: number,
     oppoElo: number,
     names: { inputNames: string[]; outputNames: string[]; backend: string; ortRuntime?: OrtSessionDiagnostics },
-    onFailure?: (error: Error) => void,
+    onFailure: ((error: Error) => void) | undefined,
+    loseDevice: (loss: OrtDeviceLoss) => WorkerDeviceLostError,
   ) {
     this.worker = worker;
     this.onFailure = onFailure;
+    this.loseDevice = loseDevice;
     this.modelLoad = modelLoad;
     this.selfElo = selfElo;
     this.oppoElo = oppoElo;
@@ -305,6 +314,21 @@ export class Maia3BrowserEvaluator {
   static async create(
     options: Maia3BrowserEvaluatorOptions = {},
     modelDeps = { load: loadLc0ModelForOrt, clear: clearLc0ModelCacheEntry },
+  ): Promise<Maia3BrowserEvaluator> {
+    const deviceRecovery = options.deviceRecovery ?? new WorkerDeviceRecovery();
+    const loseDevice = (loss: OrtDeviceLoss) => {
+      const error = deviceRecovery.lost(loss);
+      options.onDeviceLossWarning?.(error.warning('Maia3'));
+      return error;
+    };
+    return retryWorkerDeviceLoss(() => this.createOnce(options, modelDeps, deviceRecovery, loseDevice), options.signal);
+  }
+
+  private static async createOnce(
+    options: Maia3BrowserEvaluatorOptions,
+    modelDeps: { load: typeof loadLc0ModelForOrt; clear: typeof clearLc0ModelCacheEntry },
+    deviceRecovery: WorkerDeviceRecovery,
+    loseDevice: (loss: OrtDeviceLoss) => WorkerDeviceLostError,
   ): Promise<Maia3BrowserEvaluator> {
     const selfElo = clampElo(options.selfElo ?? MAIA3_DEFAULT_ELO);
     const oppoElo = clampElo(options.oppoElo ?? selfElo);
@@ -347,15 +371,25 @@ export class Maia3BrowserEvaluator {
         return closing;
       };
       try {
-        const { names, loaded } = await Maia3BrowserEvaluator.postInit(worker, async () => (modelLoad = await loadModel(loadSignal)), options, close);
+        const { names, loaded } = await Maia3BrowserEvaluator.postInit(
+          worker,
+          async () => (modelLoad = await loadModel(loadSignal)),
+          { ...options, ep: deviceRecovery.provider(options.ep) },
+          close,
+          loseDevice,
+        );
         options.signal?.throwIfAborted();
-        const evaluator = new Maia3BrowserEvaluator(worker, loaded, selfElo, oppoElo, names, options.onFailure);
+        const evaluator = new Maia3BrowserEvaluator(worker, loaded, selfElo, oppoElo, names, options.onFailure, loseDevice);
         const abort = () => evaluator.terminate();
         options.signal?.addEventListener('abort', abort, { once: true });
         evaluator.abortCleanup = () => options.signal?.removeEventListener('abort', abort);
         return evaluator;
       } catch (error) {
         loading.abort(error);
+        if (error instanceof WorkerDeviceLostError) {
+          terminateEngineWorker(worker);
+          throw error;
+        }
         const closed = close();
         if (options.signal?.aborted) void closed.catch(() => undefined);
         else await closed;
@@ -384,6 +418,7 @@ export class Maia3BrowserEvaluator {
     load: () => Promise<Lc0ModelLoadResult>,
     { ep, signal, wasmThreads }: Maia3BrowserEvaluatorOptions,
     close: () => Promise<void>,
+    loseDevice: (loss: OrtDeviceLoss) => WorkerDeviceLostError,
   ): Promise<{ loaded: Lc0ModelLoadResult; names: { inputNames: string[]; outputNames: string[]; backend: string; ortRuntime?: OrtSessionDiagnostics } }> {
     return new Promise((resolve, reject) => {
       let loaded: Lc0ModelLoadResult;
@@ -419,8 +454,14 @@ export class Maia3BrowserEvaluator {
           ortRuntime?: OrtSessionDiagnostics;
           modelLoad?: Lc0ModelLoadInfo;
           modelParseError?: boolean;
+          loss?: OrtDeviceLoss;
         };
-        if (data.type === 'deviceLost' || data.id !== 0) return;
+        if (data.type === 'deviceLost') {
+          cleanup();
+          reject(loseDevice(data.loss!));
+          return;
+        }
+        if (data.id !== 0) return;
         if (data.type === 'ready') {
           cleanup();
           resolve({
@@ -473,15 +514,20 @@ export class Maia3BrowserEvaluator {
   private onMessage(event: MessageEvent): void {
     const data = event.data as { type?: string; id?: number; message?: string; loss?: OrtDeviceLoss };
     if (data.type === 'deviceLost') {
-      this.deviceLost = data.loss ?? null;
+      if (this.disposing) return;
+      this.deviceLost = data.loss!;
+      this.fail(this.loseDevice(this.deviceLost));
       return;
     }
     if (typeof data.id !== 'number') return;
     const pending = this.pending.get(data.id);
     if (!pending) return;
+    if (data.type === 'error') {
+      rejectWorkerRequest(this.pending, data.id, pending, new Error(data.message ?? 'Maia3 worker error'), workerBackendUsesWebGpu(this.backend));
+      return;
+    }
     this.pending.delete(data.id);
-    if (data.type === 'error') pending.reject(new Error(data.message ?? 'Maia3 worker error'));
-    else pending.resolve(data);
+    pending.resolve(data);
   }
 
   private post<T>(message: Record<string, unknown>, transfers: Transferable[] = []): Promise<T> {
@@ -574,8 +620,7 @@ export class Maia3BrowserEvaluator {
         void this.closing.catch(() => undefined);
       }
     }
-    for (const pending of this.pending.values()) pending.reject(error);
-    this.pending.clear();
+    rejectAllWorkerRequests(this.pending, error);
   }
 
   private fail(error: Error): void {
