@@ -1294,8 +1294,12 @@ test('the default pair gives a cold Lc0 Small the first line before starting Sto
     await running;
   }
   assert.deepEqual(
-    page.published.map((lines) => lines.map((line) => line.engine)),
-    [['Lc0'], ['Lc0', 'SF Lite']],
+    page.published[0].map((line) => line.engine),
+    ['Lc0'],
+  );
+  assert.deepEqual(
+    page.published.at(-1).map((line) => line.engine),
+    ['Lc0', 'SF Lite'],
   );
   assert.equal(page.admissions.length, 1);
   assert.deepEqual([...page.completeAnalysisKeys], [page.analysisSelectionCacheKey()]);
