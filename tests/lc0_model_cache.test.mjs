@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createLc0OnnxEvaluatorFromUrl } from '../src/lc0/lc0SmallModelSelection.ts';
-import { clearLc0ModelCache, clearLc0ModelCacheEntry, loadLc0ModelForOrt, modelFileName, sha256Hex, verifyLc0ModelBytes } from '../src/lc0/modelCache.ts';
+import { clearLc0ModelCache, clearLc0ModelCacheEntry, inspectLc0ModelDownload, loadLc0ModelForOrt, modelFileName, sha256Hex, verifyLc0ModelBytes } from '../src/lc0/modelCache.ts';
 
 // Known SHA-256 test vector: the empty input hashes to this digest.
 const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
@@ -52,7 +52,7 @@ class FakeCache {
     this.store = new Map();
   }
   async match(req) {
-    return this.store.get(req.url ?? req);
+    return this.store.get(req.url ?? req)?.clone();
   }
   async put(req, res) {
     this.store.set(req.url ?? req, res);
@@ -60,8 +60,8 @@ class FakeCache {
   async delete(req) {
     return this.store.delete(req.url ?? req);
   }
-  async keys() {
-    return [...this.store.keys()];
+  async keys(request) {
+    return [...this.store.keys()].filter((url) => !request || url === request.url).map((url) => new Request(url));
   }
 }
 
@@ -154,6 +154,37 @@ async function withMockedEnv(
     globalThis.location = prev.location;
   }
 }
+
+test('offline lookup restores a verified immutable model, but never trusts replaced bodies or downloads with a stale pin', async () => {
+  const options = { cache: true, manifestUrl: MANIFEST_URL, channelUrl: null, metadataStore: new MemoryMetadataStore(), requireManifestEntry: true };
+  await withMockedEnv(async () => {
+    const onlineFetch = globalThis.fetch;
+    assert.equal((await loadLc0ModelForOrt(MODEL_URL, options)).cacheStatus, 'miss');
+    const cache = await caches.open('lc0-browser-models-v1');
+    globalThis.fetch = async (url) => {
+      assert.equal(url, MANIFEST_URL, 'offline pins must never authorize a binary fetch');
+      throw new TypeError('offline');
+    };
+    assert.equal((await inspectLc0ModelDownload(MODEL_URL, options)).cached, true);
+    const offline = await loadLc0ModelForOrt(MODEL_URL, options);
+    assert.equal(offline.url, MODEL_ARTIFACT_URL);
+    assert.equal(offline.verification, 'hashed');
+    assert.equal(new TextDecoder().decode(offline.model), 'abc');
+
+    globalThis.fetch = async (url) => url === MANIFEST_URL ? Response.json({ models: [] }) : onlineFetch(url);
+    await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /App-origin model integrity metadata is unavailable/);
+    globalThis.fetch = async (url) => {
+      assert.equal(url, MANIFEST_URL);
+      throw new TypeError('offline');
+    };
+    await assert.rejects(loadLc0ModelForOrt(MODEL_URL, { ...options, forceReload: true }), /App-origin model integrity metadata is unavailable/);
+    await cache.put(MODEL_ARTIFACT_URL, new Response('bad'));
+    await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /No verified cached model available offline/);
+    assert.equal(await cache.match(MODEL_ARTIFACT_URL), undefined);
+    await cache.put(MODEL_ARTIFACT_URL, new Response('abc'));
+    await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /App-origin model integrity metadata is unavailable/);
+  }, { serveBytes: () => bytesOf('abc'), manifestArtifactUrl: MODEL_ARTIFACT_URL, manifestBytes: 3, manifestSha256: ABC_SHA256 });
+});
 
 test('exact manifest URL pins precede filename fallback and tolerate non-UTF-8 URL octets', async () => {
   const url = MODEL_URL.replace('test.onnx', '%E9.onnx');

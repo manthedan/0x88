@@ -65,6 +65,7 @@ export interface Lc0ModelVerificationMetadata {
   runtimeVersion: string;
   cacheName: string;
   url: string;
+  provenance?: ModelPinProvenance;
   expectedBytes?: number;
   expectedSha256?: string;
   observedBytes: number;
@@ -378,21 +379,27 @@ async function ignoreMetadataFailure<T>(operation: (() => Promise<T>) | undefine
   }
 }
 
-const manifestFlights = new Map<string, Promise<Lc0ModelManifest | undefined>>();
+const unreachable = Symbol('model metadata unreachable');
+type ManifestLookup<T> = T | undefined | typeof unreachable;
 
-async function fetchModelManifest(manifestUrl: string): Promise<Lc0ModelManifest | undefined> {
+async function fetchManifest<T>(url: string, cache: RequestCache, parse: (value: unknown) => T): Promise<ManifestLookup<T>> {
+  const response = await fetch(url, { cache }).catch((): typeof unreachable => unreachable);
+  if (response === unreachable) return unreachable;
+  if (!response.ok) return undefined;
+  try {
+    return parse(await response.json());
+  } catch {
+    return undefined;
+  }
+}
+
+const manifestFlights = new Map<string, Promise<ManifestLookup<Lc0ModelManifest>>>();
+
+async function fetchModelManifest(manifestUrl: string): Promise<ManifestLookup<Lc0ModelManifest>> {
   const key = absoluteUrl(manifestUrl);
   const existing = manifestFlights.get(key);
   if (existing) return existing;
-  const flight = (async () => {
-    try {
-      const response = await fetch(manifestUrl, { cache: 'no-cache' });
-      if (!response.ok) return undefined;
-      return v.parse(Lc0ModelManifestSchema, await response.json());
-    } catch {
-      return undefined;
-    }
-  })();
+  const flight = fetchManifest(manifestUrl, 'no-cache', (value) => v.parse(Lc0ModelManifestSchema, value));
   manifestFlights.set(key, flight);
   try {
     return await flight;
@@ -410,22 +417,14 @@ export function modelFileName(modelUrl: string): string | undefined {
   }
 }
 
-async function fetchManifestEntry(modelUrl: string, manifestUrl: string): Promise<Lc0ModelManifestEntry | undefined> {
+async function fetchManifestEntry(modelUrl: string, manifestUrl: string): Promise<ManifestLookup<Lc0ModelManifestEntry>> {
   const manifest = await fetchModelManifest(manifestUrl);
+  if (manifest === unreachable) return unreachable;
   const absolute = absoluteUrl(modelUrl);
   const exact = manifest?.models?.find((entry) => entry.url === modelUrl || absoluteUrl(entry.url) === absolute);
   if (exact) return exact;
   const file = modelFileName(modelUrl);
   return manifest?.models?.find((entry) => entry.file === file);
-}
-
-async function fetchManifestEntryWithTiming(
-  modelUrl: string,
-  manifestUrl: string,
-): Promise<{ entry?: Lc0ModelManifestEntry; manifestUrl: string; elapsedMs: number }> {
-  const started = nowMs();
-  const entry = await fetchManifestEntry(modelUrl, manifestUrl);
-  return { entry, manifestUrl, elapsedMs: nowMs() - started };
 }
 
 function manifestArtifactUrl(entry: Lc0ModelManifestEntry | undefined, manifestUrl: string): string | undefined {
@@ -437,8 +436,17 @@ function logicalUrlField(modelUrl: string, resolvedUrl: string): string | undefi
   return absoluteUrl(resolvedUrl) === absoluteUrl(modelUrl) ? undefined : modelUrl;
 }
 
+interface ModelPinProvenance {
+  logicalUrl: string;
+  manifestUrl: string;
+  channelUrl?: string;
+  appManifestPin: boolean;
+}
+
 interface ResolvedModelArtifact {
   url: string;
+  metadataUnreachable?: boolean;
+  offline?: boolean;
   /** Encoded representation size when known, otherwise the raw artifact size. */
   downloadBytes?: number;
   expectedBytes?: number;
@@ -460,7 +468,7 @@ function configuredChannelUrl(): string | undefined {
   return cleanChannelUrl(globals.LC0_BROWSER_ARTIFACT_CHANNEL_URL) ?? cleanChannelUrl(env.VITE_LC0_ARTIFACT_CHANNEL_URL);
 }
 
-async function resolveChannelArtifactUrl(modelUrl: string, channelUrl: string | undefined): Promise<ResolvedModelArtifact | undefined> {
+async function resolveChannelArtifactUrl(modelUrl: string, channelUrl: string | undefined): Promise<ManifestLookup<ResolvedModelArtifact>> {
   if (!channelUrl) return undefined;
   let logicalPath: string;
   try {
@@ -469,15 +477,13 @@ async function resolveChannelArtifactUrl(modelUrl: string, channelUrl: string | 
     return undefined;
   }
   try {
-    const channelResponse = await fetch(channelUrl, { cache: 'no-cache' });
-    if (!channelResponse.ok) return undefined;
-    const channel = v.parse(Lc0ArtifactChannelManifestSchema, await channelResponse.json());
+    const channel = await fetchManifest(channelUrl, 'no-cache', (value) => v.parse(Lc0ArtifactChannelManifestSchema, value));
+    if (!channel || channel === unreachable) return channel;
     const releasePath = channel.releaseManifestUrl ?? channel.releaseUrl;
     if (!releasePath) return undefined;
     const releaseUrl = new URL(releasePath, channelUrl).href;
-    const releaseResponse = await fetch(releaseUrl, { cache: 'force-cache' });
-    if (!releaseResponse.ok) return undefined;
-    const release = v.parse(Lc0ArtifactReleaseManifestSchema, await releaseResponse.json());
+    const release = await fetchManifest(releaseUrl, 'force-cache', (value) => v.parse(Lc0ArtifactReleaseManifestSchema, value));
+    if (!release || release === unreachable) return release;
     const artifacts = release.artifacts ?? [];
     const exactArtifact = artifacts.find((entry) => entry.logicalUrl === logicalPath);
     const logicalFile = logicalPath.split('/').pop();
@@ -519,8 +525,14 @@ async function resolveArtifactUrl(
   if (artifactUrl)
     return { url: artifactUrl, downloadBytes: manifest.entry?.bytes, expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
   const channelArtifact = await resolveChannelArtifactUrl(modelUrl, channelUrl);
-  if (!channelArtifact)
-    return { url: modelUrl, downloadBytes: manifest.entry?.bytes, expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
+  if (!channelArtifact || channelArtifact === unreachable)
+    return {
+      url: modelUrl,
+      metadataUnreachable: channelArtifact === unreachable,
+      downloadBytes: manifest.entry?.bytes,
+      expectedBytes: manifest.entry?.bytes,
+      expectedSha256: manifest.entry?.sha256,
+    };
   // The asset host cannot replace pins supplied by the app-origin manifest.
   // Check outside resolveChannelArtifactUrl's unavailable-channel fallback catch:
   // contradictory metadata must fail closed, not silently choose another URL.
@@ -619,7 +631,7 @@ export interface Lc0ModelDownloadState {
  * create a cache bucket, update LRU metadata, or weaken the inference loader.
  */
 export async function inspectLc0ModelDownload(modelUrl: string, options: Lc0ModelLoadOptions = {}): Promise<Lc0ModelDownloadState> {
-  const resolved = await resolveLoaderArtifact(modelUrl, options);
+  const { resolved } = await resolveLoaderArtifact(modelUrl, options);
   const state: Lc0ModelDownloadState = { url: resolved.url, downloadBytes: resolved.downloadBytes, cached: false };
   const cacheName = options.cacheName ?? DEFAULT_CACHE_NAME;
   try {
@@ -633,7 +645,7 @@ export async function inspectLc0ModelDownload(modelUrl: string, options: Lc0Mode
       metadata.key !== key ||
       metadata.cacheName !== cacheName ||
       metadata.url !== absoluteUrl(resolved.url) ||
-      !metadataMatches(metadata, metadata.observedBytes, resolved, options.rehashAfterMs ?? DEFAULT_REHASH_AFTER_MS)
+      !metadataMatches(metadata, metadata.observedBytes, resolved, resolved.offline ? Infinity : (options.rehashAfterMs ?? DEFAULT_REHASH_AFTER_MS))
     )
       return state;
     const cache = await untilAborted(caches.open(cacheName), options.signal);
@@ -645,14 +657,60 @@ export async function inspectLc0ModelDownload(modelUrl: string, options: Lc0Mode
   }
 }
 
-/** The artifact (URL and integrity pins) the loader would fetch for modelUrl. */
-async function resolveLoaderArtifact(modelUrl: string, options: Lc0ModelLoadOptions): Promise<ResolvedModelArtifact> {
+async function resolveOfflineArtifact(
+  provenance: ModelPinProvenance,
+  options: Lc0ModelLoadOptions,
+  expectation: Lc0ModelBytesExpectation | undefined,
+): Promise<ResolvedModelArtifact | undefined> {
+  if (options.cache === false || options.forceReload || !cacheApiAvailable()) return undefined;
+  const store = options.metadataStore ?? browserMetadataStore();
+  if (!store) return undefined;
+  const cacheName = options.cacheName ?? DEFAULT_CACHE_NAME;
+  const records = await ignoreMetadataFailure(() => store.list(cacheName));
+  const candidates = records?.filter((record) => {
+    const pin = record.provenance;
+    if (pin) {
+      if (pin.logicalUrl !== provenance.logicalUrl || pin.manifestUrl !== provenance.manifestUrl || pin.channelUrl !== provenance.channelUrl) return false;
+    } else if (record.url !== provenance.logicalUrl || provenance.manifestUrl !== absoluteUrl(defaultManifestUrlForModel(provenance.logicalUrl))) return false;
+    if (options.requireManifestEntry && !pin?.appManifestPin) return false;
+    return (
+      record.key === metadataKey(cacheName, record.url) &&
+      record.cacheName === cacheName &&
+      /^[a-f0-9]{64}$/.test(record.sha256 ?? '') &&
+      record.expectedSha256 === record.sha256 &&
+      metadataMatches(record, record.observedBytes, {
+        expectedSha256: expectation?.expectedSha256 ?? record.expectedSha256,
+        expectedBytes: expectation?.expectedBytes ?? record.expectedBytes,
+      }, Infinity)
+    );
+  });
+  const record = candidates?.sort((a, b) => b.lastUsedAt - a.lastUsedAt)[0];
+  if (!record) return undefined;
+  return { url: record.url, expectedSha256: record.sha256, expectedBytes: record.observedBytes, offline: true };
+}
+
+async function resolveLoaderArtifact(modelUrl: string, options: Lc0ModelLoadOptions) {
   options.signal?.throwIfAborted();
-  const manifest = options.manifestEntry
-    ? { entry: options.manifestEntry, manifestUrl: options.manifestUrl ?? modelUrl }
-    : await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
+  const started = nowMs();
+  const manifestUrl = options.manifestUrl ?? (options.manifestEntry ? modelUrl : defaultManifestUrlForModel(modelUrl));
+  const lookup = options.manifestEntry ?? (await untilAborted(fetchManifestEntry(modelUrl, manifestUrl), options.signal));
+  const entry = lookup === unreachable ? undefined : lookup;
+  const manifestMs = nowMs() - started;
   const channelUrl = options.channelUrl === null ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
-  return untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
+  const provenance: ModelPinProvenance = {
+    logicalUrl: absoluteUrl(modelUrl),
+    manifestUrl: absoluteUrl(manifestUrl),
+    channelUrl,
+    appManifestPin: /^[a-f0-9]{64}$/i.test(entry?.sha256 ?? ''),
+  };
+  const appPinMissing = options.requireManifestEntry && !provenance.appManifestPin;
+  const resolved = appPinMissing ? undefined : await untilAborted(resolveArtifactUrl(modelUrl, { entry, manifestUrl }, channelUrl), options.signal);
+  if (resolved?.metadataUnreachable || (lookup === unreachable && (!resolved || resolved.url === modelUrl))) {
+    const offline = await untilAborted(resolveOfflineArtifact(provenance, options, resolved), options.signal);
+    if (offline) return { resolved: offline, provenance, manifestMs };
+  }
+  if (!resolved) throw new Error(`App-origin model integrity metadata is unavailable for ${modelUrl}. Please retry loading the model.`);
+  return { resolved, provenance, manifestMs };
 }
 
 /** Whether Cache Storage has an entry for the loader's exact artifact, without
@@ -660,7 +718,7 @@ async function resolveLoaderArtifact(modelUrl: string, options: Lc0ModelLoadOpti
  * the loader still verifies the entry (metadata, else a rehash) when it reads it.
  */
 export async function lc0ModelCacheEntryExists(modelUrl: string, options: Lc0ModelLoadOptions = {}): Promise<boolean> {
-  const resolved = await resolveLoaderArtifact(modelUrl, options);
+  const { resolved } = await resolveLoaderArtifact(modelUrl, options);
   const cacheName = options.cacheName ?? DEFAULT_CACHE_NAME;
   if (!cacheApiAvailable() || !(await untilAborted(caches.has(cacheName), options.signal))) return false;
   const cache = await untilAborted(caches.open(cacheName), options.signal);
@@ -720,6 +778,7 @@ function verifiedMetadata(
   modelUrl: string,
   expectation: Lc0ModelBytesExpectation,
   check: Lc0ModelBytesCheck,
+  provenance: ModelPinProvenance,
 ): Lc0ModelVerificationMetadata {
   const time = epochMs();
   return {
@@ -728,6 +787,7 @@ function verifiedMetadata(
     runtimeVersion: METADATA_RUNTIME_VERSION,
     cacheName,
     url: absoluteUrl(modelUrl),
+    provenance,
     expectedBytes: expectation.expectedBytes,
     expectedSha256: expectation.expectedSha256?.toLowerCase(),
     observedBytes: check.byteLength,
@@ -866,25 +926,23 @@ export function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undef
 async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoadOptions): Promise<Lc0ModelLoadResult> {
   options.signal?.throwIfAborted();
   const started = nowMs();
-  const channelUrl = options.channelUrl === null ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
-  const manifest = options.manifestEntry
-    ? { entry: options.manifestEntry, manifestUrl: options.manifestUrl ?? modelUrl, elapsedMs: 0 }
-    : await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
-  if (options.requireManifestEntry && !/^[a-f0-9]{64}$/i.test(manifest.entry?.sha256 ?? '')) {
-    throw new Error(`App-origin model integrity metadata is unavailable for ${modelUrl}. Please retry loading the model.`);
-  }
-  const resolved = await untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
+  const { resolved, provenance, manifestMs } = await resolveLoaderArtifact(modelUrl, options);
   const expectation: Lc0ModelBytesExpectation = { expectedBytes: resolved.expectedBytes, expectedSha256: resolved.expectedSha256 };
   if (!options.allowUnverified && !/^[a-f0-9]{64}$/i.test(expectation.expectedSha256 ?? '')) {
     throw new Error(`LC0 model integrity metadata is unavailable for ${modelUrl}. Please retry loading the model.`);
   }
 
+  const offlineMiss = (): never => {
+    refuseUnapprovedDownload(options, modelUrl);
+    throw new Error(`No verified cached model available offline for ${modelUrl}. Reconnect to download the model.`);
+  };
   if (!options.cache) {
-    return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifest.elapsedMs, 'disabled');
+    if (resolved.offline) return offlineMiss();
+    return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifestMs, 'disabled');
   }
 
   if (!cacheApiAvailable() || !expectation.expectedSha256) {
-    return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifest.elapsedMs);
+    return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifestMs);
   }
 
   const cacheName = options.cacheName ?? DEFAULT_CACHE_NAME;
@@ -900,7 +958,8 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
     cache = await caches.open(cacheName);
     cached = options.forceReload ? undefined : await cache.match(cacheKey);
   } catch {
-    return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifest.elapsedMs);
+    if (resolved.offline) return offlineMiss();
+    return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifestMs);
   }
 
   if (cached) {
@@ -909,14 +968,15 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
     try {
       bytes = await cached.arrayBuffer();
     } catch {
-      return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifest.elapsedMs);
+      if (resolved.offline) return offlineMiss();
+      return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifestMs);
     }
     options.signal?.throwIfAborted();
     const cacheReadMs = nowMs() - cacheReadStarted;
-    const metadata = await ignoreMetadataFailure(store ? () => store.get(key) : undefined);
+    const metadata = resolved.offline ? undefined : await ignoreMetadataFailure(store ? () => store.get(key) : undefined);
     options.signal?.throwIfAborted();
     if (metadataMatches(metadata, bytes.byteLength, expectation, options.rehashAfterMs ?? DEFAULT_REHASH_AFTER_MS)) {
-      await ignoreMetadataFailure(store ? () => store.put({ ...metadata, lastUsedAt: epochMs() }) : undefined);
+      await ignoreMetadataFailure(store ? () => store.put({ ...metadata, provenance, lastUsedAt: epochMs() }) : undefined);
       options.signal?.throwIfAborted();
       return {
         model: bytes,
@@ -934,14 +994,16 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
         hashMs: 0,
         storagePersistent,
         elapsedMs: nowMs() - started,
-        telemetry: telemetry(started, 'cache-storage', { manifestMs: manifest.elapsedMs, cacheReadMs, hashMs: 0 }),
+        telemetry: telemetry(started, 'cache-storage', { manifestMs, cacheReadMs, hashMs: 0 }),
       };
     }
 
-    const check = await verifyLc0ModelBytes(bytes, expectation, options.allowUnverified);
+    const check = await verifyLc0ModelBytes(bytes, expectation, options.allowUnverified && !resolved.offline);
     options.signal?.throwIfAborted();
     if (check.ok && check.sha256Checked) {
-      await ignoreMetadataFailure(store ? () => store.put(verifiedMetadata(key, cacheName, resolved.url, expectation, check)) : undefined);
+      if (!resolved.offline) {
+        await ignoreMetadataFailure(store ? () => store.put(verifiedMetadata(key, cacheName, resolved.url, expectation, check, provenance)) : undefined);
+      }
       options.signal?.throwIfAborted();
       return {
         model: bytes,
@@ -959,7 +1021,7 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
         hashMs: check.hashMs ?? 0,
         storagePersistent,
         elapsedMs: nowMs() - started,
-        telemetry: telemetry(started, 'cache-storage', { manifestMs: manifest.elapsedMs, cacheReadMs, hashMs: check.hashMs }),
+        telemetry: telemetry(started, 'cache-storage', { manifestMs, cacheReadMs, hashMs: check.hashMs }),
       };
     }
 
@@ -967,10 +1029,11 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
     options.signal?.throwIfAborted();
     await ignoreMetadataFailure(store ? () => store.delete(key) : undefined);
     options.signal?.throwIfAborted();
+    if (resolved.offline) return offlineMiss();
     if (!(await cacheQuotaAllows(expectation.expectedBytes, options))) {
       options.signal?.throwIfAborted();
       return {
-        ...(await fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifest.elapsedMs, 'quota-limited', storagePersistent)),
+        ...(await fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifestMs, 'quota-limited', storagePersistent)),
         revalidated: true,
         cacheReadMs,
       };
@@ -989,8 +1052,9 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
       store,
       options,
       storagePersistent,
+      provenance,
       {
-        manifestMs: manifest.elapsedMs,
+        manifestMs,
         cacheReadMs,
         hashMs: check.hashMs,
       },
@@ -998,13 +1062,14 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
     return { ...result, revalidated: true };
   }
 
+  if (resolved.offline) return offlineMiss();
   if (!(await cacheQuotaAllows(expectation.expectedBytes, options))) {
     options.signal?.throwIfAborted();
-    return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifest.elapsedMs, 'quota-limited', storagePersistent);
+    return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifestMs, 'quota-limited', storagePersistent);
   }
 
-  return fetchAndCacheModel(cache, cacheKey, fetchRequest, modelUrl, resolved.url, expectation, started, cacheName, key, store, options, storagePersistent, {
-    manifestMs: manifest.elapsedMs,
+  return fetchAndCacheModel(cache, cacheKey, fetchRequest, modelUrl, resolved.url, expectation, started, cacheName, key, store, options, storagePersistent, provenance, {
+    manifestMs,
   });
 }
 
@@ -1086,6 +1151,7 @@ async function fetchAndCacheModel(
   store: Lc0ModelVerificationMetadataStore | undefined,
   options: Lc0ModelLoadOptions,
   storagePersistent: boolean | undefined,
+  provenance: ModelPinProvenance,
   inheritedTelemetry: Pick<Lc0ModelLoadTelemetry, 'manifestMs' | 'cacheReadMs' | 'hashMs'> = {},
 ): Promise<Lc0ModelLoadResult> {
   refuseUnapprovedDownload(options, logicalModelUrl);
@@ -1107,7 +1173,7 @@ async function fetchAndCacheModel(
   options.signal?.throwIfAborted();
   const cacheWriteMs = nowMs() - cacheWriteStarted;
   if (cacheWritable) {
-    await ignoreMetadataFailure(store ? () => store.put(verifiedMetadata(key, cacheName, fetchModelUrl, expectation, check)) : undefined);
+    await ignoreMetadataFailure(store ? () => store.put(verifiedMetadata(key, cacheName, fetchModelUrl, expectation, check, provenance)) : undefined);
     options.signal?.throwIfAborted();
     try {
       await enforceModelCacheBounds(cache, cacheName, fetchModelUrl, store, options);
