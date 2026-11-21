@@ -30,6 +30,8 @@ const CACHE_PREFIX = '0x88-app2-';
 const LEGACY_CACHE_PREFIXES = ['0x88-app-', 'lc0-app-shell-'];
 const APP_SHELL_FALLBACK = '/app/play/';
 const ACTIVATION_RECORD = '/__sw/previous-cache';
+const STATE_CACHE = '0x88-sw-state';
+const LAST_ACTIVE_RECORD = '/__sw/active-cache';
 const NAVIGATION_TIMEOUT_MS = 3500;
 // Stylesheets are not here: they are Vite build output under /_app/immutable/.
 const SHELL_ASSETS = new Set(['/favicon.svg', '/manifest.webmanifest']);
@@ -65,15 +67,22 @@ async function activateCache() {
   // CacheStorage.keys() is in creation order. A later installer may already
   // have opened its own cache and must be left alone.
   const older = names.slice(0, names.indexOf(CACHE_NAME));
-  const builds = older.filter((name) => name.startsWith(CACHE_PREFIX));
-  let previous = builds[0];
-  for (const name of builds.reverse()) {
-    if (await (await caches.open(name)).match(ACTIVATION_RECORD)) {
-      previous = name;
-      break;
+  const state = await caches.open(STATE_CACHE);
+  let previous = await (await state.match(LAST_ACTIVE_RECORD))?.text();
+  if (previous === CACHE_NAME) {
+    previous = await (await current.match(ACTIVATION_RECORD))?.text();
+  } else if (!previous) {
+    const builds = older.filter((name) => name.startsWith(CACHE_PREFIX));
+    previous = builds[0];
+    for (const name of builds.reverse()) {
+      if (await (await caches.open(name)).match(ACTIVATION_RECORD)) {
+        previous = name;
+        break;
+      }
     }
   }
   await current.put(ACTIVATION_RECORD, new Response(previous ?? ''));
+  await state.put(LAST_ACTIVE_RECORD, new Response(CACHE_NAME));
   await Promise.all(older.filter((name) => name !== previous && (name.startsWith(CACHE_PREFIX) || LEGACY_CACHE_PREFIXES.some((prefix) => name.startsWith(prefix))))
     .map((name) => caches.delete(name)));
 }

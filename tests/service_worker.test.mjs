@@ -160,7 +160,7 @@ test('an update waits for old clients; activation keeps the previous build and r
   assert.equal(worker.state.skipped, false);
   assert.equal(await (await oldCache.match(oldChunk)).text(), 'old build');
   await dispatchLifecycle(worker, 'activate');
-  assert.deepEqual(await worker.caches.keys(), ['0x88-app2-100', 'lc0-browser-models-v1', 'other-cache', '0x88-app2-200']);
+  assert.deepEqual(await worker.caches.keys(), ['0x88-app2-100', 'lc0-browser-models-v1', 'other-cache', '0x88-app2-200', '0x88-sw-state']);
 });
 
 const SHELL_HTML = [
@@ -204,7 +204,44 @@ test('offline navigation and lazy imports survive a visit while the update was w
   const c = loadWorker({ version: 'c', fetch: async () => html('C home'), caches: a.caches });
   await dispatchLifecycle(c, 'install');
   await dispatchLifecycle(c, 'activate');
-  assert.deepEqual(await a.caches.keys(), [b.context.CACHE_NAME, c.context.CACHE_NAME]);
+  assert.deepEqual(await a.caches.keys(), ['0x88-sw-state', b.context.CACHE_NAME, c.context.CACHE_NAME]);
+});
+
+test('rollback retains the active worker’s offline pages and chunks despite cache creation order', async () => {
+  const html = (body) => basic(body, { contentType: 'text/html' });
+  const a = loadWorker({ version: 'a', fetch: async () => html('A home') });
+  await dispatchLifecycle(a, 'install');
+  await dispatchLifecycle(a, 'activate');
+  const b = loadWorker({ version: 'b', fetch: async () => html('B home'), caches: a.caches });
+  await dispatchLifecycle(b, 'install');
+  await dispatchLifecycle(b, 'activate');
+  const rollback = loadWorker({ version: 'a', fetch: async () => html('A home'), caches: a.caches });
+  await dispatchLifecycle(rollback, 'install');
+  const chunk = '/_app/immutable/chunks/analysis-a.js';
+  const page = request('/app/analysis/', { mode: 'navigate' });
+  b.state.fetch = async ({ url }) => (url.endsWith(chunk) ? basic('A chunk') : html('A analysis'));
+  for (const req of [page, request(chunk)]) {
+    const event = fetchEvent(req);
+    b.listeners.fetch(event);
+    await event.response;
+    await Promise.all(event.pending);
+  }
+  await dispatchLifecycle(rollback, 'activate');
+  const restarted = loadWorker({
+    version: 'a',
+    fetch: async () => {
+      throw new TypeError('offline');
+    },
+    caches: a.caches,
+  });
+  for (const [req, expected] of [
+    [page, 'A analysis'],
+    [request(chunk), 'A chunk'],
+  ]) {
+    const event = fetchEvent(req);
+    restarted.listeners.fetch(event);
+    assert.equal(await (await event.response).text(), expected);
+  }
 });
 
 test('activation cannot remove a later installer’s cache', async () => {
