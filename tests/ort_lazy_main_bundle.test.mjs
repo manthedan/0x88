@@ -109,7 +109,7 @@ test('a failed evaluator import asks for a reload and preserves its cause, but c
   });
   const online = Object.getOwnPropertyDescriptor(globalThis.navigator, 'onLine');
   Object.defineProperty(globalThis.navigator, 'onLine', { configurable: true, value: false });
-  t.after(() => online ? Object.defineProperty(globalThis.navigator, 'onLine', online) : delete globalThis.navigator.onLine);
+  t.after(() => (online ? Object.defineProperty(globalThis.navigator, 'onLine', online) : delete globalThis.navigator.onLine));
   await assert.rejects(lazyOrtEvaluators.createLc0OnnxEvaluatorFromUrl('/small.onnx'), {
     message: 'You appear to be offline. Reconnect and reload this page to try again.',
     cause,
@@ -125,11 +125,18 @@ test('Play tells users to reload instead of letting Retry loop on a failed evalu
   const reload = t.mock.fn();
   const retry = t.mock.fn();
   const ctx = { dom: { buttonEl: () => button }, board: { turn: 'w' }, humanColor: 'w' };
-  const run = new Function('ctx', 'EvaluatorImportError', 'ctxSetEngineNote', 'location', 'ctxVerifySelectedEngineReady', `
+  const run = new Function(
+    'ctx',
+    'EvaluatorImportError',
+    'ctxSetEngineNote',
+    'location',
+    'ctxVerifySelectedEngineReady',
+    `
     ${stripTypeScriptTypes(failures)}
     const ctxSelectedEngine = () => ({ label: 'Lc0 Small' });
     return { fail: (error) => ctxSetEngineFailure(ctx, error), click: () => ctxRetryEngine(ctx) };
-  `)(ctx, EvaluatorImportError, note, { reload }, retry);
+  `,
+  )(ctx, EvaluatorImportError, note, { reload }, retry);
   const error = new EvaluatorImportError('Part of the app could not load.');
   run.fail(error);
   assert.deepEqual(note.mock.calls[0].arguments, [ctx, error.message, true]);
@@ -151,7 +158,10 @@ test('Arena mount renders basic runtime status without importing ORT', async () 
   const details = { open: false };
   const badge = { isConnected: true, closest: () => details, classList: { toggle() {} }, textContent: '' };
   let ortImports = 0;
-  const render = new Function('badge', 'collectOrtRuntimeDiagnostics', `
+  const render = new Function(
+    'badge',
+    'collectOrtRuntimeDiagnostics',
+    `
     let runtimeIsolation = false, runtimeSharedArrayBuffer = false;
     const maybeEl = () => badge;
     const isV0DeployProfile = () => false;
@@ -160,7 +170,8 @@ test('Arena mount renders basic runtime status without importing ORT', async () 
     const centipawnHybridManifestStatusText = () => '';
     ${stripTypeScriptTypes(badgeSource)}
     return renderRuntimeBadge;
-  `)(badge, async () => {
+  `,
+  )(badge, async () => {
     ortImports++;
     return { describe: 'auto->wasm', wasm: { numThreads: 1 }, sessions: { active: 0 }, webgpuAvailable: false };
   });
@@ -180,13 +191,17 @@ test('Arena benchmark diagnostics include a used hybrid ORT head or worker big n
   const diagnosticsSource = source.slice(source.indexOf('async function safeOrtRuntimeDiagnostics('), source.indexOf('function fixedSuiteFensFromParams('));
   const diagnostics = { sessions: { active: 1 } };
   const collect = t.mock.fn(async () => diagnostics);
-  const collectFor = new Function('Lc0WebHybridEvaluator', 'collectOrtRuntimeDiagnostics', `
+  const collectFor = new Function(
+    'Lc0WebHybridEvaluator',
+    'collectOrtRuntimeDiagnostics',
+    `
     const ortRuntime = undefined, centipawnUsedOrt = false;
     return async (lc0Cache, bt4Telemetry = new Map()) => {
       ${stripTypeScriptTypes(diagnosticsSource)}
       return safeOrtRuntimeDiagnostics();
     };
-  `)(Lc0WebHybridEvaluator, collect);
+  `,
+  )(Lc0WebHybridEvaluator, collect);
   const createRuntime = async () => ({ evaluate: async () => {}, executionFootprint: () => ({}) });
   const wgsl = new Lc0WebHybridEvaluator({ packUrl: '/pack', headBackend: 'wgsl' }, { createRuntime });
   const ort = new Lc0WebHybridEvaluator({ packUrl: '/pack', headBackend: 'ort' }, { createRuntime });

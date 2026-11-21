@@ -182,7 +182,7 @@ test('offline navigation and lazy imports survive a visit while the update was w
   const b = loadWorker({ version: 'b', fetch: async () => html('B home'), caches: a.caches });
   await dispatchLifecycle(b, 'install');
   const chunk = '/_app/immutable/chunks/analysis-b.js';
-  a.state.fetch = async ({ url }) => url.endsWith(chunk) ? basic('B chunk') : html('B analysis');
+  a.state.fetch = async ({ url }) => (url.endsWith(chunk) ? basic('B chunk') : html('B analysis'));
   for (const req of [request('/app/analysis/', { mode: 'navigate' }), request(chunk)]) {
     const event = fetchEvent(req);
     a.listeners.fetch(event);
@@ -190,8 +190,13 @@ test('offline navigation and lazy imports survive a visit while the update was w
     await Promise.all(event.pending);
   }
   await dispatchLifecycle(b, 'activate');
-  b.state.fetch = async () => { throw new TypeError('offline'); };
-  for (const [req, expected] of [[request('/app/analysis/?fen=offline', { mode: 'navigate' }), 'B analysis'], [request(chunk), 'B chunk']]) {
+  b.state.fetch = async () => {
+    throw new TypeError('offline');
+  };
+  for (const [req, expected] of [
+    [request('/app/analysis/?fen=offline', { mode: 'navigate' }), 'B analysis'],
+    [request(chunk), 'B chunk'],
+  ]) {
     const event = fetchEvent(req);
     b.listeners.fetch(event);
     assert.equal(await (await event.response).text(), expected);
@@ -207,7 +212,14 @@ test('activation cannot remove a later installer’s cache', async () => {
   const b = loadWorker({ version: 'b', fetch: async () => html() });
   await dispatchLifecycle(b, 'install');
   let finishInstall;
-  const c = loadWorker({ version: 'c', fetch: () => new Promise((resolve) => { finishInstall = () => resolve(html()); }), caches: b.caches });
+  const c = loadWorker({
+    version: 'c',
+    fetch: () =>
+      new Promise((resolve) => {
+        finishInstall = () => resolve(html());
+      }),
+    caches: b.caches,
+  });
   const installing = dispatchLifecycle(c, 'install');
   await Promise.resolve();
   await dispatchLifecycle(b, 'activate');

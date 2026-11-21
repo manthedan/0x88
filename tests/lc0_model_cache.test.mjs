@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createLc0OnnxEvaluatorFromUrl } from '../src/lc0/lc0SmallModelSelection.ts';
-import { clearLc0ModelCache, clearLc0ModelCacheEntry, inspectLc0ModelDownload, loadLc0ModelForOrt, modelFileName, sha256Hex, verifyLc0ModelBytes } from '../src/lc0/modelCache.ts';
+import {
+  clearLc0ModelCache,
+  clearLc0ModelCacheEntry,
+  inspectLc0ModelDownload,
+  loadLc0ModelForOrt,
+  modelFileName,
+  sha256Hex,
+  verifyLc0ModelBytes,
+} from '../src/lc0/modelCache.ts';
 
 // Known SHA-256 test vector: the empty input hashes to this digest.
 const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
@@ -130,7 +138,11 @@ async function withMockedEnv(
     }
     if (url === CHANNEL_URL) {
       return new Response(
-        JSON.stringify(channelManifest ? { ...channelManifest, releaseUrl: new URL(RELEASE_URL).pathname } : { schema: 'lc0_browser.artifact_channel_manifest.v1', releaseManifestUrl: new URL(RELEASE_URL).pathname }),
+        JSON.stringify(
+          channelManifest
+            ? { ...channelManifest, releaseUrl: new URL(RELEASE_URL).pathname }
+            : { schema: 'lc0_browser.artifact_channel_manifest.v1', releaseManifestUrl: new URL(RELEASE_URL).pathname },
+        ),
         { headers: { 'content-type': 'application/json' } },
       );
     }
@@ -160,33 +172,36 @@ async function withMockedEnv(
 
 test('offline lookup restores a verified immutable model, but never trusts replaced bodies or downloads with a stale pin', async () => {
   const options = { cache: true, manifestUrl: MANIFEST_URL, channelUrl: null, metadataStore: new MemoryMetadataStore(), requireManifestEntry: true };
-  await withMockedEnv(async () => {
-    const onlineFetch = globalThis.fetch;
-    assert.equal((await loadLc0ModelForOrt(MODEL_URL, options)).cacheStatus, 'miss');
-    const cache = await caches.open('lc0-browser-models-v1');
-    globalThis.fetch = async (url) => {
-      assert.equal(url, MANIFEST_URL, 'offline pins must never authorize a binary fetch');
-      throw new TypeError('offline');
-    };
-    assert.equal((await inspectLc0ModelDownload(MODEL_URL, options)).cached, true);
-    const offline = await loadLc0ModelForOrt(MODEL_URL, options);
-    assert.equal(offline.url, MODEL_ARTIFACT_URL);
-    assert.equal(offline.verification, 'hashed');
-    assert.equal(new TextDecoder().decode(offline.model), 'abc');
+  await withMockedEnv(
+    async () => {
+      const onlineFetch = globalThis.fetch;
+      assert.equal((await loadLc0ModelForOrt(MODEL_URL, options)).cacheStatus, 'miss');
+      const cache = await caches.open('lc0-browser-models-v1');
+      globalThis.fetch = async (url) => {
+        assert.equal(url, MANIFEST_URL, 'offline pins must never authorize a binary fetch');
+        throw new TypeError('offline');
+      };
+      assert.equal((await inspectLc0ModelDownload(MODEL_URL, options)).cached, true);
+      const offline = await loadLc0ModelForOrt(MODEL_URL, options);
+      assert.equal(offline.url, MODEL_ARTIFACT_URL);
+      assert.equal(offline.verification, 'hashed');
+      assert.equal(new TextDecoder().decode(offline.model), 'abc');
 
-    globalThis.fetch = async (url) => url === MANIFEST_URL ? Response.json({ models: [] }) : onlineFetch(url);
-    await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /App-origin model integrity metadata is unavailable/);
-    globalThis.fetch = async (url) => {
-      assert.equal(url, MANIFEST_URL);
-      throw new TypeError('offline');
-    };
-    await assert.rejects(loadLc0ModelForOrt(MODEL_URL, { ...options, forceReload: true }), /App-origin model integrity metadata is unavailable/);
-    await cache.put(MODEL_ARTIFACT_URL, new Response('bad'));
-    await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /No verified cached model available offline/);
-    assert.equal(await cache.match(MODEL_ARTIFACT_URL), undefined);
-    await cache.put(MODEL_ARTIFACT_URL, new Response('abc'));
-    await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /App-origin model integrity metadata is unavailable/);
-  }, { serveBytes: () => bytesOf('abc'), manifestArtifactUrl: MODEL_ARTIFACT_URL, manifestBytes: 3, manifestSha256: ABC_SHA256 });
+      globalThis.fetch = async (url) => (url === MANIFEST_URL ? Response.json({ models: [] }) : onlineFetch(url));
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /App-origin model integrity metadata is unavailable/);
+      globalThis.fetch = async (url) => {
+        assert.equal(url, MANIFEST_URL);
+        throw new TypeError('offline');
+      };
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, { ...options, forceReload: true }), /App-origin model integrity metadata is unavailable/);
+      await cache.put(MODEL_ARTIFACT_URL, new Response('bad'));
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /No verified cached model available offline/);
+      assert.equal(await cache.match(MODEL_ARTIFACT_URL), undefined);
+      await cache.put(MODEL_ARTIFACT_URL, new Response('abc'));
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /App-origin model integrity metadata is unavailable/);
+    },
+    { serveBytes: () => bytesOf('abc'), manifestArtifactUrl: MODEL_ARTIFACT_URL, manifestBytes: 3, manifestSha256: ABC_SHA256 },
+  );
 });
 
 test('shipped pins recover old content-addressed records offline without trusting unrelated models or corrupt cached bytes', async (t) => {
@@ -196,25 +211,28 @@ test('shipped pins recover old content-addressed records offline without trustin
   t.after(() => delete globalThis.__SHIPPED_MODEL_PINS__);
   const metadataStore = new MemoryMetadataStore();
   const options = { cache: true, manifestUrl: MANIFEST_URL, channelUrl: null, metadataStore, requireManifestEntry: true };
-  await withMockedEnv(async () => {
-    await loadLc0ModelForOrt(MODEL_URL, options);
-    const legacy = [...metadataStore.entries.values()][0];
-    delete legacy.provenance;
-    assert.equal(legacy.url, MODEL_ARTIFACT_URL);
-    const requests = [];
-    globalThis.fetch = async (input) => {
-      requests.push(input);
-      throw new TypeError('offline');
-    };
-    assert.equal((await inspectLc0ModelDownload(MODEL_URL, options)).cached, true);
-    const restored = await loadLc0ModelForOrt(MODEL_URL, options);
-    assert.equal(restored.verification, 'hashed');
-    assert.equal(restored.url, MODEL_ARTIFACT_URL);
-    await assert.rejects(loadLc0ModelForOrt(MODEL_URL.replace('test.onnx', 'unknown.onnx'), options), /App-origin model integrity metadata is unavailable/);
-    await (await caches.open('lc0-browser-models-v1')).put(MODEL_ARTIFACT_URL, new Response('bad'));
-    await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /No verified cached model available offline/);
-    assert.ok(requests.every((input) => input === MANIFEST_URL));
-  }, { serveBytes: () => bytesOf('abc'), manifestArtifactUrl: MODEL_ARTIFACT_URL, manifestBytes: 3, manifestSha256: ABC_SHA256 });
+  await withMockedEnv(
+    async () => {
+      await loadLc0ModelForOrt(MODEL_URL, options);
+      const legacy = [...metadataStore.entries.values()][0];
+      delete legacy.provenance;
+      assert.equal(legacy.url, MODEL_ARTIFACT_URL);
+      const requests = [];
+      globalThis.fetch = async (input) => {
+        requests.push(input);
+        throw new TypeError('offline');
+      };
+      assert.equal((await inspectLc0ModelDownload(MODEL_URL, options)).cached, true);
+      const restored = await loadLc0ModelForOrt(MODEL_URL, options);
+      assert.equal(restored.verification, 'hashed');
+      assert.equal(restored.url, MODEL_ARTIFACT_URL);
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL.replace('test.onnx', 'unknown.onnx'), options), /App-origin model integrity metadata is unavailable/);
+      await (await caches.open('lc0-browser-models-v1')).put(MODEL_ARTIFACT_URL, new Response('bad'));
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /No verified cached model available offline/);
+      assert.ok(requests.every((input) => input === MANIFEST_URL));
+    },
+    { serveBytes: () => bytesOf('abc'), manifestArtifactUrl: MODEL_ARTIFACT_URL, manifestBytes: 3, manifestSha256: ABC_SHA256 },
+  );
 });
 
 test('exact manifest URL pins precede filename fallback and tolerate non-UTF-8 URL octets', async () => {
@@ -360,23 +378,26 @@ test('loadLc0ModelForOrt resolves stable model URLs through channel release mani
 test('concurrent and subsequent lookups share channel and release fetches; channels expire independently', async (t) => {
   let now = Date.now();
   t.mock.method(Date, 'now', () => now);
-  await withMockedEnv(async (fetchLog) => {
-    const options = { manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL };
-    const inspect = () => inspectLc0ModelDownload(MODEL_URL, options);
-    await Promise.all([inspect(), inspect(), inspect()]);
-    await inspect();
-    const count = (url) => fetchLog.urls.filter((requested) => requested === url).length;
-    assert.equal(count(CHANNEL_URL), 1);
-    assert.equal(count(RELEASE_URL), 1);
-    now += 31_000;
-    await inspect();
-    assert.equal(count(CHANNEL_URL), 2);
-    assert.equal(count(RELEASE_URL), 1);
-    now += 31_000;
-    await inspect();
-    assert.equal(count(CHANNEL_URL), 3);
-    assert.equal(count(RELEASE_URL), 2);
-  }, { manifestSha256: ABC_SHA256, manifestBytes: 3 });
+  await withMockedEnv(
+    async (fetchLog) => {
+      const options = { manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL };
+      const inspect = () => inspectLc0ModelDownload(MODEL_URL, options);
+      await Promise.all([inspect(), inspect(), inspect()]);
+      await inspect();
+      const count = (url) => fetchLog.urls.filter((requested) => requested === url).length;
+      assert.equal(count(CHANNEL_URL), 1);
+      assert.equal(count(RELEASE_URL), 1);
+      now += 31_000;
+      await inspect();
+      assert.equal(count(CHANNEL_URL), 2);
+      assert.equal(count(RELEASE_URL), 1);
+      now += 31_000;
+      await inspect();
+      assert.equal(count(CHANNEL_URL), 3);
+      assert.equal(count(RELEASE_URL), 2);
+    },
+    { manifestSha256: ABC_SHA256, manifestBytes: 3 },
+  );
 });
 
 test('loadLc0ModelForOrt resolves v2 channels to immutable Brotli bodies with decoded integrity', async () => {

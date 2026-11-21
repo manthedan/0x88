@@ -110,7 +110,10 @@ test('immutable release manifests reuse the edge body across query strings', asy
 test('mutable channel revalidation returns a bodyless 304 only for an existing matching object', async () => {
   const env = fakeEnv();
   const url = `https://assets.example/${CHANNEL_KEY}`;
-  for (const [method, etag] of [['GET', '"old", W/"fake-etag"'], ['HEAD', '*']]) {
+  for (const [method, etag] of [
+    ['GET', '"old", W/"fake-etag"'],
+    ['HEAD', '*'],
+  ]) {
     const response = await handleArtifactRequest(new Request(url, { method, headers: { 'If-None-Match': etag } }), env);
     assert.equal(response.status, 304);
     assert.equal(response.headers.get('ETag'), '"fake-etag"');

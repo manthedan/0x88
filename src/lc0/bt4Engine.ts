@@ -1,7 +1,6 @@
 import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
 import { rankFlipColorSwapBoard, rankFlipMove } from '../chess/boardNormalization.ts';
 import { moveFromUci, moveToUci } from '../chess/moveCodec.ts';
-import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import {
   type OrtSessionDiagnostics,
   ortDequantFoldEnabled,
@@ -10,6 +9,7 @@ import {
   requestedOrtRuntimeDiagnosticOptions,
   resolveFreshWorkerOrtSessionPlacement,
 } from '../nn/ortConfig.ts';
+import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import type { OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
 import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
@@ -17,8 +17,8 @@ import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import { terminateEngineWorker } from './engineRetirement.ts';
 import { type LargeNetPrefetchOptions, type LargeNetPrefetchResult, largeNetWorkerEp, phoneColdPrefetch } from './largeNetDownload.ts';
-import { lc0SplitKUrl, selectLc0OrtModelUrl } from './lc0ModelUrls.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './lc0EvaluatorBase.ts';
+import { lc0SplitKUrl, selectLc0OrtModelUrl } from './lc0ModelUrls.ts';
 import { inspectLc0ModelDownload } from './modelCache.ts';
 import { PHONE_LARGE_NET_SUFFIX, phoneBigNetBlocked } from './phoneLargeNetPolicy.ts';
 

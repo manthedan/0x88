@@ -4,8 +4,8 @@ import test from 'node:test';
 import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange, subscribeAssetProbeRetry } from '../src/lc0/assetProbe.ts';
 import { berserkVariantAssetStatus, checkBerserkVariantAsset } from '../src/lc0/berserkVariants.ts';
 import { browserVariantOption } from '../src/lc0/browserVariantOption.ts';
-import { createEngineArtifactLoader } from '../src/lc0/engineArtifacts.ts';
 import { bigNetAssetStatusSync, bigNetOptionState, checkBigNetAsset } from '../src/lc0/bt4Engine.ts';
+import { createEngineArtifactLoader } from '../src/lc0/engineArtifacts.ts';
 import { checkPlentyChessVariantAsset, plentyChessVariantAssetStatus } from '../src/lc0/plentychessVariants.ts';
 import { checkRecklessVariantAsset, recklessVariantAssetStatus } from '../src/lc0/recklessVariants.ts';
 import { checkStormphraxVariantAsset, stormphraxVariantAssetStatus } from '../src/lc0/stormphraxVariants.ts';
@@ -45,7 +45,12 @@ test('transient HEAD failures probe the cache even when the browser reports onli
     assert.equal(options.cache, 'force-cache');
     return new Response('abc');
   });
-  for (const [url, expected] of [['/offline-wifi', 'present'], ['/503', 'present'], ['/404', 'missing'], ['/410', 'missing']]) {
+  for (const [url, expected] of [
+    ['/offline-wifi', 'present'],
+    ['/503', 'present'],
+    ['/404', 'missing'],
+    ['/410', 'missing'],
+  ]) {
     assert.equal(await probeAssetUrls([url]), expected);
   }
 });

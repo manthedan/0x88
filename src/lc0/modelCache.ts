@@ -710,7 +710,10 @@ async function resolveOfflineArtifact(
       if (pin.logicalUrl !== provenance.logicalUrl || pin.manifestUrl !== provenance.manifestUrl || pin.channelUrl !== provenance.channelUrl) return false;
     } else {
       const pinnedLegacy = metadataMatches(record, record.observedBytes, legacyPin ?? {}, Infinity);
-      const directLegacy = !legacyPin && !options.requireManifestEntry && record.url === provenance.logicalUrl &&
+      const directLegacy =
+        !legacyPin &&
+        !options.requireManifestEntry &&
+        record.url === provenance.logicalUrl &&
         provenance.manifestUrl === absoluteUrl(defaultManifestUrlForModel(provenance.logicalUrl));
       if (!pinnedLegacy && !directLegacy) return false;
     }
@@ -720,10 +723,15 @@ async function resolveOfflineArtifact(
       record.cacheName === cacheName &&
       /^[a-f0-9]{64}$/.test(record.sha256 ?? '') &&
       record.expectedSha256 === record.sha256 &&
-      metadataMatches(record, record.observedBytes, {
-        expectedSha256: expectation?.expectedSha256 ?? record.expectedSha256,
-        expectedBytes: expectation?.expectedBytes ?? record.expectedBytes,
-      }, Infinity)
+      metadataMatches(
+        record,
+        record.observedBytes,
+        {
+          expectedSha256: expectation?.expectedSha256 ?? record.expectedSha256,
+          expectedBytes: expectation?.expectedBytes ?? record.expectedBytes,
+        },
+        Infinity,
+      )
     );
   });
   const record = candidates?.sort((a, b) => b.lastUsedAt - a.lastUsedAt)[0];
@@ -1111,9 +1119,24 @@ async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoa
     return fetchUncachedVerifiedModel(modelUrl, resolved, options, started, manifestMs, 'quota-limited', storagePersistent);
   }
 
-  return fetchAndCacheModel(cache, cacheKey, fetchRequest, modelUrl, resolved.url, expectation, started, cacheName, key, store, options, storagePersistent, provenance, {
-    manifestMs,
-  });
+  return fetchAndCacheModel(
+    cache,
+    cacheKey,
+    fetchRequest,
+    modelUrl,
+    resolved.url,
+    expectation,
+    started,
+    cacheName,
+    key,
+    store,
+    options,
+    storagePersistent,
+    provenance,
+    {
+      manifestMs,
+    },
+  );
 }
 
 /**

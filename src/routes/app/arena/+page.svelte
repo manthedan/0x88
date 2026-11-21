@@ -1,9 +1,9 @@
 <script lang="ts">
 import { onMount } from 'svelte';
+import { showRouteControllerFailure } from '#lib/chunkLoadError.ts';
 import BrowserCapabilities from '#lib/components/BrowserCapabilities.svelte';
 import PhoneLargeNetPreference from '#lib/components/PhoneLargeNetPreference.svelte';
 import SiteHeader from '#lib/components/SiteHeader.svelte';
-import { showRouteControllerFailure } from '#lib/chunkLoadError.ts';
 import { beforeNavigate } from '$app/navigation';
 
 let mountedUrl: URL | null = null;

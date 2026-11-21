@@ -119,7 +119,11 @@ async function probeHttpCache(url: string, signal: AbortSignal): Promise<boolean
  * the session so existing pickers stop displaying checking indefinitely. */
 export async function probeAssetUrls(
   urls: readonly string[],
-  { timeoutMs = 8_000, signal, probeCached = probeHttpCache }: {
+  {
+    timeoutMs = 8_000,
+    signal,
+    probeCached = probeHttpCache,
+  }: {
     timeoutMs?: number;
     signal?: AbortSignal;
     probeCached?: (url: string, signal: AbortSignal) => Promise<boolean>;

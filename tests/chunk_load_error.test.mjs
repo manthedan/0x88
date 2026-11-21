@@ -6,7 +6,7 @@ test('a missing route chunk has a working reload action without blaming a deploy
   const reload = t.mock.fn();
   const location = Object.getOwnPropertyDescriptor(globalThis, 'location');
   Object.defineProperty(globalThis, 'location', { configurable: true, value: { reload } });
-  t.after(() => location ? Object.defineProperty(globalThis, 'location', location) : delete globalThis.location);
+  t.after(() => (location ? Object.defineProperty(globalThis, 'location', location) : delete globalThis.location));
   const button = {};
   const node = { ownerDocument: { createElement: () => button }, append: t.mock.fn() };
   showRouteControllerFailure(node, new TypeError('Importing a module script failed.'));

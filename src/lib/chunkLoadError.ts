@@ -1,6 +1,10 @@
 export function classifyChunkLoadError(error: unknown): { kind: 'offline' | 'chunk'; message: string } | undefined {
   const detail = error instanceof Error ? error.message : String(error);
-  if (!/failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|unable to preload css for|loading chunk \S+ failed/i.test(detail)) {
+  if (
+    !/failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|unable to preload css for|loading chunk \S+ failed/i.test(
+      detail,
+    )
+  ) {
     return undefined;
   }
   return globalThis.navigator?.onLine === false

@@ -34,13 +34,21 @@ function chessgroundArrows(): Plugin {
   };
 }
 
-const shippedModelPins = Object.fromEntries(['/models/lc0/manifest.json', '/models/maia3/manifest.json', '/models/centipawn.manifest.json'].map((manifest) => {
-  const { models } = JSON.parse(readFileSync(new URL(`./public${manifest}`, import.meta.url), 'utf8')) as {
-    models: { url: string; sha256?: string; bytes?: number }[];
-  };
-  return [manifest, Object.fromEntries(models.filter(({ sha256 }) => /^[a-f0-9]{64}$/i.test(sha256 ?? ''))
-    .map(({ url, sha256, bytes }) => [url, { expectedSha256: sha256, expectedBytes: bytes }]))];
-}));
+const shippedModelPins = Object.fromEntries(
+  ['/models/lc0/manifest.json', '/models/maia3/manifest.json', '/models/centipawn.manifest.json'].map((manifest) => {
+    const { models } = JSON.parse(readFileSync(new URL(`./public${manifest}`, import.meta.url), 'utf8')) as {
+      models: { url: string; sha256?: string; bytes?: number }[];
+    };
+    return [
+      manifest,
+      Object.fromEntries(
+        models
+          .filter(({ sha256 }) => /^[a-f0-9]{64}$/i.test(sha256 ?? ''))
+          .map(({ url, sha256, bytes }) => [url, { expectedSha256: sha256, expectedBytes: bytes }]),
+      ),
+    ];
+  }),
+);
 
 export default defineConfig({
   cacheDir: sharedNodeModules ? '.vite-cache' : undefined,
