@@ -674,6 +674,7 @@ onMount(() => {
   @media (max-width:900px){
     .arena-workspace{grid-template-columns:minmax(0,1fr)}
     .arena-workspace .arena-sidebar{max-height:none; overflow:visible}
+    .arena-workspace .section-block>summary, .eng-more>summary, .more-options>summary{min-height:44px}
     .charts-panel{grid-column:auto}
     /* Setup first before the first game; running games keep the board first. */
     .arena-workspace:global([data-match=none]) .arena-sidebar,
