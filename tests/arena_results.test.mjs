@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { arenaChartColorIndex, arenaOpeningPairs, arenaPointsForSeat, arenaUciChartSample, formatArenaPoints } from '../src/lc0/arenaResults.ts';
+import { arenaChartColorIndex, arenaOpeningPairs, arenaPointsForSeat, arenaPreviousMoveLabel, arenaUciChartSample, formatArenaPoints } from '../src/lc0/arenaResults.ts';
+
+test('Arena search subtitles include the actual move in SAN with its move number', () => {
+  const fen = '4k3/4p3/8/8/8/8/8/4K1N1';
+  assert.equal(arenaPreviousMoveLabel(`${fen} w - - 0 3`, 'g1f3'), 'Previous move 3. Nf3');
+  assert.equal(arenaPreviousMoveLabel(`${fen} b - - 0 2`, 'e7e6'), 'Previous move 2… e6');
+  assert.equal(arenaPreviousMoveLabel(`${fen} b - - 0 2`), 'Previous search');
+});
 import { buildSchedule, roundRobinPairings } from '../src/lc0/tournament.ts';
 
 test('Arena half-point notation includes zero and totals', () => {

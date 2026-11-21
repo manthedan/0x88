@@ -64,7 +64,7 @@ import { ARENA_BIG_NET_MEMORY_REASON, arenaBigNetPairingBlocked, arenaBigNetSeat
 import { arenaMoveDelay, guardArenaUnload } from './arenaNavigation.ts';
 import { type ArenaOpening, BUILTIN_ARENA_OPENINGS, parseArenaOpenings } from './arenaOpenings.ts';
 import { loadRetirableResource } from './arenaResourceLoad.ts';
-import { arenaOpeningPairs, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
+import { arenaOpeningPairs, arenaPreviousMoveLabel, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { arenaSideTimeMs } from './arenaTiming.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
@@ -602,7 +602,7 @@ const pendingLc0ReplyProbes = new Map<string, PendingLc0ReplyProbe>();
 const lc0TreeTelemetry = new Map<string, Lc0TreeTelemetry>();
 const uciTelemetry = new Map<string, UciEngineTelemetry>();
 const bt4Telemetry = new Map<string, Bt4Telemetry>();
-const engineOutputs = new Map<string, EngineOutputSnapshot>();
+const engineOutputs = new Map<string, EngineOutputSnapshot & { moveLabel: string }>();
 const engineOutputHistory: EngineOutputSnapshot[] = [];
 let engineOutputTotalCount = 0;
 const MAX_ENGINE_OUTPUT_HISTORY = 1000;
@@ -1229,7 +1229,7 @@ function recordEngineOutput(snapshot: EngineOutputSnapshot): void {
   thinkingEngineIds.delete(snapshot.engineId);
   thinkingSince.delete(snapshot.engineId);
   arenaSearchProgress.delete(snapshot.engineId);
-  engineOutputs.set(snapshot.engineId, snapshot);
+  engineOutputs.set(snapshot.engineId, { ...snapshot, moveLabel: arenaPreviousMoveLabel(snapshot.fen, snapshot.move) });
   engineOutputTotalCount += 1;
   engineOutputHistory.push(snapshot);
   if (engineOutputHistory.length > MAX_ENGINE_OUTPUT_HISTORY) engineOutputHistory.splice(0, engineOutputHistory.length - MAX_ENGINE_OUTPUT_HISTORY);
@@ -1348,12 +1348,11 @@ function engineCardHtml(id: string): string {
   const side = boardSideFor(id);
   const progress = arenaSearchProgress.get(id) ?? { label: rawName, units: 'search' as const, indeterminate: true };
   const live = thinking ? arenaSearchProgressHtml(progress) : '';
-  const searched = snapshot ? parseFen(snapshot.fen) : null;
-  const resultLabel = searched ? `Previous move ${searched.fullmove}${searched.turn === 'b' ? '…' : '.'}` : 'No completed search';
+  const resultLabel = snapshot?.moveLabel ?? 'No completed search';
   const activity = thinking
     ? `<span class="eng-thinking-label" title="Searching move ${board.fullmove}; results below are from the previous completed search">Thinking</span>`
     : '';
-  const head = `<header class="eng-head">${engineAvatarHtml(rawName)}<span class="eng-title"><span class="eng-name">${htmlEscape(name)}${activity}</span><span class="eng-side">${side ? `${side} · ` : ''}${resultLabel}</span></span><span class="eng-eval" title="Previous move’s evaluation from White's view">${htmlEscape(snapshot?.evalText ?? '—')}</span></header>`;
+  const head = `<header class="eng-head">${engineAvatarHtml(rawName)}<span class="eng-title"><span class="eng-name">${htmlEscape(name)}${activity}</span><span class="eng-side">${side ? `${side} · ` : ''}${htmlEscape(resultLabel)}</span></span><span class="eng-eval" title="Previous move’s evaluation from White's view">${htmlEscape(snapshot?.evalText ?? '—')}</span></header>`;
   if (!snapshot) {
     return `<article class="eng-card${thinking ? ' thinking' : ''}" data-engine-id="${htmlEscape(id)}" style="--eng:${engineBrushes(rawName).swatch}">${head}${live}${thinking ? '' : '<p class="eng-empty">Waiting for its first move.</p>'}</article>`;
   }
