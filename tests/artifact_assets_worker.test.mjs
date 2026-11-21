@@ -91,6 +91,40 @@ test('artifact assets worker serves full immutable artifacts with required heade
   assert.equal(await text(response), 'abcdefghijklmnopqrstuvwxyz');
 });
 
+test('immutable release manifests reuse the edge body across query strings', async (t) => {
+  await withFakeEdgeCache(async () => {
+    const env = fakeEnv();
+    const get = t.mock.method(env.ARTIFACTS, 'get');
+    const pending = [];
+    const first = await handleArtifactRequest(new Request(`https://assets.example/${RELEASE_KEY}`), env, { waitUntil: (work) => pending.push(work) });
+    assert.equal(first.headers.get('Cache-Status'), 'lc0-artifact-worker; miss');
+    await Promise.all(pending);
+    const second = await handleArtifactRequest(new Request(`https://assets.example/${RELEASE_KEY}?another=1`), env);
+    assert.equal(second.headers.get('Cache-Status'), 'lc0-artifact-worker; hit');
+    assert.equal(second.headers.get('Cache-Control'), 'public, max-age=31536000, immutable');
+    assert.equal(await text(second), '{"schema":"release"}');
+    assert.equal(get.mock.callCount(), 1);
+  });
+});
+
+test('mutable channel revalidation returns a bodyless 304 only for an existing matching object', async () => {
+  const env = fakeEnv();
+  const url = `https://assets.example/${CHANNEL_KEY}`;
+  for (const [method, etag] of [['GET', '"old", W/"fake-etag"'], ['HEAD', '*']]) {
+    const response = await handleArtifactRequest(new Request(url, { method, headers: { 'If-None-Match': etag } }), env);
+    assert.equal(response.status, 304);
+    assert.equal(response.headers.get('ETag'), '"fake-etag"');
+    assert.equal(response.headers.get('Cache-Control'), 'no-cache');
+    assert.equal(response.headers.get('Access-Control-Allow-Origin'), '*');
+    assert.equal(response.headers.get('Content-Length'), null);
+    assert.equal(response.body, null);
+  }
+  const changed = await handleArtifactRequest(new Request(url, { headers: { 'If-None-Match': '"old"' } }), env);
+  assert.equal(changed.status, 200);
+  assert.equal(await text(changed), '{"schema":"channel"}');
+  assert.equal((await handleArtifactRequest(new Request(`${url.replace('stable', 'missing')}`, { headers: { 'If-None-Match': '*' } }), env)).status, 404);
+});
+
 test('artifact assets worker caches HEAD metadata without R2 body fetches', async () => {
   await withFakeEdgeCache(async () => {
     const request = new Request(`https://assets.example/${KEY}`, { method: 'HEAD' });
