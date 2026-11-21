@@ -7,7 +7,11 @@ import { ENGINE_ARTIFACT_PINS } from '../src/lc0/engineArtifactPins.generated.ts
 import { stockfishWorkerUrl } from '../src/lc0/stockfishEngine.ts';
 
 const bytes = (s) => new TextEncoder().encode(s);
-const files = { '/fixture/engine.js': bytes('trusted glue'), '/fixture/engine.wasm': bytes('trusted wasm'), '/fixture/engine.data': bytes('trusted data') };
+const files = {
+  '/fixture/engine.js': bytes('trusted glue'),
+  '/fixture/engine.wasm': Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0),
+  '/fixture/engine.data': bytes('trusted data'),
+};
 const pins = Object.fromEntries(
   Object.entries(files).map(([path, data]) => [path, { bytes: data.length, sha256: createHash('sha256').update(data).digest('hex') }]),
 );
@@ -26,6 +30,7 @@ function sandbox(tamper) {
     Response,
     TextDecoder,
     Uint8Array,
+    WebAssembly,
     crypto: webcrypto,
     fetch: async (url) => {
       const path = new URL(url, 'https://0x88.app').pathname;
@@ -37,9 +42,12 @@ function sandbox(tamper) {
       imports++;
       context.Factory = async (options) => {
         factoryOptions = options;
-        assert.deepEqual([...options.wasmBinary], [...files['/fixture/engine.wasm']]);
-        assert.deepEqual([...new Uint8Array(options.getPreloadedPackage())], [...files['/fixture/engine.data']]);
-        return {};
+        options.instantiateWasm({}, (instance) => assert(instance instanceof WebAssembly.Instance));
+        const preload = options.getPreloadedPackage();
+        assert.deepEqual([...new Uint8Array(preload)], [...files['/fixture/engine.data']]);
+        assert.throws(() => options.getPreloadedPackage(), /Missing verified.*preload data/);
+        options.preRun = [() => preload];
+        return options;
       };
       context.onmessage = () => {};
     },
@@ -81,14 +89,12 @@ test('Emscripten passes only verified WASM and preload bytes to the factory', as
   await flush();
   assert.equal(env.imports(), 1);
   assert.equal(env.messages.at(-1)?.type, 'ready');
+  for (const field of ['instantiateWasm', 'getPreloadedPackage', 'preRun']) assert(!Object.hasOwn(env.factoryOptions(), field), field);
 });
-test('Emscripten starts all asset fetches before the binaries finish and clears its preloads after init', async () => {
+test('Emscripten starts all asset fetches before the binaries finish', async () => {
   const env = sandbox();
   const binaryGate = Promise.withResolvers();
-  const factoryGate = Promise.withResolvers();
   const requested = [];
-  let module;
-  let consumed;
   const fetch = env.context.fetch;
   env.context.fetch = async (url) => {
     const name = new URL(url).pathname;
@@ -96,29 +102,14 @@ test('Emscripten starts all asset fetches before the binaries finish and clears 
     if (name.endsWith('.wasm') || name.endsWith('.data')) await binaryGate.promise;
     return fetch(url);
   };
-  env.context.importScripts = () => {
-    env.context.Factory = async (options) => {
-      module = options;
-      consumed = options.getPreloadedPackage();
-      assert.throws(() => options.getPreloadedPackage(), /Missing verified/);
-      await factoryGate.promise;
-      return options;
-    };
-  };
   vm.runInNewContext(withPins(emscriptenUciWorkerScript({ label: 'Fixture', factoryGlobal: 'Factory' })), env.context);
   env.context.onmessage({ data: { type: 'init', id: 1, jsUrl: '/fixture/engine.js', trustedJsUrl: true } });
   await new Promise(setImmediate);
   assert.deepEqual(requested.sort(), ['/fixture/engine.data', '/fixture/engine.js', '/fixture/engine.wasm']);
-  assert.equal(module, undefined);
+  assert.equal(env.imports(), 0);
   binaryGate.resolve();
   await flush();
-  assert.deepEqual(new Uint8Array(consumed), files['/fixture/engine.data']);
-  assert.deepEqual(module.wasmBinary, files['/fixture/engine.wasm']);
-  factoryGate.resolve();
-  await flush();
   assert.equal(env.messages.at(-1)?.type, 'ready');
-  assert.equal('wasmBinary' in module, false);
-  assert.equal('getPreloadedPackage' in module, false);
 });
 test('the Emscripten factory can read the stop flag without a worker message', async () => {
   const env = sandbox();

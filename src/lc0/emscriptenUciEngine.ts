@@ -126,12 +126,12 @@ async function init(jsUrl, wasmUrl, dataUrl, trustedJsUrl, stopBuffer) {
     siblingDataUrl.pathname = siblingDataUrl.pathname.replace(/\.js$/, '.data');
     const resolvedDataUrl = dataUrl ? resolveUrl(dataUrl) : siblingDataUrl.href;
     artifactUrls = [resolvedJsUrl, resolvedWasmUrl, resolvedDataUrl];
-    let wasmBytes, dataBytes;
+    let wasmModule, dataBytes;
     try {
       if (!trustedJsUrl && new URL(resolvedJsUrl).origin !== self.location.origin) throw new Error('Refusing to execute untrusted ' + ENGINE_LABEL + ' Emscripten glue: ' + resolvedJsUrl);
       let glueBytes;
-      [wasmBytes, dataBytes, glueBytes] = await Promise.all([
-        engineArtifacts.bytes(resolvedWasmUrl || resolvedJsUrl.replace(/\.js$/, '.wasm')),
+      [wasmModule, dataBytes, glueBytes] = await Promise.all([
+        engineArtifacts.bytes(resolvedWasmUrl || resolvedJsUrl.replace(/\.js$/, '.wasm')).then((bytes) => WebAssembly.compile(bytes)),
         engineArtifacts.bytes(resolvedDataUrl),
         engineArtifacts.bytes(resolvedJsUrl),
       ]);
@@ -144,11 +144,17 @@ async function init(jsUrl, wasmUrl, dataUrl, trustedJsUrl, stopBuffer) {
     const stop = stopBuffer ? new Int32Array(stopBuffer) : null;
     modulePromise = factory({
       ...(stop ? { shouldStop: () => Atomics.load(stop, 0) } : {}),
-      wasmBinary: new Uint8Array(wasmBytes),
+      instantiateWasm(imports, receiveInstance) {
+        const module = wasmModule;
+        wasmModule = null;
+        const instance = new WebAssembly.Instance(module, imports);
+        receiveInstance(instance, module);
+        return instance.exports;
+      },
       getPreloadedPackage() {
-        if (!dataBytes) throw new Error('Missing verified ' + ENGINE_LABEL + ' preload data');
         const bytes = dataBytes;
         dataBytes = null;
+        if (!bytes) throw new Error('Missing verified ' + ENGINE_LABEL + ' preload data');
         return bytes;
       },
       postRun(mod) {
@@ -165,12 +171,12 @@ async function init(jsUrl, wasmUrl, dataUrl, trustedJsUrl, stopBuffer) {
       print(line) { self.postMessage({ type: 'line', line: String(line), stream: 'stdout' }); },
       printErr(line) { self.postMessage({ type: 'line', line: String(line), stream: 'stderr' }); },
     }).then((mod) => {
-      delete mod.wasmBinary;
+      delete mod.instantiateWasm;
       delete mod.getPreloadedPackage;
+      delete mod.preRun;
       engine = mod;
       return mod;
     });
-    wasmBytes = null;
   }
   try {
     await modulePromise;

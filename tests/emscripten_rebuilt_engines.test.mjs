@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { webcrypto } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import test from 'node:test';
+import { createContext, runInContext } from 'node:vm';
+import { emscriptenUciWorkerScript } from '../src/lc0/emscriptenUciEngine.ts';
 
-const require = createRequire(import.meta.url);
 const MiB = 1024 * 1024;
 const tiers = {
   berserk: ['', '-simd128', '-relaxed-simd128'],
@@ -13,6 +14,7 @@ const tiers = {
   stormphrax: ['', '-relaxed-simd128'],
 };
 const unlinked = { plentychess: 'processed.bin', stormphrax: 'undertown.nnue' };
+const factoryNames = { berserk: 'Berserk', plentychess: 'PlentyChess', stormphrax: 'Stormphrax' };
 const lfsPointerHeader = 'version https://git-lfs.github.com/spec/v1\n';
 
 function fixtureAbsent(path) {
@@ -31,39 +33,73 @@ test('missing Emscripten fixtures include LFS pointers but not corrupt bodies', 
   assert.equal(fixtureAbsent(path), false);
 });
 
+async function startWorker(engine, jsUrl, wasmUrl, dataUrl, stop) {
+  const factoryGlobal = factoryNames[engine];
+  const source = readFileSync(`public${jsUrl}`, 'utf8');
+  const stdout = [];
+  let mod;
+  let instances = 0;
+  const requests = new Set();
+  const { promise: ready, resolve, reject } = Promise.withResolvers();
+  const context = createContext({
+    location: new URL('https://0x88.app/worker.js'),
+    WorkerGlobalScope: class {},
+    URL,
+    Blob,
+    Response,
+    TextDecoder,
+    Uint8Array,
+    console,
+    performance,
+    crypto: webcrypto,
+    WebAssembly: Object.assign(Object.create(WebAssembly), {
+      Instance: class extends WebAssembly.Instance {
+        constructor(module, imports) {
+          super(module, imports);
+          instances++;
+          const memory = Object.values(this.exports).find((value) => value instanceof WebAssembly.Memory);
+          assert.equal(memory.buffer.byteLength, 64 * MiB);
+          assert.throws(() => memory.grow((512 - 64) * 16 + 1), RangeError);
+        }
+      },
+    }),
+    fetch: async (url) => {
+      const { pathname } = new URL(url);
+      assert(!requests.has(pathname), `worker fetched ${pathname} twice`);
+      requests.add(pathname);
+      return new Response(readFileSync(`public${pathname}`));
+    },
+    importScripts() {
+      runInContext(source, context);
+      const factory = context[factoryGlobal];
+      context[factoryGlobal] = async (options) => (mod = await factory(options));
+    },
+    postMessage(message) {
+      if (message.type === 'ready') resolve();
+      else if (message.type === 'error') reject(new Error(message.message));
+      else if (message.type === 'line' && message.stream === 'stdout') stdout.push(message.line);
+    },
+  });
+  context.self = context;
+  runInContext(emscriptenUciWorkerScript({ label: engine, factoryGlobal }), context);
+  context.onmessage({ data: { type: 'init', id: 1, jsUrl, wasmUrl, dataUrl, stopBuffer: stop.buffer } });
+  await ready;
+  assert.deepEqual(requests, new Set([jsUrl, wasmUrl, dataUrl]));
+  assert.equal(instances, 1);
+  for (const field of ['getPreloadedPackage', 'preRun']) assert(!Object.hasOwn(mod, field), field);
+  return { mod, stdout };
+}
+
 for (const [engine, suffixes] of Object.entries(tiers)) {
   for (const suffix of suffixes) {
     test(`${engine}${suffix}: rebuilt WASM stops cooperatively, then searches again`, async (t) => {
-      const base = `${engine}-emscripten${suffix}`;
-      const dir = resolve('public', engine);
-      const wasm = join(dir, `${base}.wasm`);
-      const data = join(dir, `${engine}-emscripten.data`);
-      const missing = [wasm, data].find(fixtureAbsent);
+      const base = `/${engine}/${engine}-emscripten${suffix}`;
+      const wasmUrl = `${base}.wasm`;
+      const dataUrl = `/${engine}/${engine}-emscripten.data`;
+      const missing = [`public${wasmUrl}`, `public${dataUrl}`].find(fixtureAbsent);
       if (missing) return t.skip(`Engine fixture not hydrated: ${missing}`);
-      const tmp = mkdtempSync(join(tmpdir(), 'emscripten-uci-'));
-      t.after(() => rmSync(tmp, { recursive: true, force: true }));
-      const glue = join(tmp, `${base}.cjs`);
-      copyFileSync(join(dir, `${base}.js`), glue);
-      const compiled = new WebAssembly.Module(readFileSync(wasm));
-      const stdout = [];
       const flag = new Int32Array(new SharedArrayBuffer(4));
-      let stopReads = 0;
-      const mod = await require(glue)({
-        instantiateWasm(imports, receiveInstance) {
-          const instance = new WebAssembly.Instance(compiled, imports);
-          const memory = Object.values(instance.exports).find((value) => value instanceof WebAssembly.Memory);
-          assert.equal(memory.buffer.byteLength, 64 * MiB);
-          assert.throws(() => memory.grow((512 - 64) * 16 + 1), RangeError);
-          return receiveInstance(instance);
-        },
-        locateFile: () => data,
-        print: (line) => stdout.push(line),
-        shouldStop: () => {
-          const value = Atomics.load(flag, 0);
-          stopReads += value;
-          return value;
-        },
-      });
+      const { mod, stdout } = await startWorker(engine, `${base}.js`, wasmUrl, dataUrl, flag);
       const command = (line) => mod.ccall('command', null, ['string'], [line]);
       if (unlinked[engine]) {
         // The packager exposes the MEMFS create call. It throws EEXIST if the
@@ -78,9 +114,8 @@ for (const [engine, suffixes] of Object.entries(tiers)) {
       command('position startpos');
       Atomics.store(flag, 0, 1);
       command('go depth 8');
-      assert(stopReads > 0, 'the stop flag must be consumed in depth-limited searches');
       assert.match(stdout.at(-1), /^bestmove [a-h][1-8]/);
-      assert(!stdout.some((line) => /^info depth 8 /.test(line)));
+      assert(!stdout.some((line) => /^info depth 8 /.test(line)), 'the stop flag must be consumed in depth-limited searches');
       Atomics.store(flag, 0, 0);
       stdout.length = 0;
       command('ucinewgame');

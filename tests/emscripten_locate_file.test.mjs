@@ -56,9 +56,15 @@ async function exerciseWorkerScript(script, factoryName) {
     };
     return Promise.resolve({ ccall() {} });
   };
-  const bytes = new TextEncoder().encode('verified fixture');
-  const pin = { sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length };
-  const pins = Object.fromEntries(['/engine/variant.js', '/engine/variant.wasm', '/engine/canonical.data'].map((path) => [path, pin]));
+  const fixture = new TextEncoder().encode('verified fixture');
+  const files = {
+    '/engine/variant.js': fixture,
+    '/engine/variant.wasm': Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0),
+    '/engine/canonical.data': fixture,
+  };
+  const pins = Object.fromEntries(
+    Object.entries(files).map(([path, bytes]) => [path, { sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length }]),
+  );
   script = script.replace(JSON.stringify(ENGINE_ARTIFACT_PINS), JSON.stringify(pins));
   runInNewContext(script, {
     self,
@@ -68,7 +74,7 @@ async function exerciseWorkerScript(script, factoryName) {
     TextDecoder,
     Uint8Array,
     crypto: webcrypto,
-    fetch: async () => new Response(bytes),
+    fetch: async (url) => new Response(files[new URL(url).pathname]),
     importScripts() {},
   });
   self.onmessage({
@@ -123,7 +129,10 @@ test('the CI test job fetches the Emscripten startup fixtures', () => {
   const job = workflow.split('\n  test:\n')[1].split('\n  build:\n')[0];
   const fixtures = /TEST_LFS_INCLUDE: (.+)/.exec(job)?.[1].split(',') ?? [];
   for (const [family] of STARTUP_ENGINES) {
-    for (const path of startupFixtures(family)) assert.ok(fixtures.includes(path), `${path} must be hydrated in CI`);
+    for (const path of startupFixtures(family)) {
+      const wasmGlob = path.endsWith('.wasm') && `public/${family}/*.wasm`;
+      assert.ok(fixtures.includes(path) || (wasmGlob && fixtures.includes(wasmGlob)), `${path} must be hydrated in CI`);
+    }
   }
   assert.ok(job.includes('git lfs pull --include="$LFS_INCLUDE,$TEST_LFS_INCLUDE"'));
 });
