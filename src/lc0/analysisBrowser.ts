@@ -32,7 +32,7 @@ import {
 } from './analysis/analysisEngines.ts';
 import { cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
 import { analysisGamePosition } from './analysisContinuity.ts';
-import { mountAnalysisDisclosure } from './analysisDisclosure.ts';
+import { mountAnalysisDisclosure, mountPositionTools } from './analysisDisclosure.ts';
 import {
   ANALYSIS_DRAWABLE_BRUSHES,
   type AnalysisLine,
@@ -5218,22 +5218,7 @@ function wireEvents() {
     } else if (target?.dataset.uci && tree.addUci(target.dataset.uci)) afterNavigation();
   });
   wirePvPreview();
-  const positionTools = el('positionTools') as HTMLDetailsElement;
-  const openLoadForm = () => {
-    const quick = el('movelist').querySelector<HTMLTextAreaElement>('[data-quick-pgn]');
-    if (quick && !positionTools.open) {
-      (el('openingExplorer') as HTMLDetailsElement).open = false;
-      setView(el('movesTab') as HTMLButtonElement);
-      quick.focus({ preventScroll: true });
-      quick.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      return;
-    }
-    positionTools.open = !positionTools.open;
-    if (positionTools.open) inputEl('fenInput').focus();
-  };
-  el('openPosition').addEventListener('click', openLoadForm);
-  el('emptyLoadGame').addEventListener('click', openLoadForm);
-  positionTools.addEventListener('toggle', () => el('openPosition').setAttribute('aria-expanded', String(positionTools.open)));
+  mountPositionTools(el('positionTools') as HTMLDetailsElement, inputEl('fenInput'), [el('openPosition'), el('emptyLoadGame')], mountAbort.signal);
   const loadQuickPgn = () => {
     const raw = el('movelist').querySelector<HTMLTextAreaElement>('[data-quick-pgn]')?.value.trim();
     if (!raw) {

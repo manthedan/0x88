@@ -88,7 +88,7 @@ onMount(() => {
       <button id="navForward" type="button" title="Forward (Right)" aria-label="Go forward one move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 8 7-8 7" /></svg></button>
       <button id="navEnd" type="button" title="End (Down)" aria-label="Go to last move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M6 5l8 7-8 7" /></svg></button>
     </div>
-    <button id="emptyLoadGame" class="tool-button empty-load-game" type="button" title="Load a game (PGN or FEN)" aria-label="Load a game (PGN or FEN)">Load</button>
+    <button id="emptyLoadGame" class="tool-button empty-load-game" type="button" aria-controls="positionTools" aria-expanded="false" title="Load a game (PGN or FEN)" aria-label="Load a game (PGN or FEN)">Load</button>
     <div id="boardToolDisclosure" class="board-tool-disclosure">
     <button id="boardToolsButton" class="tool-button board-tools-trigger" type="button" aria-label="Board tools" title="Board tools" aria-controls="boardTools" aria-expanded="false">•••</button>
     <div id="boardTools" class="board-tools" role="group" aria-label="Board tools">

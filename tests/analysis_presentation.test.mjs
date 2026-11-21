@@ -304,7 +304,7 @@ test('Black-to-move FEN history leaves the White ply empty and escapes imported 
   assert.match(empty, /No moves yet/);
   assert.match(empty, /<label for="quickPgn">PGN game or FEN position<\/label>/);
   assert.match(empty, /<textarea[^>]+id="quickPgn"[^>]+data-quick-pgn/);
-  assert.match(empty, /<button[^>]+data-quick-pgn-load>Load<\/button>/);
+  assert.match(empty, /<button[^>]+aria-label="Import pasted PGN or FEN" data-quick-pgn-load>Import<\/button>/);
   assert.match(empty, /PGN or FEN/);
   assert.ok(looksLikeFen('rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1'));
   assert.ok(looksLikeFen('8/8/8/8/8/8/8/K6k'));

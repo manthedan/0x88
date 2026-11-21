@@ -335,5 +335,5 @@ export function analysisMoveMarkup(root: GameNode, current: GameNode): string {
   }
   return html.length
     ? html.join('')
-    : '<div class="history-empty"><p><strong>No moves yet.</strong> Play a move on the board, or paste a game or position below.</p><label for="quickPgn">PGN game or FEN position</label><textarea id="quickPgn" class="quick-pgn" data-quick-pgn rows="3" spellcheck="false" placeholder="Paste your game or position"></textarea><div class="quick-pgn-actions"><button type="button" class="quick-pgn-load" data-quick-pgn-load>Load</button><span class="quick-pgn-hint">PGN or FEN, detected automatically</span></div></div>';
+    : '<div class="history-empty"><p><strong>No moves yet.</strong> Play a move on the board, or paste a game or position below.</p><label for="quickPgn">PGN game or FEN position</label><textarea id="quickPgn" class="quick-pgn" data-quick-pgn rows="3" spellcheck="false" placeholder="Paste your game or position"></textarea><div class="quick-pgn-actions"><button type="button" class="quick-pgn-load" aria-label="Import pasted PGN or FEN" data-quick-pgn-load>Import</button><span class="quick-pgn-hint">PGN or FEN, detected automatically</span></div></div>';
 }
