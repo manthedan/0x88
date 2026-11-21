@@ -61,7 +61,7 @@ export function emscriptenSearchTimeoutMs(options: EmscriptenUciOptions): number
   return 120000;
 }
 
-const MAX_HASH_MB = 256;
+export const EMSCRIPTEN_MAX_HASH_MB = 256;
 
 function hashCommand(hashMb: number): string {
   return `setoption name Hash value ${Math.max(2, Math.floor(hashMb))}`;
@@ -259,8 +259,8 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
   }
 
   private validateOptions(options: Options): Options {
-    if (Math.floor(options.hashMb ?? 0) > MAX_HASH_MB) {
-      throw new RangeError(`${this.config.label} supports at most ${MAX_HASH_MB} MiB of Hash in the browser`);
+    if (Math.floor(options.hashMb ?? 0) > EMSCRIPTEN_MAX_HASH_MB) {
+      throw new RangeError(`${this.config.label} supports at most ${EMSCRIPTEN_MAX_HASH_MB} MiB of Hash in the browser`);
     }
     return options;
   }

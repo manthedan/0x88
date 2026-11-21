@@ -2,6 +2,7 @@ import { START_FEN } from '../chess/board.ts';
 import { parseValidatedFen } from '../chess/fenValidation.ts';
 import { BerserkEngine } from './berserkEngine.ts';
 import { BERSERK_EMSCRIPTEN_VARIANT, type BerserkVariant, berserkVariantAssetStatus, checkBerserkVariantAsset } from './berserkVariants.ts';
+import { EMSCRIPTEN_MAX_HASH_MB } from './emscriptenUciEngine.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import { checkPlentyChessVariantAsset, PLENTYCHESS_EMSCRIPTEN_VARIANT, type PlentyChessVariant, plentyChessVariantAssetStatus } from './plentychessVariants.ts';
 import { canUsePersistentRecklessWasi, RecklessEngine, type RecklessOptions } from './recklessEngine.ts';
@@ -504,6 +505,13 @@ async function runBench(): Promise<void> {
   } catch (error) {
     setStatus((error as Error).message);
     return;
+  }
+  if (config.hashMb > EMSCRIPTEN_MAX_HASH_MB && config.modes.includes('persistent')) {
+    const limited = config.variants.filter(({ engine }) => engine === 'berserk' || engine === 'plentychess');
+    if (limited.length) {
+      setStatus(`Use at most ${EMSCRIPTEN_MAX_HASH_MB} MiB of Hash or deselect ${limited.map(({ label }) => label).join(', ')}.`);
+      return;
+    }
   }
   rows.length = 0;
   reportSnapshot = { runtime: runtimeMetadata(), config };
