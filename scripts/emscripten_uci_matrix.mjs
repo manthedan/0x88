@@ -9,14 +9,14 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { brotliCompressSync, constants } from 'node:zlib';
-import { roundOrder, runSuite, summarizeCell } from './emscripten_uci_protocol.mjs';
+import { parseBenchmarkHash, roundOrder, runSuite, summarizeCell } from './emscripten_uci_protocol.mjs';
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 2) args.set(process.argv[i].replace(/^--/, ''), process.argv[i + 1]);
 const depth = Number(args.get('depth') ?? 11);
-const hash = Number(args.get('hash') ?? 16);
+const hash = parseBenchmarkHash(args.get('hash'));
 const positions = Number(args.get('positions') ?? 20);
-for (const [key, value] of Object.entries({ depth, hash, positions })) {
+for (const [key, value] of Object.entries({ depth, positions })) {
   if (!Number.isInteger(value) || value < 1 || (key === 'positions' && value > 20)) throw Error(`Invalid ${key}`);
 }
 

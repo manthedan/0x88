@@ -13,7 +13,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
-import { exactSearch, parseBestmove, parseInfo, parseUciSearch, ROTATED_FEN_SUITE } from './emscripten_uci_protocol.mjs';
+import { exactSearch, parseBenchmarkHash, parseBestmove, parseInfo, parseUciSearch, ROTATED_FEN_SUITE } from './emscripten_uci_protocol.mjs';
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -35,6 +35,7 @@ if (!jsPaths.length) {
   console.error('Usage: node scripts/emscripten_uci_bench.mjs --js <baseline.js>[,<candidate.js>...] [--depths 9,11] [--positions 20] [--json out.json]');
   process.exit(2);
 }
+const hash = parseBenchmarkHash(args.get('hash'));
 const depths = (args.get('depths') ?? '9').split(',').map((s) => Math.max(1, Math.floor(Number(s))));
 const positionCount = Math.max(1, Math.min(ROTATED_FEN_SUITE.length, Math.floor(Number(args.get('positions') ?? ROTATED_FEN_SUITE.length))));
 const timeoutMs = Math.max(1000, Math.floor(Number(args.get('timeout') ?? 120000)));
@@ -99,7 +100,7 @@ for (const jsPath of jsPaths) {
   engine.command('isready');
   await engine.waitForLine((line) => line === 'readyok', 'readyok');
   engine.command('setoption name Threads value 1');
-  engine.command(`setoption name Hash value ${Number(args.get('hash') ?? 16)}`);
+  engine.command(`setoption name Hash value ${hash}`);
   for (const depth of depths) {
     for (const [label, fen] of positions) {
       engine.command('ucinewgame');

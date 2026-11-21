@@ -1,9 +1,29 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { exactSearch, median, parseInfo, ROTATED_FEN_SUITE, roundOrder, runSuite, summarizeCell } from '../scripts/emscripten_uci_protocol.mjs';
 import { summarizeMatrix } from '../scripts/summarize_emscripten_uci_matrix.mjs';
+
+test('direct Emscripten benchmarks reject oversized Hash before opening engine artifacts', () => {
+  const js = 'missing/plentychess-emscripten.js';
+  const matrixScript = 'emscripten_uci_matrix.mjs';
+  for (const [script, ...args] of [
+    ['emscripten_uci_bench.mjs', '--js', js],
+    [matrixScript, '--config', 'missing/matrix.json'],
+    [matrixScript, '--cell', JSON.stringify({ js })],
+  ]) {
+    const run = (hash) =>
+      spawnSync(process.execPath, [fileURLToPath(new URL(`../scripts/${script}`, import.meta.url)), ...args, '--hash', hash], { encoding: 'utf8' });
+    const rejected = run('512');
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /Invalid --hash: expected an integer from 1 to 256 MiB/);
+    assert.doesNotMatch(rejected.stderr, /ENOENT|Missing Emscripten preload/);
+    assert.match(run('256').stderr, /ENOENT|Missing Emscripten preload/);
+  }
+});
 
 test('shared rotated suite has all 20 original positions', () => {
   assert.equal(ROTATED_FEN_SUITE.length, 20);

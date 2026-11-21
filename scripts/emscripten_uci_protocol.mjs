@@ -22,6 +22,12 @@ export const ROTATED_FEN_SUITE = [
   ['Ruy Lopez ply 38', 'r1bqr1k1/3nbp1p/p2p2p1/1pnPp3/P3P1P1/1BP4P/1B1N1P1N/R2QR1K1 w - - 1 20'],
 ];
 
+export function parseBenchmarkHash(value) {
+  const hash = Number(value ?? 16);
+  if (!Number.isInteger(hash) || hash < 1 || hash > 256) throw new RangeError('Invalid --hash: expected an integer from 1 to 256 MiB');
+  return hash;
+}
+
 const uciMove = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
 
 export function parseBestmove(line) {
