@@ -130,11 +130,11 @@ function arenaAvailability(prefix, extra = {}) {
     buildEngines() {}, renderSeatSelectors() {}, refreshSeatControls() {},
     ...extra,
   };
-  const load = new Function(...Object.keys(deps), stripTypeScriptTypes(`
+  const load = new Function(...Object.keys(deps), `
     let bt4AvailabilityResolved = false, probingSeatOptions = false, running = false, startPending = false;
-    ${body}
+    ${stripTypeScriptTypes(body)}
     return { refresh: refreshBigNetAvailability, resolved: () => bt4AvailabilityResolved };
-  `))(...Object.values(deps));
+  `)(...Object.values(deps));
   return { ...load, BIG_NETS };
 }
 
