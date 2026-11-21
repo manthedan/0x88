@@ -4024,7 +4024,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     return;
   }
   const needsSmallLc0Backend = rows.some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant));
-  if (needsSmallLc0Backend && !workerReady && !searcher) {
+  const smallLc0Pending = needsSmallLc0Backend && !workerReady && !searcher;
+  if (smallLc0Pending && rows.length === 1) {
     void dispatchAnalysis({ type: 'NEEDS_BACKEND', owner });
     return;
   }
@@ -4110,7 +4111,9 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     });
     const admission = applyAnalysisEvent({ type: 'PREPARED', owner, revision: owner.preparationRevision, snapshot });
     if (!admission.some((effect) => effect.type === 'search')) return;
-    const { fen, multiPv: analysisMultiPv, selectionKey: selectionCacheKey } = snapshot;
+    const { fen, multiPv: analysisMultiPv } = snapshot;
+    const rowKeys = [...snapshot.rowKeys];
+    let selectionCacheKey = snapshot.selectionKey;
     const analysisPositions = snapshot.positions.map((board) => ({ ...board, squares: [...board.squares] }));
     const cpuPosition = { fen: snapshot.cpuPosition.fen, moves: [...snapshot.cpuPosition.moves] };
     const runRows = [...snapshot.rows];
@@ -4135,7 +4138,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     else renderEngineComparison([]);
     const tasks: Promise<void>[] = [];
     let hadTaskFailure = false;
-    const pushTask = (index: number, cacheKey: string, label: string, taskFactory: (beginSearch: () => void) => Promise<AnalysisLine[]>) => {
+    const pushTask = (index: number, label: string, taskFactory: (beginSearch: () => void) => Promise<AnalysisLine[]>) => {
       tasks.push(
         (async () => {
           if (controller.signal.aborted || mountAbort.signal.aborted) return;
@@ -4149,8 +4152,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
               mountAbort.signal.aborted
             )
               return;
-            if (lines.length) cacheEngineLines(cacheKey, lines);
-            else engineLineCache.delete(cacheKey);
+            if (lines.length) cacheEngineLines(rowKeys[index], lines);
+            else engineLineCache.delete(rowKeys[index]);
             lineGroups[index] = lines;
             publishLines();
           } catch (error) {
@@ -4159,7 +4162,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
             const errMsg = (error as Error)?.message ?? String(error);
             console.warn(`${label} analysis failed`, error);
             if (runId === activeAnalysisRunId && analysisAbort === controller && analysisIsAnalyzing(analysisRunState)) {
-              engineLineCache.delete(cacheKey);
+              engineLineCache.delete(rowKeys[index]);
               lineGroups[index] = [{ engine: label, pvUci: [], multipv: 1, scoreText: '—', detail: 'failed', pvSan: '', error: errMsg }];
               publishLines();
             }
@@ -4170,12 +4173,12 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     for (let index = 0; index < runRows.length; index++) {
       const row = runRows[index];
       const cacheKey = snapshot.rowKeys[index];
-      if (!options.force && engineLineCache.has(cacheKey)) continue;
+      if (!options.force && engineLineCache.has(cacheKey) && !(smallLc0Pending && row.family === 'lc0' && !isLc0BigNetVariant(row.variant))) continue;
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
         const key = row.variant;
         const initError = bigNetInitErrors.get(key);
         const servedModelUrl = snapshot.servedModels[key] ?? '';
-        pushTask(index, cacheKey, `Lc0 ${BIG_NETS[key].name}`, () =>
+        pushTask(index, `Lc0 ${BIG_NETS[key].name}`, () =>
           initError
             ? Promise.reject(initError)
             : engines.bigNetLines(key, fen, row.strength, analysisPositions, analysisMultiPv, servedModelUrl, controller.signal, (label, progress) =>
@@ -4184,30 +4187,34 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         );
       } else if (row.family === 'lc0') {
         const label = 'Lc0';
-        if (workerReady) pushTask(index, cacheKey, label, () => workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label));
-        else if (searcher) {
-          const lc0Searcher = searcher;
-          pushTask(index, cacheKey, label, () =>
-            lc0Searcher
-              .search(
-                { positions: analysisPositions },
-                {
-                  visits: row.strength,
-                  reuseTree: row.strength <= 16_000,
-                  multiPv: analysisMultiPv,
-                  signal: controller.signal,
-                  yieldEveryMs: 16,
-                  onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
-                },
-              )
-              .then((result) => lc0AnalysisLines(result, fen, 'Lc0')),
-          );
-        }
+        pushTask(index, label, async () => {
+          if (smallLc0Pending) {
+            const loaded = await loadLc0BackendOwned(() => controller.signal.aborted || mountAbort.signal.aborted, controller.signal, true);
+            controller.signal.throwIfAborted();
+            if (!loaded) throw new Error('Lc0 Small failed to load');
+            rowKeys[index] = analysisRunRowKey({ ...snapshot, servedModels: { ...snapshot.servedModels, small: lc0ServedModelUrl } }, row);
+            activeAnalysisSelectionKey = selectionCacheKey = rowKeys.join('\u0001');
+          }
+          if (workerReady) return workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label);
+          return searcher!
+            .search(
+              { positions: analysisPositions },
+              {
+                visits: row.strength,
+                reuseTree: row.strength <= 16_000,
+                multiPv: analysisMultiPv,
+                signal: controller.signal,
+                yieldEveryMs: 16,
+                onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
+              },
+            )
+            .then((result) => lc0AnalysisLines(result, fen, 'Lc0'));
+        });
       } else if (row.family === 'centipawn') {
         const positions = analysisPositions;
         const current = positions[positions.length - 1];
         const label = centipawnEngineLabel(row.variant);
-        pushTask(index, cacheKey, label, async (beginSearch) => {
+        pushTask(index, label, async (beginSearch) => {
           const loadingId = `startup:${label}`;
           const evaluatorKey = engines.centipawnEvaluatorCacheKey(row.variant);
           const evaluatorPrepared = engines.hasCentipawnEvaluator(evaluatorKey);
@@ -4239,7 +4246,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         const stockfishUrl = stockfishFlavorUrl(
           threadedStockfishAvailable() ? (kind === 'lite' ? 'lite-threaded' : 'threaded') : kind === 'lite' ? 'lite-single' : 'single',
         );
-        pushTask(index, cacheKey, label, (beginSearch) =>
+        pushTask(index, label, (beginSearch) =>
           engines.withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
             const engine = engines.getStockfish(kind);
             engines.cpuSessions.setThreads(engine, Math.min(lease.threads, engine.maxThreads()));
@@ -4264,7 +4271,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         const variant = viridithasVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = engines.getViridithasFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) =>
+        pushTask(index, label, (beginSearch) =>
           engines.withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
             await engines.prepareCpuEngine(
               row,
@@ -4292,7 +4299,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         const variant = berserkVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = engines.getBerserkFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) =>
+        pushTask(index, label, (beginSearch) =>
           engines.withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
             engines.cpuSessions.setThreads(engine, lease.threads);
             await engines.prepareCpuEngine(
@@ -4317,7 +4324,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         const variant = plentyChessVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = engines.getPlentyChessFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) =>
+        pushTask(index, label, (beginSearch) =>
           engines.withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
             engines.cpuSessions.setThreads(engine, lease.threads);
             await engines.prepareCpuEngine(
@@ -4342,7 +4349,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         const variant = stormphraxVariantForKey(row.variant);
         const label = variant.label;
         const engine = engines.getStormphraxFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) =>
+        pushTask(index, label, (beginSearch) =>
           engines.withCpuLease(`stormphrax:${row.variant}`, controller.signal, async (lease) => {
             engines.cpuSessions.setThreads(engine, lease.threads);
             await engines.prepareCpuEngine(
@@ -4367,7 +4374,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         const variant = recklessVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = engines.getRecklessFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) =>
+        pushTask(index, label, (beginSearch) =>
           engines.withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
             await engines.prepareCpuEngine(
               row,
@@ -5862,23 +5869,25 @@ async function loadLc0Backend(
   }
 }
 
-async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal?: AbortSignal): Promise<boolean> {
+async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal?: AbortSignal, duringAnalysis = false): Promise<boolean> {
   await awaitEngineRetirements();
   if (loadCancelled()) return false;
   const runtime = selectedLc0Runtime();
   el('analyze').toggleAttribute('disabled', true);
   selectEl('lc0RuntimeSelect').disabled = true;
   el('backend').textContent = `loading ${lc0RuntimeLabel(runtime)}…`;
-  el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)} in a worker…`;
+  if (!duringAnalysis) el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)} in a worker…`;
   showModelProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
   try {
     const backend = await initWorker(operationSignal);
     if (loadCancelled()) return false;
     el('backend').textContent = backend;
     hideModelProgress();
-    el('analyze').toggleAttribute('disabled', false);
     selectEl('lc0RuntimeSelect').disabled = false;
-    el('message').textContent = 'Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.';
+    if (!duringAnalysis) {
+      el('analyze').toggleAttribute('disabled', false);
+      el('message').textContent = 'Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.';
+    }
     return true;
   } catch (workerError) {
     if (loadCancelled() || (workerError as Error).name === 'AbortError') return false;
@@ -5954,9 +5963,11 @@ async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal
         searchBudget: `multipv=${multiPv()}`,
         notes: [diagnostics?.describe ?? 'whole-model runtime is research-only and opt-in'],
       });
-      el('analyze').toggleAttribute('disabled', false);
       selectEl('lc0RuntimeSelect').disabled = false;
-      el('message').textContent = 'Ready (main-thread fallback — deep analysis may pause the UI).';
+      if (!duringAnalysis) {
+        el('analyze').toggleAttribute('disabled', false);
+        el('message').textContent = 'Ready (main-thread fallback — deep analysis may pause the UI).';
+      }
       hideModelProgress();
       return true;
     } catch (error) {
@@ -6070,8 +6081,8 @@ async function init(mountSignal: AbortSignal) {
     el('message').textContent = 'Play a move, load a game/FEN, or tap Analyze to start.';
     return;
   }
-  if (smallLc0) await loadLc0Backend(true, mountSignal);
-  else await analyzeCurrent();
+  if (inputEl('autoAnalyze').checked) await analyzeCurrent();
+  else if (smallLc0) await loadLc0Backend(true, mountSignal);
 }
 
 let lastAnalysisMountHref: string | null = null;

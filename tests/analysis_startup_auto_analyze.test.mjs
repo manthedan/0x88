@@ -48,6 +48,7 @@ test('a saved setup without Lc0 Small honours Auto-analyze turned off during sta
   assert.deepEqual(on.calls, ['analyze']);
 });
 
-test('a saved setup with Lc0 Small still loads its backend; the loader applies the checkbox', async () => {
-  for (const autoAnalyze of [false, true]) assert.deepEqual((await startup({ autoAnalyze, smallLc0: true })).calls, ['backend:true']);
+test('a saved setup with Lc0 Small dispatches analysis before backend readiness when Auto-analyze is on', async () => {
+  assert.deepEqual((await startup({ autoAnalyze: false, smallLc0: true })).calls, ['backend:true']);
+  assert.deepEqual((await startup({ autoAnalyze: true, smallLc0: true })).calls, ['analyze']);
 });

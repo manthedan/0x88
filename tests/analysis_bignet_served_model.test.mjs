@@ -207,6 +207,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
       ...deps,
       bigNets: { acquire: (key) => acquireBigNet(key), peek: (key) => searchers.get(key), release() {}, disposeNow() {} },
       centipawnCache: centipawn.cache,
+      createStockfish: () => ({ maxThreads: () => 1, setOptions() {}, newGame: async () => {}, analyze: async () => [] }),
     });
     return centipawn.engines;
   };
@@ -243,7 +244,10 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
       smallSearchLog.push(backendRuntime);
       return [{ engine, pvUci: ['d2d4'], multipv: 1, scoreText: '+0.10', detail: backendRuntime, pvSan: '', searchedMultiPv }];
     };
-    const lc0ServedModelUrl = '';
+    let lc0ServedModelUrl = '';
+    const threadedStockfishAvailable = () => false, stockfishFlavorUrl = () => '/sf.js', jsSidecarWasmUrl = () => '/sf.wasm';
+    const withEngineTimeout = (_label, signal, _ms, analyze) => analyze(signal), cpuAnalysisTimeoutMs = () => 1000;
+    const stockfishAnalysisLines = (_infos, _fen, engine) => [{ engine, pvUci: ['e2e4'], multipv: 1, scoreText: '+0.10' }];
     let mountAbort = new AbortController();
     const engineLineCache = new Map(), lineCache = new Map(), completeAnalysisKeys = new Set();
     const published = [];
@@ -285,6 +289,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
       if (held) await held.promise;
       if (cancelled()) return false;
       backendRuntime = runtime;
+      lc0ServedModelUrl = '/small-served.onnx';
       backendCompletions.push(runtime);
       workerReady = true;
       el('analyze').toggleAttribute('disabled', false);
@@ -1242,6 +1247,26 @@ test('changing engines after Stop does not wait for a cancelled big-net init to 
       t3.dispose();
     }
   }));
+
+test('Stockfish Lite publishes a line while Lc0 Small is loading in the same run', async () => {
+  const small = { family: 'lc0', variant: 'small', strength: 64 };
+  const sf = { family: 'sf', variant: 'lite', strength: 12 };
+  const page = analysisPage({ rows: [small, sf], searchers: new Map() });
+  const release = page.holdBackend();
+  const running = page.analyzeCurrent();
+  try {
+    await new Promise(setImmediate);
+    assert.deepEqual(page.published.at(-1)?.map((line) => line.engine), ['SF Lite']);
+    assert.deepEqual(page.smallSearchLog, []);
+  } finally {
+    release();
+    await running;
+  }
+  assert.deepEqual(page.published.at(-1).map((line) => line.engine), ['Lc0', 'SF Lite']);
+  assert.equal(page.admissions.length, 1);
+  assert.deepEqual([...page.completeAnalysisKeys], [page.analysisSelectionCacheKey()]);
+  assert.ok(page.engineLineCache.has(page.engineAnalysisCacheKey(small)), 'cache under the URL actually served');
+});
 
 test('hiding an automatic initial backend load retains its search on show', async () => {
   const small = { family: 'lc0', variant: 'small', strength: 64 };
