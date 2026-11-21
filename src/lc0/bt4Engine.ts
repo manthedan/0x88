@@ -1,14 +1,3 @@
-import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
-// Lc0 big-net (BT4-it332, t3-512 distill) browser integration.
-//
-// Big nets are large and attention-heavy, so they are handled with care:
-//   - WebGPU-gated: callers must check `probeBt4Support()` before exposing them.
-//   - Lazy: the dedicated search worker is only created/initialized on first use
-//     (the first init fetches the model, cached afterwards by the Cache API).
-//   - Off the main thread: search runs entirely inside searchWorker.ts so heavy
-//     inference never blocks the UI.
-//   - Disposable: `dispose()` terminates the worker, freeing model memory.
-
 import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
 import { rankFlipColorSwapBoard, rankFlipMove } from '../chess/boardNormalization.ts';
 import { moveFromUci, moveToUci } from '../chess/moveCodec.ts';
@@ -21,6 +10,7 @@ import {
   requestedOrtExecutionProvider,
   requestedOrtRuntimeDiagnosticOptions,
 } from '../nn/ortRuntime.ts';
+import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
 import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
@@ -159,6 +149,7 @@ export interface Bt4SearchOptions {
   searchContemptLimit?: number;
   /** LC0 SwapColors parity for odds nets that were trained from one color's perspective. */
   swapColors?: boolean;
+  onSessionReady?: () => void;
   /** Throttled partial snapshots while deep searches run. */
   onProgress?: (progress: Bt4SearchProgress) => void;
   progressEveryMs?: number;
@@ -285,23 +276,32 @@ export async function checkBt4Asset(onStatus?: () => void): Promise<Bt4AssetStat
   return checkBigNetAsset(BT4_NET, onStatus);
 }
 
-/**
- * Selector-option decoration for a big net from the cached probes — shared by
- * the play and analysis engine pickers so their wording and disabled states
- * cannot drift (they previously implemented this in parallel, which is how
- * analysis ended up hiding big nets entirely without WebGPU).
- */
-export function bigNetOptionState(config: BigNetConfig): { disabled: boolean; suffix: string } {
-  // Keep the option actionable so choosing it can open consent, not load a net.
-  if (phoneBigNetBlocked(config.key)) return { disabled: false, suffix: PHONE_LARGE_NET_SUFFIX };
-  const asset = bigNetAssetStatusSync(config);
-  if (asset === 'unknown') return { disabled: true, suffix: ' (checking net)' };
-  if (asset === 'missing') return { disabled: true, suffix: ' (net not hosted here)' };
-  if (!bt4SupportedSync()) return { disabled: false, suffix: ' (CPU fallback — slow)' };
-  return { disabled: false, suffix: '' };
+export function bigNetSelectable(config: BigNetConfig): boolean {
+  return bigNetAssetStatusSync(config) === 'present';
 }
 
-/** A memory caution string when the device reports limited RAM, else null. */
+export function bigNetCpuWarning(config: BigNetConfig, backend?: string): string {
+  if (phoneBigNetBlocked(config.key) || (!backend && !bigNetSelectable(config))) return '';
+  const cpu = backend ? /^(?:[^>]+->)?wasm(?:\[|$)/.test(backend) : supportedCached === false;
+  if (!cpu) return '';
+  if (config.key === 'lqo') return 'Lc0 Queen Odds: CPU fallback — expect several seconds per move.';
+  return `Lc0 ${config.name}: CPU fallback — slow (about ${config.key === 't3' ? '1.1' : '1.5'} s/eval).`;
+}
+
+export function renderBigNetCpuWarning(target: HTMLElement, warnings: Iterable<string>): void {
+  const text = [...new Set(warnings)].filter(Boolean).join(' ');
+  if (target.textContent !== text) target.textContent = text;
+  target.hidden = !text;
+}
+
+export function bigNetOptionState(config: BigNetConfig, backend?: string): { disabled: boolean; suffix: string } {
+  if (phoneBigNetBlocked(config.key)) return { disabled: false, suffix: PHONE_LARGE_NET_SUFFIX };
+  if (!bigNetSelectable(config)) {
+    return { disabled: true, suffix: bigNetAssetStatusSync(config) === 'unknown' ? ' (checking net)' : ' (net not hosted here)' };
+  }
+  return { disabled: false, suffix: bigNetCpuWarning(config, backend) ? ' (CPU fallback — slow)' : '' };
+}
+
 export function bigNetMemoryCaution(config: BigNetConfig = BT4_NET): string | null {
   const mem = (navigator as unknown as { deviceMemory?: number }).deviceMemory;
   if (typeof mem === 'number' && mem > 0 && mem <= 4) {
@@ -313,7 +313,7 @@ export function bigNetMemoryCaution(config: BigNetConfig = BT4_NET): string | nu
 /** Human-readable one-time warning shown before the first big-net load. */
 export function bigNetLoadWarning(config: BigNetConfig = BT4_NET): string {
   const caution = bigNetMemoryCaution(config);
-  return `Lc0 ${config.name} is a large net (~${config.approxMb}MB download, cached after first load) and needs WebGPU. Arena uses the ${config.exportNote} with search tree reuse and leaf batching.${caution ? ` ${caution}` : ''}`;
+  return `Lc0 ${config.name} is a large net (~${config.approxMb}MB download, cached after first load). Arena uses the ${config.exportNote} with search tree reuse and leaf batching.${caution ? ` ${caution}` : ''}`;
 }
 
 export function bt4MemoryCaution(): string | null {
@@ -323,10 +323,6 @@ export function bt4LoadWarning(): string {
   return bigNetLoadWarning(BT4_NET);
 }
 
-/**
- * A lazily-initialized, worker-backed Lc0 big-net searcher. One instance owns
- * one searchWorker (one resident net). Call `dispose()` to free its memory.
- */
 function normalizedEvalCacheEntries(entries: number | undefined): number {
   return Math.max(0, Math.floor(Number(entries ?? 0) || 0));
 }
@@ -397,9 +393,7 @@ export class Bt4WorkerSearcher {
   }
 
   /**
-   * True when init(options) would reuse the loaded session as is: ready, with the
-   * same eval-cache size. Otherwise init disposes and reloads it, and may then
-   * serve a different model (servedModelUrl).
+   * Whether init can reuse the session with the requested cache size and diagnostics.
    */
   isInitializedFor(options: { evalCacheEntries?: number } = {}): boolean {
     return (
@@ -426,7 +420,6 @@ export class Bt4WorkerSearcher {
       try {
         await closing;
       } finally {
-        // Report this attempt's cleanup failure, but allow a later explicit retry.
         if (this.closing === closing) this.closing = null;
       }
     }
@@ -463,9 +456,6 @@ export class Bt4WorkerSearcher {
       const prefetchedLoad = prefetched?.status === 'memory' ? prefetched.load : undefined;
       const prefetchedModel = prefetched && prefetched.status !== 'fallback' ? { url: prefetched.modelUrl, load: prefetchedLoad } : undefined;
       const worker = this.startWorker();
-      // Big nets opt into app-owned Cache Storage so immutable model bytes
-      // survive route changes even when the browser HTTP cache skips large
-      // entries. Quota-limited browsers fall back to URL-loading in the worker.
       this.ortRuntime = { graphOptimizationLevel: diagnostics.ortDiagnostics.graphOptimizationLevel ?? 'all', dequantFoldEnabled: diagnostics.dequantFold };
       const ready = await this.post<{
         backend: string;
@@ -479,6 +469,7 @@ export class Bt4WorkerSearcher {
           // Keep the production device rule for both shipped and lab-selected configs.
           deviceModelSelection: true,
           ep,
+          // The browser HTTP cache may skip large entries.
           cacheModel: true,
           ...diagnostics,
           evalCacheEntries,
@@ -556,11 +547,11 @@ export class Bt4WorkerSearcher {
     try {
       await this.init({ evalCacheEntries });
     } catch (error) {
-      // An owner that stopped may retire a net still loading (Arena Stop): that is a cancellation.
       if (signal?.aborted) return cancelled;
       throw error;
     }
     if (signal?.aborted) return cancelled;
+    options.onSessionReady?.();
     let searchId: number | null = null;
     const onAbort = () => {
       if (searchId !== null) this.cancelSearch(searchId);
@@ -641,7 +632,6 @@ export class Bt4WorkerSearcher {
   /** Retire synchronously; release the detached worker's session/device before termination. */
   dispose(): Promise<void> {
     this.lifecycleGeneration++;
-    // Terminates a cold-load prefetch worker (Stop, seat swap, page hide).
     this.prefetchAbort?.abort();
     this.prefetchAbort = null;
     const worker = this.worker;

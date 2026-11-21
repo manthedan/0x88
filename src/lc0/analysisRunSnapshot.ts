@@ -1,6 +1,6 @@
 import { type BoardState, boardToFen } from '../chess/board.ts';
 import { analysisResultCacheKey } from './analysisCache.ts';
-import { type EngineRow, engineResourceProfile, isLc0BigNetVariant } from './engineCatalog.ts';
+import { bigNetKeyForVariant, type EngineRow, engineResourceProfile } from './engineCatalog.ts';
 import type { PerformanceDial } from './resourceBroker.ts';
 
 export type RunSnapshot = Readonly<{
@@ -29,12 +29,8 @@ type KeyInputs = Pick<RunSnapshot, 'fen' | 'positions' | 'multiPv' | 'runtime' |
 
 /** Shared by captured runs and the live view's cache lookup. */
 export function analysisRunRowKey(input: KeyInputs, row: EngineRow): string {
-  const runtime =
-    row.family !== 'lc0'
-      ? ''
-      : isLc0BigNetVariant(row.variant)
-        ? (input.servedModels[row.variant === 't3' ? 't3' : 'bt4'] ?? '')
-        : `${input.runtime}|${input.servedModels.small ?? ''}`;
+  const key = bigNetKeyForVariant(row.variant);
+  const runtime = row.family !== 'lc0' ? '' : key ? (input.servedModels[key] ?? '') : `${input.runtime}|${input.servedModels.small ?? ''}`;
   const { dial, cpuBudget, participantsKey } = input.broker;
   const cpu = engineResourceProfile(row.family).resourceClass === 'cpu' ? JSON.stringify([dial, cpuBudget, JSON.parse(participantsKey)]) : '';
   return analysisResultCacheKey(input.fen, input.positions.map(boardToFen), row, { multiPv: input.multiPv, runtime, cpu });

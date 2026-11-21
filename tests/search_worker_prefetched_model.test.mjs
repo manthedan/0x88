@@ -67,7 +67,7 @@ test('a WebGPU worker with an unknown vendor uses transferred split-K bytes', as
 
 for (const { worker, vendor, providers } of [
   { worker: 'WASM-only', providers: ['wasm'] },
-  { worker: 'non-Apple WebGPU', vendor: 'nvidia', providers: ['webgpu', 'wasm'] },
+  { worker: 'non-Apple WebGPU', vendor: 'nvidia', providers: ['webgpu'] },
 ]) {
   test(`a ${worker} worker releases transferred split-K bytes before loading the original`, () => {
     const source = `

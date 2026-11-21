@@ -83,6 +83,7 @@ for (const controller of ['analysis', 'arena'])
   test(`${controller} captures its root at mount and releases it after synchronous teardown`, () => {
     const text = readFileSync(new URL(`../src/lc0/${controller}Browser.ts`, import.meta.url), 'utf8');
     assert.match(text, /const pageDom = createBrowserDom\(\)/);
+    assert.doesNotMatch(text, /trustAllEvents\s*:\s*true/, 'production boards keep the Chessground trusted-event check');
     assert.doesNotMatch(text, /import\s*\{[^}]*\bel\b[^}]*\}\s*from '\.\/browserDom.ts'/);
     const mount = text.slice(text.indexOf(`export function mount${controller[0].toUpperCase() + controller.slice(1)}Browser`));
     assert.match(mount, /const releaseDom = pageDom.mount\(/);
@@ -115,6 +116,7 @@ test('Play looks up nothing in document: every lookup is confined to its mount r
   const text = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
   assert.doesNotMatch(text, /document\.(getElementById|querySelector|querySelectorAll)\(/);
   assert.doesNotMatch(text, /createBrowserDom|pageDom/, 'no module-level DOM scope shared between mounts');
+  assert.doesNotMatch(text, /trustAllEvents\s*:\s*true/, 'production boards keep the Chessground trusted-event check');
   assert.match(text, /export function mountPlayBrowser\(scope: MountScope\): void/);
   const page = readFileSync(new URL('../src/routes/app/play/+page.svelte', import.meta.url), 'utf8');
   assert.doesNotMatch(page, /document\.(getElementById|querySelector|querySelectorAll)\(/);

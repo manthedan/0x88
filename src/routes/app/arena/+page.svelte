@@ -104,6 +104,7 @@ onMount(() => {
     <div class="status-block">
       <div id="message" class="arena-status" aria-live="polite">Loading…</div>
       <div id="runtimeWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
+      <div id="bigNetCpuWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
       <div id="engineWarmupStatus" class="engine-warmup-status" role="status" aria-live="polite" aria-atomic="true" hidden>
         <progress aria-label="Engine preparation in progress"></progress>
         <div id="engineWarmupTitle" class="engine-warmup-title"></div>
@@ -395,7 +396,7 @@ onMount(() => {
   .arena-workspace .arena-sidebar{display:flex; flex-direction:column; min-width:0; max-height:none; overflow:hidden; position:static}
   .arena-sidebar > *{flex:0 0 auto}
   .status-block{padding:12px 14px 11px; border-bottom:1px solid var(--rule); background:var(--panel-inset)}
-  .status-block:not(:has(#message:not(:empty), #runtimeWarning:not([hidden]), #engineWarmupStatus:not([hidden]), #downloadProgress:not([hidden]))){display:none}
+  .status-block:not(:has(#message:not(:empty), #runtimeWarning:not([hidden]), #bigNetCpuWarning:not([hidden]), #engineWarmupStatus:not([hidden]), #downloadProgress:not([hidden]))){display:none}
   .arena-status{color:var(--ink); font:600 14.5px/1.4 var(--sans)}
   .arena-status:empty{display:none}
   .runtime-warning{

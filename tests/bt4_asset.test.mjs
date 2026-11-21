@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BT4_NET, bigNetAssetStatusSync, checkBigNetAsset } from '../src/lc0/bt4Engine.ts';
+import {
+  BT4_NET,
+  bigNetAssetStatusSync,
+  bigNetCpuWarning,
+  bigNetOptionState,
+  bigNetSelectable,
+  checkBigNetAsset,
+  probeBt4Support,
+  renderBigNetCpuWarning,
+  T3_NET,
+} from '../src/lc0/bt4Engine.ts';
 
 function testConfig(modelUrl) {
   return { ...BT4_NET, modelUrl };
@@ -24,6 +34,46 @@ test('big-net asset probe uses a lightweight HEAD request and records present as
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('desktop can select either hosted big net without WebGPU and only sees the warning for CPU', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 200 }));
+  const target = { textContent: '', hidden: true };
+  for (const [net, seconds] of [
+    [BT4_NET, '1.5'],
+    [T3_NET, '1.1'],
+  ]) {
+    const config = { ...net, modelUrl: `/unit/${net.key}-cpu.onnx` };
+    assert.equal(bigNetSelectable(config), false);
+    assert.equal(bigNetOptionState(config).disabled, true);
+    await checkBigNetAsset(config);
+    assert.equal(bigNetSelectable(config), true);
+    assert.equal(bigNetOptionState(config).disabled, false);
+    renderBigNetCpuWarning(target, [bigNetCpuWarning(config, 'auto->webgpu,wasm')]);
+    assert.equal(target.hidden, true);
+    renderBigNetCpuWarning(target, [bigNetCpuWarning(config, 'auto->wasm[bundled:cpu]')]);
+    assert.equal(target.hidden, false);
+    assert.ok(target.textContent.includes(`${seconds} s/eval`));
+    assert.equal(await probeBt4Support(), false);
+    assert.ok(bigNetCpuWarning(config).includes('CPU fallback'));
+    renderBigNetCpuWarning(target, [bigNetCpuWarning(config, 'auto->webgpu')]);
+    assert.deepEqual(target, { textContent: '', hidden: true });
+  }
+});
+
+test('a cached big net running on WASM warns even without a successful asset probe', async (t) => {
+  const config = testConfig('/unit/big-net-cached.onnx');
+  t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 404 }));
+  assert.equal(await probeBt4Support(), false);
+  const assertWarnings = () => {
+    assert.equal(bigNetCpuWarning(config), '', 'do not predict CPU fallback for an unconfirmed asset');
+    assert.match(bigNetCpuWarning(config, 'auto->wasm'), /CPU fallback/);
+    assert.equal(bigNetCpuWarning(config, 'auto->webgpu'), '');
+  };
+  assert.equal(bigNetAssetStatusSync(config), 'unknown');
+  assertWarnings();
+  assert.equal(await checkBigNetAsset(config), 'missing');
+  assertWarnings();
 });
 
 test('production skips known-unhosted big-net asset probes', async () => {

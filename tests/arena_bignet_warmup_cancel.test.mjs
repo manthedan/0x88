@@ -45,6 +45,7 @@ for (const phase of ['before init', 'during init', 'during search', 'no cancella
       'showDownloadProgress',
       'hideDownloadProgress',
       'arenaCacheEntries',
+      'renderBigNetWarning',
       `${warmupSource}\nreturn lc0BigNetWarmup('t3');`,
     )(
       () => ({ config: T3_NET, searcher }),
@@ -52,6 +53,7 @@ for (const phase of ['before init', 'during init', 'during search', 'no cancella
       () => {},
       () => {},
       () => 2048,
+      () => {},
     );
     const controller = new AbortController();
     if (phase === 'before init') controller.abort();

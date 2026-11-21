@@ -9,6 +9,8 @@ import test from 'node:test';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { createRootDom } from '../src/lc0/browserDom.ts';
+import { BIG_NETS, bigNetOptionState, checkBigNetAsset } from '../src/lc0/bt4Engine.ts';
+import { enginePlayOptions } from '../src/lc0/engineCatalog.ts';
 import { createMountScope } from '../src/lc0/mountScope.ts';
 import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
 import { createEngineUiPort, setEngineNote } from '../src/lc0/play/playEngineUi.ts';
@@ -447,6 +449,34 @@ test('Play checks its overrides before it creates any engine', () => {
   assert.ok(reload > 0, 'mountPlayBrowser consults the override gate');
   assert.ok(reload < mount.indexOf('createPlayContext(scope)'), 'before the mount builds its context');
   assert.ok(reload < mount.indexOf('ctxInit(ctx)'), 'before any engine starts');
+});
+
+test('v0 Play probes BT4 and Queen Odds so their hosted models become selectable, without probing t3', async (t) => {
+  const play = readFileSync('src/lc0/playBrowser.ts', 'utf8');
+  const start = play.indexOf('  const refreshIfMounted =');
+  const code = play.slice(start, play.indexOf('  ctxRender(ctx);', start));
+  const urls = [];
+  const refreshed = [];
+  const deps = {
+    ctx: {},
+    ENGINE_OPTIONS: enginePlayOptions().filter((option) => option.v0),
+    BIG_NETS,
+    probeBt4Support: async () => false,
+    checkBigNetAsset,
+    ctxIsDisposed: () => false,
+    ctxRefreshEngineOptions: () => refreshed.push(bigNetOptionState(BIG_NETS.bt4).disabled),
+    ctxResolvePendingPreferredEngine: () => {},
+  };
+  t.mock.method(globalThis, 'fetch', async (url, { method }) => {
+    assert.equal(method, 'HEAD');
+    urls.push(url);
+    return new Response(null, { status: 200 });
+  });
+  assert.equal(bigNetOptionState(BIG_NETS.bt4).disabled, true);
+  new Function(...Object.keys(deps), stripTypeScriptTypes(code))(...Object.values(deps));
+  await new Promise(setImmediate);
+  assert.deepEqual(urls.sort(), [BIG_NETS.bt4.modelUrl, BIG_NETS.lqo.modelUrl].sort());
+  assert.equal(refreshed.at(-1), false, 'the probe refresh enables BT4');
 });
 
 test('a failed opening-index fetch is retried by a later mount', async () => {

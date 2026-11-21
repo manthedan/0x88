@@ -186,6 +186,30 @@ test('auto and explicit webgpu,wasm sessions may fall back to wasm', () => {
   assert.equal(shouldFallbackToWasmAfterOrtFailure('wasm', ['wasm']), false);
 });
 
+for (const gpuStarts of [true, false]) {
+  test(`auto reports the actual backend after a successful adapter probe (WebGPU init ${gpuStarts ? 'succeeds' : 'fails'})`, async (t) => {
+    const ort = await import(`../src/nn/ortRuntime.ts?gpuStarts=${gpuStarts}`);
+    ort.setRequestedOrtExecutionProviderForCurrentThread('auto');
+    t.mock.getter(globalThis, 'navigator', () => ({
+      gpu: { requestAdapter: async () => ({ features: new Set(['shader-f16']) }) },
+    }));
+    t.mock.method(console, 'info', () => {});
+    t.mock.method(console, 'warn', () => {});
+    const attempts = [];
+    t.mock.method(ort.InferenceSession, 'create', async (_input, { executionProviders }) => {
+      attempts.push(executionProviders);
+      if (executionProviders.includes('webgpu') && gpuStarts) return { provider: 'webgpu' };
+      if (executionProviders.includes('wasm')) return { provider: 'wasm' };
+      throw new Error('WebGPU backend init failed');
+    });
+    const session = await ort.createOrtSession('/test.onnx');
+    const diagnostics = await ort.collectOrtRuntimeDiagnostics();
+    assert.equal(diagnostics.describe, `auto->${session.provider}`);
+    assert.deepEqual(attempts, gpuStarts ? [['webgpu']] : [['webgpu'], ['wasm']]);
+    assert.equal(diagnostics.fallback?.reason, gpuStarts ? undefined : 'WebGPU backend init failed');
+  });
+}
+
 test('strict webgpu provider selection never resolves directly to wasm', () => {
   setRequestedOrtExecutionProviderForCurrentThread('webgpu');
   try {
@@ -207,7 +231,7 @@ test('once a document has loaded the CPU-only ORT runtime, a later auto request 
     const requestedOrtExecutionProvider = () => ep;
     const webgpuUsableForProviderSelection = () => true;
     const ortRuntimeArtifactKindForCurrentThread = () => lockedOrtRuntimeArtifactKind ?? (ep === 'wasm' ? 'wasm' : 'asyncify');
-    ${slice('export function resolvedOrtExecutionProviders(', '/** True when this document')}
+    ${slice('export function resolvedOrtExecutionProviders(', 'function explicitWasmOnlyOrtEpPin(')}
     ${slice('function lockOrtRuntimeArtifactKind(', 'let lastOrtExecutionProviders')}
     return (next) => {
       ep = next;

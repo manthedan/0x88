@@ -51,10 +51,7 @@ const backendFunction = slice('async function loadLc0Backend(', 'async function 
 const reloadFunction = slice('async function reloadLc0Backend(', 'async function init(');
 const hiddenFunctions = slice('function hiddenTabActive(', 'function installHiddenTabPause(');
 const criticalHandoff = slice('    pauseAnalysis: (maiaOwner) => {', '    updateView: (moment, lines) => {');
-const navigationFunction = slice(
-  'let analysisGameTree = tree;',
-  '// ---------------------------------------------------------------------------\n// Human moves',
-);
+const navigationFunction = slice('let analysisGameTree = tree;', 'const MAIA3_PANEL_RATINGS');
 const centipawnAvailability = slice('async function refreshCentipawnHybridManifestStatus(', 'function centipawnHistoryFens(');
 
 const T3_ORIGINAL = T3_NET.modelUrl;
@@ -302,7 +299,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     let maia3PanelBlockedByRun = null;
     const shouldAutoAnalyzePosition = () => true, mainlineNodes = () => [];
     const awaitEngineRetirements = async () => {}, hasEngineRetirements = () => false;
-    const reconcileActiveRuntimeFallbackWarning = () => {}, renderRecklessRuntimeInfo = () => {};
+    const reconcileActiveRuntimeFallbackWarning = () => {}, renderRecklessRuntimeInfo = () => {}, renderBigNetWarning = () => {};
     let centipawnHybridManifestStatus = 'unknown';
     // The TVMJS manifest fallback only runs for the legacy research override;
     // the shipped s4fix model is ORT-only and skips the manifest probe.

@@ -29,14 +29,14 @@ import { createRootDom, htmlEscape, type RootDom } from './browserDom.ts';
 import {
   BIG_NETS,
   bigNetAssetStatusSync,
+  bigNetCpuWarning,
   bigNetMemoryCaution,
   bigNetOptionState,
   bt4SupportedSync,
   checkBigNetAsset,
-  LQO_NET,
   phoneBlockedBigNetModelUrl,
   probeBt4Support,
-  T3_NET,
+  renderBigNetCpuWarning,
 } from './bt4Engine.ts';
 import { writeClipboard } from './clipboard.ts';
 import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryClass.ts';
@@ -45,6 +45,7 @@ import { enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engine
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { LC0_SMALL_BATCH1_QDQ8_PATH, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
+import { LQO_BLACK_MISSING_QUEEN_FEN, LQO_WHITE_MISSING_QUEEN_FEN } from './lqoStartingPositions.ts';
 import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle, maia3ModelFallbackUrls } from './maia3.ts';
 import type { MountScope } from './mountScope.ts';
 import { rememberMoveFocus } from './moveListFocus.ts';
@@ -93,7 +94,6 @@ function playModelRequest(url: URL): Pick<PlayContext, 'blockedModelOverride' | 
   const requested = url.searchParams.get('model');
   // Asset URLs resolve against the live page URL, which is this mount's.
   const defaultModelUrl = resolvePublicAssetUrl(LC0_SMALL_BATCH1_QDQ8_PATH);
-  // v0 deploys ignore ?model=. An override, even one naming the default file, disables the device rule.
   const blockedModelOverride = phoneBlockedBigNetModelUrl(requested);
   return {
     blockedModelOverride,
@@ -115,7 +115,6 @@ const ENGINE_OPTIONS: PlayEngineOption[] = [
 const LEVEL_COUNT = 5;
 /** Search-effort labels. Deliberately not "Beginner": engine play is strong at any setting. */
 const EFFORT_LEVEL_NAMES = ['Fastest', 'Quick', 'Standard', 'Strong', 'Deep'] as const;
-/** Stockfish handicap ladder: UCI Skill Level plus a depth cap per level. */
 const SF_LEVELS = [
   { skill: 0, depth: 5, label: '1 · Weakest (skill 0)' },
   { skill: 5, depth: 6, label: '2 · Casual (skill 5)' },
@@ -127,16 +126,12 @@ const SF_LEVELS = [
 // Engines outlive page mounts; see play/playEngines.ts.
 const engines = createPlayEngines({ loadCentipawn: createBrowserSquareformerRuntimeEvaluator });
 
-// ---------------------------------------------------------------------------
-// Screen wake lock (best-effort): keeps the screen on while the engine is
-// thinking so a sleeping laptop does not abandon the move.
-// ---------------------------------------------------------------------------
 const wakeLocks = createWakeLockManager(() => navigator.wakeLock?.request('screen'));
 
 /** Start FEN for the current game; odds opponents remove their own queen. */
 function startFenFor(option: PlayEngineOption, human: Color): string {
   if (option.variant !== 'lqo') return START_FEN;
-  return human === 'w' ? 'rnb1kbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' : 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1';
+  return human === 'w' ? LQO_BLACK_MISSING_QUEEN_FEN : LQO_WHITE_MISSING_QUEEN_FEN;
 }
 
 // ---------------------------------------------------------------------------
@@ -284,10 +279,6 @@ function ctxIsDisposed(ctx: PlayContext): boolean {
   return ctx.disposed;
 }
 
-// ---------------------------------------------------------------------------
-// Context-scoped functions (all game state and UI logic)
-// ---------------------------------------------------------------------------
-
 function ctxSelectedEngine(ctx: PlayContext): PlayEngineOption {
   return ENGINE_OPTIONS.find((option) => option.id === ctx.opponent.active.engineId) ?? ENGINE_OPTIONS[0];
 }
@@ -365,12 +356,10 @@ function ctxStrengthCaption(ctx: PlayContext): string {
     return sf.skill >= 20 ? `full strength · depth ${sf.depth}` : `UCI skill ${sf.skill} · depth ${sf.depth}`;
   }
   const value = ctxStrengthFor(option, level);
-  const cpuNote =
-    option.family === 'lc0' && option.variant !== 'small' && !bt4SupportedSync() ? ' · CPU fallback (no WebGPU): expect several seconds per move' : '';
-  if (option.variant === 'lqo') return `≈ ${value} visits per move · specialized queen-odds search${cpuNote}`;
+  if (option.variant === 'lqo') return `≈ ${value} visits per move · specialized queen-odds search`;
   const isNeuralSearch = option.family === 'lc0' || option.family === 'centipawn';
   const base = isNeuralSearch ? `≈ ${value} visits per move` : `search depth ${value}`;
-  return isNeuralSearch ? `${base} — strong even on Fastest; pick a Maia for a human-level opponent${cpuNote}` : base;
+  return isNeuralSearch ? `${base} — strong even on Fastest; pick a Maia for a human-level opponent` : base;
 }
 
 function ctxRenderLevelOptions(ctx: PlayContext): void {
@@ -673,6 +662,9 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
           drawScore: lqoOptions?.drawScore ?? PLAY_DRAW_SCORE,
           searchContemptLimit: lqoOptions?.searchContemptLimit ?? PLAY_SEARCH_CONTEMPT_LIMIT,
           signal,
+          onSessionReady: () => {
+            if (!ctxIsDisposed(ctx)) ctxRender(ctx);
+          },
           onProgress: (progress) => {
             if (!signal.aborted) ctxShowSearchProgress(ctx, `Lc0 ${searcher.config.name} search`, progress);
           },
@@ -765,7 +757,6 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
       const engine = await engines.cpuEngineFor(option, ctx.engineUi);
       engine.setOptions({ depth: 1, movetimeMs: undefined });
       const uci = await engine.bestMove(boardToFen(ctx.board), signal);
-      // A cancelled probe has no answer to check; the guard below returns.
       if (!signal.aborted && (!uci || !legalMoves(ctx.board).some((move) => moveToUci(move) === uci))) {
         throw new Error(`${option.label} readiness check returned ${uci ? `illegal move ${uci}` : 'no move'}.`);
       }
@@ -783,10 +774,6 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
     }
   }
 }
-
-// ---------------------------------------------------------------------------
-// Game flow (context-scoped)
-// ---------------------------------------------------------------------------
 
 const THINKING_SHOW_DELAY_MS = 400;
 
@@ -904,7 +891,6 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
 
 function ctxOnUserMove(ctx: PlayContext, from: Key, to: Key): void {
   if (ctx.viewPly !== null) {
-    // Browsing an earlier ply is view-only; snap the board back to the browsed position.
     ctxRender(ctx);
     return;
   }
@@ -1092,10 +1078,6 @@ function ctxExportPgn(ctx: PlayContext): string {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Rendering (context-scoped)
-// ---------------------------------------------------------------------------
-
 function ctxVerdictText(ctx: PlayContext): string {
   if (!ctx.gameOver) return '';
   const { result, reason } = ctx.gameOver;
@@ -1148,8 +1130,6 @@ function ctxRenderMoveList(ctx: PlayContext): void {
     list.scrollTop = list.scrollHeight;
     return;
   }
-  // Only scroll when the browsed ply changes, so an engine reply arriving
-  // mid-browse does not yank a list the user scrolled by hand.
   const scrollKey = `ply:${shown}`;
   if (ctx.moveListScrollKey === scrollKey) return;
   ctx.moveListScrollKey = scrollKey;
@@ -1182,7 +1162,6 @@ function ctxNavigate(ctx: PlayContext, action: MoveNavAction): void {
 function ctxSetViewPly(ctx: PlayContext, viewPly: number | null): void {
   const next = normalizeViewPly(viewPly, ctx.moves.length);
   if (next === ctx.viewPly) return;
-  // A promotion choice belongs to the live position; leaving it cancels the pick.
   if (ctx.pendingPromotion) ctx.pendingPromotion = null;
   // Chessground's set() keeps an active selection or drag; drop it so it does
   // not leak into the browsed position or back into live play.
@@ -1227,7 +1206,8 @@ function ctxEngineOptionState(option: PlayEngineOption): { disabled: boolean; su
     return reason ? { disabled: true, suffix: ` (${reason})` } : { disabled: false, suffix: '' };
   }
   if (option.family !== 'lc0' || option.variant === 'small') return { disabled: false, suffix: '' };
-  return bigNetOptionState(BIG_NETS[option.variant as BigNetKey]);
+  const key = option.variant as BigNetKey;
+  return bigNetOptionState(BIG_NETS[key], peekBigNetSearcher(key)?.backend);
 }
 
 function ctxEngineOptionHtml(option: PlayEngineOption): string {
@@ -1288,8 +1268,8 @@ function ctxRenderEngineCaution(ctx: PlayContext): void {
     const config = BIG_NETS[option.variant as BigNetKey];
     const memory = bigNetMemoryCaution(config);
     const odds = option.variant === 'lqo' ? ' The bot starts without its queen and uses the LeelaQueenOdds v2 network. ' : ' ';
-    const cpu = bt4SupportedSync() ? '' : ' No WebGPU here: runs on the CPU (wasm) fallback with reduced visit budgets — expect several seconds per move.';
-    caution.textContent = `First move downloads the ~${config.approxMb}MB net.${odds}${memory ?? ''}${cpu}`.trimEnd();
+    const cpu = bigNetCpuWarning(config, peekBigNetSearcher(config.key)?.backend);
+    caution.textContent = `First move downloads the ~${config.approxMb}MB net.${odds}${memory ?? ''} ${cpu}`.trimEnd();
     caution.hidden = false;
   } else if (option.family === 'centipawn') {
     caution.textContent = 'First use downloads the 6.2MB Centipawn model and ONNX Runtime Web.';
@@ -1298,11 +1278,6 @@ function ctxRenderEngineCaution(ctx: PlayContext): void {
     caution.hidden = true;
   }
 }
-
-// ---------------------------------------------------------------------------
-// Game chrome: player strips, setup summary, game-over card, opening name.
-// Presentation only; live identity is committed, while setup fields show the draft.
-// ---------------------------------------------------------------------------
 
 const SF_LEVEL_NAMES = ['Weakest', 'Casual', 'Club', 'Strong', 'Full strength'] as const;
 const ENGINE_MONOGRAMS: Partial<Record<PlayFamily, string>> = {
@@ -1414,7 +1389,6 @@ function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shownPly: nu
   else if (!isHuman && ctx.practicePosition && !ctx.started && !ctx.engineReady) [text, kind] = ['Loads on Play', 'ready'];
   else if (!isHuman && !ctx.engineReady && !ctx.gameOver)
     [text, kind] = ctx.dom.buttonEl('retryEngine').hidden ? ['Loading…', 'thinking'] : ['Error · retry', 'error'];
-  // Readiness only matters before the first move; during play the strips carry the turn.
   else if (!isHuman && phase === 'setup') [text, kind] = ['Ready', 'ready'];
   else if (isHuman && phase === 'playing' && ctx.viewPly === null && ctx.board.turn === color && ctx.engineReady && !ctx.pendingPromotion)
     [text, kind] = ['Your move', 'turn'];
@@ -1431,12 +1405,18 @@ function ctxRenderChrome(ctx: PlayContext, shownPly: number): void {
   main.dataset.opponentState = ctx.opponent.tag;
   main.dataset.opponent = ctx.opponent.active.engineId;
   main.dataset.pendingOpponent = ctx.opponent.pending?.engineId ?? '';
-  const hasNotice = !ctx.dom.buttonEl('retryEngine').hidden || !ctx.dom.el('runtimeWarning').hidden || !ctx.dom.el('dlProgress').hidden;
+  const option = ctxSelectedEngine(ctx);
+  const key = option.variant as BigNetKey;
+  const bigNetWarning = ctx.dom.el('bigNetCpuWarning');
+  renderBigNetCpuWarning(bigNetWarning, [
+    option.family === 'lc0' && option.variant !== 'small' ? bigNetCpuWarning(BIG_NETS[key], peekBigNetSearcher(key)?.backend) : '',
+  ]);
+  const hasNotice =
+    !bigNetWarning.hidden || !ctx.dom.buttonEl('retryEngine').hidden || !ctx.dom.el('runtimeWarning').hidden || !ctx.dom.el('dlProgress').hidden;
   main.dataset.quiet = String(
     !hasNotice && ctx.engineReady && !ctx.preparingEngine && !ctx.thinkingShown && !ctx.pendingPromotion && ctx.viewPly === null && !boardCheck(ctx.board),
   );
   main.dataset.config = ctx.configOpen && phase !== 'setup' ? 'open' : 'closed';
-  const option = ctxSelectedEngine(ctx);
   const opponent = ctxOpponentName(option);
   const topColor: Color = ctx.orientation === 'white' ? 'b' : 'w';
   ctxRenderStrip(ctx, 'topStrip', topColor, shownPly, phase);
@@ -1483,7 +1463,6 @@ function ctxRenderChrome(ctx: PlayContext, shownPly: number): void {
   ctx.dom.buttonEl('downloadPgn').disabled = !hasRecord;
   for (const link of ctx.dom.queryAll<HTMLAnchorElement>('[data-analyze]')) {
     link.setAttribute('aria-disabled', String(!hasRecord));
-    // Mid-game, analysis opens beside the game instead of replacing it.
     if (phase === 'playing') {
       link.target = '_blank';
       link.rel = 'noopener';
@@ -1523,7 +1502,6 @@ function ctxRender(ctx: PlayContext): void {
   const browsing = ctx.viewPly !== null;
   const statusText = ctxStatusText(ctx);
   const setupReady = ctxPhase(ctx) === 'setup' && ctx.engineReady && !ctx.engineThinking && !ctx.preparingEngine && !browsing;
-  // Setup reads as a heading; the "Press Play or make a move" hint lives under the Play button.
   ctx.dom.el('status').textContent = setupReady ? `New game vs ${ctxOpponentName(ctxSelectedEngine(ctx))}` : statusText;
   // The one live region: turn and readiness changes are announced here and nowhere else.
   const announcement = ctx.dom.el('gameAnnouncement');
@@ -1560,7 +1538,6 @@ function ctxRender(ctx: PlayContext): void {
     fen: boardToFen(shownBoard).split(' ')[0],
     turnColor: shownBoard.turn === 'w' ? ('white' as const) : ('black' as const),
     coordinates: true,
-    trustAllEvents: true,
     check: boardCheck(shownBoard),
     highlight: { lastMove: true, check: true },
     animation: { enabled: true, duration: 160 },
@@ -1589,14 +1566,9 @@ function ctxRender(ctx: PlayContext): void {
   ctx.dom.el('positionNoticeText').textContent = ctx.practicePosition
     ? 'Continue this position. Queen-odds opponents are unavailable because they need their own starting position.'
     : ctx.handoffNotice;
-  // Switching roots is only offered before play or after the game is finished.
   ctx.dom.buttonEl('useStartingPosition').hidden = !ctx.practicePosition || (ctx.started && !ctx.gameOver);
   ctxRenderChrome(ctx, shownPly);
 }
-
-// ---------------------------------------------------------------------------
-// Restart banner logic
-// ---------------------------------------------------------------------------
 
 function ctxSetOpponent(ctx: PlayContext, next: PlayOpponentState): void {
   const previousEngineId = ctx.opponent.active.engineId;
@@ -1660,10 +1632,6 @@ function ctxTuneOpponent(ctx: PlayContext): void {
   ctxPersistPlayPreferences(ctx);
   ctxRender(ctx);
 }
-
-// ---------------------------------------------------------------------------
-// Mount/init
-// ---------------------------------------------------------------------------
 
 function ctxUpdatePendingInput(ctx: PlayContext, event: PendingInputEvent): void {
   const { pending, acknowledged } = transitionPendingInput(ctx.pendingInput, event);
@@ -1739,7 +1707,6 @@ async function ctxCheckRestoredDownloadConsent(ctx: PlayContext): Promise<boolea
   return pending;
 }
 
-/** Imported setup must not make an opponent move before the player presses Play. */
 function ctxPrepareOrStartEngine(ctx: PlayContext): void {
   ctxCancelPickerConsent(ctx);
   if (ctx.practicePosition && !ctx.started) return;
@@ -1765,7 +1732,6 @@ function ctxResetGameStateForMount(ctx: PlayContext): void {
 function ctxRevokePhoneLargeNets(ctx: PlayContext): void {
   if (!phoneLargeNetsBlocked()) return;
   if (ctx.pickerConsent) ctxCancelPickerConsent(ctx);
-  // A saved-engine asset probe must not restore a large opponent after revocation.
   const pending = ENGINE_OPTIONS.find((option) => option.id === ctx.pendingPreferredEngineId);
   const cancellingRestore = !!pending && phoneSafeEngineVariant(pending.family, pending.variant) !== pending.variant;
   if (cancellingRestore) ctx.pendingPreferredEngineId = null;
@@ -1812,11 +1778,13 @@ function ctxInit(ctx: PlayContext): void {
     showPhoneLargeNetFallback();
   }
   const preferredOption = ENGINE_OPTIONS.find((option) => option.id === preferences.engineId && (!ctx.practicePosition || option.group !== 'odds'));
-  const preferredBigNetStatus =
-    preferredOption?.family === 'lc0' && preferredOption.variant !== 'small' ? bigNetAssetStatusSync(BIG_NETS[preferredOption.variant as BigNetKey]) : null;
-  const preferredBigNetCanProbe =
-    preferredOption?.family === 'lc0' && preferredOption.variant !== 'small' && (!isV0DeployProfile() || preferredOption.variant === 'lqo');
-  ctx.pendingPreferredEngineId = !saved && preferredOption && preferredBigNetCanProbe && preferredBigNetStatus === 'unknown' ? preferredOption.id : null;
+  ctx.pendingPreferredEngineId =
+    !saved &&
+    preferredOption?.family === 'lc0' &&
+    preferredOption.variant !== 'small' &&
+    bigNetAssetStatusSync(BIG_NETS[preferredOption.variant as BigNetKey]) === 'unknown'
+      ? preferredOption.id
+      : null;
   ctx.dom.selectEl('engineSelect').value = preferredOption && (saved || !ctxEngineOptionState(preferredOption).disabled) ? preferredOption.id : 'maia3';
   ctx.dom.selectEl('colorSelect').value =
     ctx.practicePosition && !saved ? (replayPlayPosition(ctx.practicePosition).board.turn === 'w' ? 'white' : 'black') : preferences.color;
@@ -1862,7 +1830,6 @@ function ctxInit(ctx: PlayContext): void {
     }
     const phase = ctxPhase(ctx);
     if (phase === 'setup' && !resolvingSavedEngine) {
-      // Play: the board is already set up with these settings, so start without a reset.
       ctx.started = true;
       ctx.configOpen = false;
       if (!ctx.preparingEngine && !ctx.engineThinking) ctxPrepareOrStartEngine(ctx);
@@ -2000,7 +1967,6 @@ function ctxInit(ctx: PlayContext): void {
   ctx.scope.listen(ctx.dom.selectEl('colorSelect'), 'change', () => ctxMaybeQueueRestart(ctx));
   ctx.scope.listen(window, PHONE_LARGE_NET_CHANGE_EVENT, () => ctxRevokePhoneLargeNets(ctx));
   ctx.scope.listen(ctx.dom.selectEl('engineSelect'), 'change', async () => {
-    // Transfer abandoned saved-probe preparation to a superseding picker owner.
     const resumeFallback = !!ctx.pendingPreferredEngineId || !!ctx.pickerConsent?.resumeFallback;
     ctxCancelPickerConsent(ctx);
     const request = { controller: new AbortController(), resumeFallback };
@@ -2014,7 +1980,6 @@ function ctxInit(ctx: PlayContext): void {
     const previousEngineId = ctx.lastEngineId;
     const selectionGame = ctx.abort.signal;
     const resumeRevertedOpponent = () => {
-      // Discarding the initial asset probe also removed its preparation callback.
       if (
         request.resumeFallback &&
         !ctx.disposed &&
@@ -2073,14 +2038,9 @@ function ctxInit(ctx: PlayContext): void {
       ctxResolvePendingPreferredEngine(ctx);
     }
   };
-  if (!isV0DeployProfile()) {
-    void probeBt4Support().then(refreshIfMounted);
-    void checkBigNetAsset(BIG_NETS.bt4).then(refreshIfMounted);
-    void checkBigNetAsset(T3_NET).then(refreshIfMounted);
-    void checkBigNetAsset(LQO_NET).then(refreshIfMounted);
-  } else {
-    void probeBt4Support().then(refreshIfMounted);
-    void checkBigNetAsset(LQO_NET).then(refreshIfMounted);
+  void probeBt4Support().then(refreshIfMounted);
+  for (const option of ENGINE_OPTIONS) {
+    if (option.family === 'lc0' && option.variant !== 'small') void checkBigNetAsset(BIG_NETS[option.variant as BigNetKey]).then(refreshIfMounted);
   }
   ctxRender(ctx);
   if (ctx.pendingPreferredEngineId) {
@@ -2123,6 +2083,7 @@ function hasPlayBrowserDom(root: HTMLElement): boolean {
     'engineCaution',
     'engineNote',
     'runtimeWarning',
+    'bigNetCpuWarning',
     'retryEngine',
     'dlProgress',
     'progressAnnouncement',

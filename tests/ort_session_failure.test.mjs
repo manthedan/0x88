@@ -23,7 +23,7 @@ test('ORT keeps the first error of this session even if its final retry fails di
   const noop = () => {};
   const create = link(
     '../src/nn/ortRuntime.ts',
-    'async function createOrtSessionFromSource(',
+    'async function prepareOrtThread(',
     'export async function releaseOrtSession(',
     'return createOrtSessionFromSource;',
     {

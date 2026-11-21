@@ -354,8 +354,15 @@ export function engineResourceProfile(family: EngineFamily): EngineFamilyResourc
   return engineFamilyDefinition(family).resource;
 }
 
-export function isLc0BigNetVariant(variant: string): variant is 'bt4' | 't3' {
-  return variant === 'bt4' || variant === 't3';
+export type Lc0BigNetVariant = 'bt4' | 't3';
+
+export function bigNetKeyForVariant(variant: string): Lc0BigNetVariant | null {
+  return variant === 'bt4' || variant === 't3' ? variant : null;
+}
+
+/** Analysis and Arena large-net variants; Queen Odds is a separate Play-only choice. */
+export function isLc0BigNetVariant(variant: string): variant is Lc0BigNetVariant {
+  return bigNetKeyForVariant(variant) !== null;
 }
 
 export function engineFamilyOptions(): { value: EngineFamily; label: string }[] {

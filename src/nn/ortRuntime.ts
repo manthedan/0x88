@@ -454,7 +454,6 @@ function normalizeEp(value: string | null | undefined): OrtExecutionProviderPref
   return 'wasm';
 }
 
-/** The EP requested by the URL/env of this document or worker, ignoring per-call overrides. */
 function ambientOrtExecutionProviderParam(): string | null | undefined {
   return (
     browserParam('ortEp') ?? browserParam('ep') ?? browserParam('executionProviders') ?? envValue('TINY_LEELA_ORT_EP') ?? envValue('ORT_EXECUTION_PROVIDERS')
@@ -512,7 +511,6 @@ function selectOrtExecutionProviders(requested: OrtExecutionProviderPreference, 
   return ['wasm'];
 }
 
-/** True when this document/worker was started with an explicit wasm-only EP pin. */
 function explicitWasmOnlyOrtEpPin(): boolean {
   const raw = ambientOrtExecutionProviderParam();
   return raw !== null && raw !== undefined && String(raw).trim() !== '' && normalizeEp(raw) === 'wasm';
@@ -541,35 +539,13 @@ export function ortRuntimeArtifactKindIsLocked(): boolean {
   return lockedOrtRuntimeArtifactKind !== null;
 }
 
-/**
- * Which staged runtime pair this thread loads. Asyncify is required by the
- * WebGPU/JSEP path and is pure download + instrumentation overhead for
- * CPU-only sessions, so wasm-EP-only threads take the smaller CPU build.
- *
- * The choice must be made before ORT initializes and can never change
- * afterwards (the binary is worker-global), which is why "this session happens
- * to run on wasm" is not sufficient on its own:
- * - strict `ep=webgpu` keeps a GPU pair (JSPI on a production build that can
- *   use it, otherwise asyncify), so a GPU-less browser still fails with
- *   "WebGPU unavailable" instead of an opaque link error;
- * - anything that resolves to include `webgpu` keeps that same GPU pair, which
- *   also keeps the in-process WebGPU->WASM fallback in `createOrtSession` on
- *   one binary;
- * - a CPU-only resolution takes the small build only when escalating to WebGPU
- *   later in this same thread is impossible (`navigator.gpu` missing, i.e.
- *   Safari/Firefox) or has been ruled out by an explicit `?ep=wasm` / env pin.
- *   A programmatic `setRequestedOrtExecutionProviderForCurrentThread('wasm')`
- *   deliberately does NOT qualify: search workers switch EP per message and
- *   must keep the GPU-capable binary. Such a worker can still opt in via
- *   `setOrtRuntimeArtifactKindForCurrentThread('wasm')` before its first
- *   session.
- */
 let ortJspiFallbackReason: string | undefined;
 
 function requestedOrtJspiPreference(): OrtJspiPreference {
   return resolveOrtJspiPreference(browserParam('ortJspi') ?? envValue('ORT_JSPI') ?? envValue('TINY_LEELA_ORT_JSPI'));
 }
 
+/** ORT can only initialize one binary per thread. Use a GPU-capable pair if a later session could need WebGPU. */
 export function ortRuntimeArtifactKindForCurrentThread(): OrtRuntimeArtifactKind {
   if (lockedOrtRuntimeArtifactKind) return lockedOrtRuntimeArtifactKind;
   // Node (no `location`) imports ORT's bundle with the Emscripten glue inlined,
@@ -857,7 +833,6 @@ export function subtractOrtWebGpuDiagnosticsSnapshot(after: OrtWebGpuDiagnostics
     profiling: webGpuProfilingSummary(
       after.profiling.enabled,
       after.profiling.eventCount - before.profiling.eventCount,
-      // Null cumulative totals have no events, so contribute nothing to a real-event delta.
       (after.profiling.kernelGpuMsTotal ?? 0) - (before.profiling.kernelGpuMsTotal ?? 0),
       (after.profiling.topPrograms ?? [])
         .map((entry) => {
@@ -1205,22 +1180,7 @@ export async function collectOrtRuntimeDiagnostics(options: { probeAdapter?: boo
   return diag;
 }
 
-/**
- * Settle `probedWebGpuAdapterUsable` before the artifact is chosen.
- *
- * `navigator.gpu` existing does not mean an adapter can be acquired (a
- * blocklisted GPU, a headless or software-only context). Provider and artifact
- * resolution are both synchronous and consult the probe result, but the only
- * thing that used to set it was `collectOrtRuntimeDiagnostics({probeAdapter})`,
- * which normal worker startup runs *after* the first session. Such a browser
- * therefore locked the 24 MB asyncify pair at one thread, tried WebGPU, failed,
- * and served the rest of the session from the large binary anyway.
- *
- * Runs at most once per thread, and only when the answer can change a decision:
- * a pinned `ep=wasm` never consults it, and strict `ep=webgpu` resolves to
- * `['webgpu']` regardless so it still surfaces "WebGPU unavailable" rather than
- * silently degrading.
- */
+/** navigator.gpu can exist even when no adapter is available (e.g. a blocklisted GPU). */
 async function ensureWebGpuAdapterProbed(requested = requestedOrtExecutionProvider()): Promise<void> {
   if (probedWebGpuAdapterUsable !== null || !webgpuAvailable() || requested === 'wasm' || requested === 'webgpu') return;
   try {
@@ -1228,8 +1188,6 @@ async function ensureWebGpuAdapterProbed(requested = requestedOrtExecutionProvid
     probedWebGpuAdapterUsable = !!adapter;
     probedWebGpuShaderF16 = gpuAdapterShaderF16(adapter);
     if (probedWebGpuShaderF16 === false) console.info('Centipawn ORT: WebGPU adapter lacks shader-f16; ORT sessions run on WASM.');
-    // gpuAdapterVendor never throws: unreadable metadata means "vendor unknown",
-    // not "adapter unusable".
     if (adapter) probedWebGpuAdapterVendor = (await gpuAdapterVendor(adapter)) ?? '';
   } catch {
     probedWebGpuAdapterUsable = false;
@@ -1286,7 +1244,7 @@ async function webGpuAdapterVendor(): Promise<string | undefined> {
 }
 
 export type OrtSessionPlacement = {
-  /** Providers the next createOrtSession call will request, in order. */
+  /** Primary provider followed by any fallback provider for the next createOrtSession call. */
   providers: string[];
   /** Lower-cased GPUAdapterInfo.vendor ('apple', 'nvidia', ...); only probed when providers include webgpu. */
   adapterVendor?: string;
@@ -1345,15 +1303,8 @@ export type CreateOrtSessionOptions = {
 };
 
 /**
- * Attempt order: folded model on the requested providers; the unfolded model on
- * the same providers if ORT rejected the folded rewrite; then, when the
- * requested provider preference allows it, WASM on `wasmFallbackModel` or else
- * the unfolded model. Exported for tests.
- *
- * With `wasmFallbackModel` the primary attempts request WebGPU only. Given
- * ['webgpu', 'wasm'], ORT itself drops WebGPU when its backend init fails and
- * resolves a WASM session on the primary (WebGPU-specific) bytes, so the WASM
- * model would never be used.
+ * Given ['webgpu', 'wasm'], ORT silently drops WebGPU if its backend fails to
+ * initialize and returns a WASM session without exposing that fallback.
  */
 export function planOrtSessionAttempts(
   prepared: { input: OrtModelInput; original?: OrtModelSource },
@@ -1361,8 +1312,7 @@ export function planOrtSessionAttempts(
   wasmFallback: boolean,
   options: CreateOrtSessionOptions = {},
 ): OrtSessionAttemptPlan[] {
-  const primaryProviders =
-    options.wasmFallbackModel && wasmFallback && providers.includes('webgpu') ? providers.filter((provider) => provider !== 'wasm') : providers;
+  const primaryProviders = wasmFallback ? ['webgpu'] : providers;
   const attempts: OrtSessionAttemptPlan[] = [{ input: prepared.input, providers: primaryProviders, kind: 'primary', note: () => describeDequantFold() }];
   if (prepared.original !== undefined) {
     attempts.push({
@@ -1393,21 +1343,21 @@ export function createOrtSession(modelPath: OrtModelInput, options: CreateOrtSes
   }, options);
 }
 
-async function createOrtSessionFromSource(takeModel: () => OrtModelInput, options: CreateOrtSessionOptions): Promise<ort.InferenceSession> {
-  // Must precede resolvedOrtExecutionProviders(): both it and the artifact
-  // selector read the probe result, and the locks below freeze that choice.
-  await untilAborted(ensureWebGpuAdapterProbed(), options.signal);
-  options.signal?.throwIfAborted();
-  const resolved = resolvedOrtExecutionProviders();
-  if (options.webgpuOnly && !resolved.includes('webgpu')) throw new Error('createOrtSession: webgpuOnly requested but WebGPU is not a resolved provider');
-  const providers = options.webgpuOnly ? ['webgpu'] : resolved;
-  // Both locks run before the first InferenceSession.create so the artifact is
-  // decided (and frozen) before ORT initializes its worker-global wasm module;
-  // the WebGPU->WASM fallback below then reuses the same binary.
+async function prepareOrtThread({ signal, webgpuOnly }: CreateOrtSessionOptions) {
+  await untilAborted(ensureWebGpuAdapterProbed(), signal);
+  signal?.throwIfAborted();
+  const requested = requestedOrtExecutionProvider();
+  const resolved = resolvedOrtExecutionProviders(requested);
+  if (webgpuOnly && !resolved.includes('webgpu')) throw new Error('createOrtSession: webgpuOnly requested but WebGPU is not a resolved provider');
+  const providers = webgpuOnly ? ['webgpu'] : resolved;
   lockRequestedOrtWasmArtifact();
   lockOrtRuntimeArtifactKind(providers);
+  return { providers, wasmFallback: !webgpuOnly && shouldFallbackToWasmAfterOrtFailure(requested, providers) };
+}
+
+async function createOrtSessionFromSource(takeModel: () => OrtModelInput, options: CreateOrtSessionOptions): Promise<ort.InferenceSession> {
+  const { providers, wasmFallback } = await prepareOrtThread(options);
   let prepared: PreparedOrtModelInput | undefined = await prepareOrtModelInput(takeModel(), options.reloadModel);
-  const wasmFallback = !options.webgpuOnly && shouldFallbackToWasmAfterOrtFailure(requestedOrtExecutionProvider(), providers);
   const attempts = planOrtSessionAttempts(prepared, providers, wasmFallback, options);
   prepared = undefined;
   let firstMessage: string | undefined;
@@ -1452,7 +1402,6 @@ async function createOrtSessionFromSource(takeModel: () => OrtModelInput, option
         discardDequantFold(lastMessage);
         console.warn(`Centipawn: ORT session failed on the dequantize-folded model; retrying with the original bytes. ${lastMessage}`);
       } else {
-        // A separate WASM model is loaded as-is (unfolded), so the fold summary no longer applies.
         if (typeof next.input === 'function') discardDequantFold(lastMessage);
         console.warn(`Centipawn: ORT WebGPU session failed; falling back to WASM. ${lastMessage}`);
       }

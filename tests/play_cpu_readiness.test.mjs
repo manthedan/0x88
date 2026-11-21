@@ -8,7 +8,7 @@ import { legalMoves } from '../src/chess/movegen.ts';
 
 const source = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
 const from = source.indexOf('async function ctxVerifySelectedEngineReady(');
-const to = source.indexOf('// ---------------------------------------------------------------------------\n// Game flow', from);
+const to = source.indexOf('const THINKING_SHOW_DELAY_MS', from);
 for (const move of [null, 'a1a8', 'e2e4']) {
   test(`CPU readiness requires a legal probe reply: ${move}`, async () => {
     const option = { id: 'sf-lite', family: 'sf', label: 'Stockfish' };

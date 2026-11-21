@@ -284,7 +284,7 @@ test('saved and explicitly selected profiles fall back without prompting or acqu
       isLc0BigNetVariant: (variant) => Object.hasOwn(BIG_NETS, variant),
       BIG_NETS,
       phoneBigNetBlocked: (key) => phoneBigNetBlocked(key, true, false),
-      bigNetSelectableSync: () => {
+      bigNetSelectable: () => {
         assert.fail('blocked restore must not check assets');
       },
       requestLargeNetConsent: () => {

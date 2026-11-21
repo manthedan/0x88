@@ -41,7 +41,7 @@ for (const operation of ['warmup', 'move']) {
       assert.ok(start >= 0 && end > start);
       const factory = new Function(
         'deps',
-        `const { bigNetFor, warmupPositions, showDownloadProgress, hideDownloadProgress, arenaCacheEntries, engines, arenaBudgetMode, arenaMovetimeMs, setArenaVisitProgress, recordBt4SearchOutput, clearArenaSearchProgress } = deps;\n${stripTypeScriptTypes(source.slice(start, end))}\nreturn ${name};`,
+        `const { bigNetFor, warmupPositions, showDownloadProgress, hideDownloadProgress, arenaCacheEntries, engines, arenaBudgetMode, arenaMovetimeMs, setArenaVisitProgress, recordBt4SearchOutput, clearArenaSearchProgress, renderBigNetWarning } = deps;\n${stripTypeScriptTypes(source.slice(start, end))}\nreturn ${name};`,
       )({
         bigNetFor: () => ({ config: LQO_NET, searcher }),
         warmupPositions: [parseFen(START_FEN)],
@@ -53,13 +53,14 @@ for (const operation of ['warmup', 'move']) {
         arenaMovetimeMs: () => 1000,
         setArenaVisitProgress: () => {},
         recordBt4SearchOutput: () => {},
+        renderBigNetWarning: () => {},
         clearArenaSearchProgress: () => {},
       });
       const controller = new AbortController();
       const pending =
         operation === 'warmup'
           ? factory('lqo')(controller.signal)
-          : factory('seat-1', { variant: 'lqo', strength: 1 })([parseFen(START_FEN)], controller.signal);
+          : factory('seat-1', { variant: 'lqo', strength: 1 }, 'lqo')([parseFen(START_FEN)], controller.signal);
       await new Promise(setImmediate);
       const worker = workers[0];
       assert.ok(worker, 'operation is awaiting shared model initialization');
@@ -127,6 +128,7 @@ for (const operation of ['warmup', 'move']) {
       setArenaVisitProgress: () => {},
       recordBt4SearchOutput: () => {},
       clearArenaSearchProgress: () => {},
+      renderBigNetWarning: () => {},
     };
     const slice = (from, to) => stripTypeScriptTypes(source.slice(source.indexOf(from), source.indexOf(to, source.indexOf(from))));
     const name = operation === 'warmup' ? 'lc0BigNetWarmup' : 'lc0BigNetMove';
@@ -137,7 +139,9 @@ for (const operation of ['warmup', 'move']) {
     )(deps);
     const controller = new AbortController();
     const pending =
-      operation === 'warmup' ? factory('bt4')(controller.signal) : factory('seat-1', { variant: 'bt4', strength: 1 })([parseFen(START_FEN)], controller.signal);
+      operation === 'warmup'
+        ? factory('bt4')(controller.signal)
+        : factory('seat-1', { variant: 'bt4', strength: 1 }, 'bt4')([parseFen(START_FEN)], controller.signal);
     for (let i = 0; i < 50 && !prefetchSignal; i++) await new Promise(setImmediate);
     assert.ok(prefetchSignal, 'the cold load is prefetching');
     controller.abort();

@@ -53,6 +53,7 @@ for (const workflow of ['Arena', 'Analysis']) {
                 'showDownloadProgress',
                 'hideDownloadProgress',
                 'arenaCacheEntries',
+                'renderBigNetWarning',
                 `${arena}\nreturn lc0BigNetWarmup('t3');`,
               )(
                 bigNetFor,
@@ -60,6 +61,7 @@ for (const workflow of ['Arena', 'Analysis']) {
                 show,
                 hide,
                 () => 2048,
+                () => {},
               )(controller.signal)
             : testAnalysisEngines({
                 // The controller's port: its model progress item is the shared slot.
