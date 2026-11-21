@@ -82,7 +82,7 @@ test('a large-net setup waits for its nets to become available before asking for
     isLc0BigNetVariant: (key) => key === 'bt4' || key === 't3',
     phoneBigNetBlocked: () => false,
     bigNetSelectable: ({ key }) => present.has(key),
-    checkBigNetAsset: async ({ key }) => {
+    waitForBigNetAsset: async ({ key }) => {
       checks.push(key);
       await pending.promise;
       present.add(key);
@@ -102,6 +102,37 @@ test('a large-net setup waits for its nets to become available before asking for
   assert.deepEqual(await loading, rows);
   assert.deepEqual(checks, ['bt4', 't3']);
   assert.deepEqual(prompts, ['bt4', 't3']);
+});
+
+test('refreshing Analysis availability preserves the focused version control', async () => {
+  const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('async function refreshBigNetAvailability('), source.indexOf('function renderBigNetWarning('));
+  const label = 'Engine 1 model or variant';
+  const original = { getAttribute: () => label };
+  const document = { activeElement: original };
+  const replacement = {
+    focus: () => {
+      document.activeElement = replacement;
+    },
+  };
+  const deps = {
+    document,
+    CSS: { escape: (value) => value },
+    el: () => ({ contains: (node) => node === original, querySelector: (selector) => (selector === `[aria-label="${label}"]` ? replacement : null) }),
+    BIG_NETS: { bt4: {}, t3: {} },
+    engineRows: [],
+    probeBt4Support: async () => true,
+    checkBigNetAsset: async () => 'present',
+    isStaleMount: () => false,
+    whileAnalysisMounted: (callback) => callback,
+    renderRecklessRuntimeInfo() {},
+    renderEngineList: () => {
+      document.activeElement = null;
+    },
+  };
+  const refresh = new Function(...Object.keys(deps), `${stripTypeScriptTypes(body)}; return refreshBigNetAvailability;`)(...Object.values(deps));
+  await refresh(new AbortController().signal);
+  assert.equal(document.activeElement, replacement);
 });
 
 for (const action of ['add', 'change']) {

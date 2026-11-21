@@ -4,11 +4,24 @@ import test from 'node:test';
 import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange, subscribeAssetProbeRetry } from '../src/lc0/assetProbe.ts';
 import { berserkVariantAssetStatus, checkBerserkVariantAsset } from '../src/lc0/berserkVariants.ts';
 import { browserVariantOption } from '../src/lc0/browserVariantOption.ts';
-import { bigNetAssetStatusSync, bigNetOptionState, checkBigNetAsset } from '../src/lc0/bt4Engine.ts';
+import { bigNetAssetStatusSync, bigNetOptionState, checkBigNetAsset, waitForBigNetAsset } from '../src/lc0/bt4Engine.ts';
 import { checkPlentyChessVariantAsset, plentyChessVariantAssetStatus } from '../src/lc0/plentychessVariants.ts';
 import { checkRecklessVariantAsset, recklessVariantAssetStatus } from '../src/lc0/recklessVariants.ts';
 import { checkStormphraxVariantAsset, stormphraxVariantAssetStatus } from '../src/lc0/stormphraxVariants.ts';
 import { checkViridithasVariantAsset, viridithasVariantAssetStatus } from '../src/lc0/viridithasVariants.ts';
+
+test('setup availability waits through a transient HEAD failure', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  let hits = 0;
+  t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: ++hits === 1 ? 503 : 200 }));
+  const config = { key: 'bt4', modelUrl: '/test/setup-retry.onnx' };
+  const availability = waitForBigNetAsset(config, new AbortController().signal);
+  await new Promise(setImmediate);
+  assert.equal(bigNetAssetStatusSync(config), 'unknown');
+  t.mock.timers.tick(1_000);
+  assert.equal(await availability, 'present');
+  assert.equal(hits, 2);
+});
 
 for (const code of [404, 410]) {
   test(`confirmed ${code} resolves missing even when another required HEAD hangs`, async (t) => {
