@@ -186,9 +186,8 @@ test('review PGN retains FEN start, Black numbering, headers, result and origina
     'b',
   );
   const pgn = annotatedPgn(result, {
-    tags: { White: 'Alice', Black: 'Bob', FEN: fen, SetUp: '1', Result: '0-1' },
-    startTurn: 'b',
-    startFullmove: 37,
+    tags: { White: 'Alice', Black: 'Bob', FEN: START_FEN, SetUp: '0', Result: '0-1' },
+    startFen: fen,
     result: '1-0',
   });
   assert.match(pgn, /37\.\.\. f6 \$4/);
@@ -197,6 +196,7 @@ test('review PGN retains FEN start, Black numbering, headers, result and origina
   assert.match(pgn, /\[%eval #3\]/);
   assert.match(pgn, /\[Result "1-0"\]/);
   const parsed = parsePgnGame(pgn);
+  assert.equal(parsed.tags.SetUp, '1');
   assert.equal(parsed.tree.root.fen, fen);
   assert.equal(parsed.tags.White, 'Alice');
   assert.equal(parsed.result, '1-0');

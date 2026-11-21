@@ -7,7 +7,8 @@
  * scope. See docs/arena_analysis_roadmap.md stage 3.
  */
 
-import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
+import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
+import { setPgnStartTags } from '../chess/pgn.ts';
 import { insufficientMaterial } from '../chess/drawRules.ts';
 import { inCheck, legalMoves } from '../chess/movegen.ts';
 
@@ -206,8 +207,7 @@ const CLASS_NAG: Partial<Record<MoveClass, string>> = {
 export interface AnnotatedPgnOptions {
   tags?: Record<string, string>;
   result?: string;
-  startFullmove?: number;
-  startTurn?: 'w' | 'b';
+  startFen?: string;
 }
 
 /**
@@ -217,7 +217,9 @@ export interface AnnotatedPgnOptions {
  */
 export function annotatedPgn(review: GameReview, options: AnnotatedPgnOptions = {}): string {
   const result = ['1-0', '0-1', '1/2-1/2', '*'].includes(options.result ?? '') ? options.result! : '*';
+  const startFen = options.startFen ?? START_FEN;
   const tags = { Event: 'Game review', ...options.tags, Result: result };
+  setPgnStartTags(tags, startFen);
   const escapeTag = (value: string) =>
     value
       .replace(/\\/g, '\\\\')
@@ -227,12 +229,12 @@ export function annotatedPgn(review: GameReview, options: AnnotatedPgnOptions = 
     .filter(([key]) => /^\w+$/.test(key))
     .map(([key, value]) => `[${key} "${escapeTag(value)}"]`)
     .join('\n');
-  const startTurn = options.startTurn ?? 'w';
-  let fullmove = options.startFullmove ?? 1;
+  const start = parseFen(startFen);
+  let fullmove = start.fullmove;
   const tokens: string[] = [];
   review.moves.forEach((move, index) => {
     if (move.side === 'w') tokens.push(`${fullmove}.`);
-    else if (index === 0 && startTurn === 'b') tokens.push(`${fullmove}...`);
+    else if (index === 0 && start.turn === 'b') tokens.push(`${fullmove}...`);
     tokens.push(move.san);
     const nag = CLASS_NAG[move.class];
     if (nag) tokens.push(nag);

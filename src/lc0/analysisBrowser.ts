@@ -3583,13 +3583,11 @@ function reviewedPgn(): string | undefined {
     clearReviewState('Review cleared after game changed; run review again before copying annotated PGN.');
     return;
   }
-  const start = parseFen(lastReviewNodes[0].fen);
   const metadata = reviewMetadata.get(tree);
   return annotatedPgn(lastReview, {
-    tags: { Event: 'Game review', ...metadata?.tags, ...(lastReviewNodes[0].fen === START_FEN ? {} : { SetUp: '1', FEN: lastReviewNodes[0].fen }) },
+    tags: metadata?.tags,
     result: metadata?.signature === lastReviewSignature ? metadata.result : '*',
-    startFullmove: start.fullmove,
-    startTurn: start.turn,
+    startFen: lastReviewNodes[0].fen,
   });
 }
 

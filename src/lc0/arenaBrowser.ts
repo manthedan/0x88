@@ -3406,14 +3406,6 @@ function gameTreeFromOpening(opening: ArenaOpening): GameTree {
   return tree;
 }
 
-function openingPgnSetupTags(opening: ArenaOpening): Record<string, string> {
-  if (opening.moves?.length) {
-    const startFen = opening.startFen ?? START_FEN;
-    return startFen !== START_FEN ? { SetUp: '1', FEN: startFen } : {};
-  }
-  return opening.fen !== START_FEN ? { SetUp: '1', FEN: opening.fen } : {};
-}
-
 function setOpeningPreview(opening: ArenaOpening): void {
   historyBoards = openingHistoryBoards(opening);
   board = historyBoards[historyBoards.length - 1];
@@ -4493,7 +4485,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
         score.bWins += 1;
       }
     }
-    const tags: Record<string, string> = { Event: 'LC0 arena', White: white.name, Black: black.name, Opening: opening.name, ...openingPgnSetupTags(opening) };
+    const tags: Record<string, string> = { Event: 'LC0 arena', White: white.name, Black: black.name, Opening: opening.name };
     const pgn = gameTreeToPgn(tree, { ...tags, ...arenaAdjudicationTags(reason) }, result);
     const completed: ArenaCompletedGame = {
       pgn,
