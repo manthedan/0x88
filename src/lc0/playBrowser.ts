@@ -356,7 +356,8 @@ function ctxStrengthCaption(ctx: PlayContext): string {
     const sf = SF_LEVELS[level];
     return sf.skill >= 20 ? `full strength · depth ${sf.depth}` : `UCI skill ${sf.skill} · depth ${sf.depth}`;
   }
-  const value = ctxStrengthFor(option, level);
+  const backend = option.family === 'lc0' && option.variant !== 'small' ? peekBigNetSearcher(option.variant as BigNetKey)?.backend : undefined;
+  const value = ctxStrengthFor(option, level, backend || undefined);
   if (option.variant === 'lqo') return `≈ ${value} visits per move · specialized queen-odds search`;
   const isNeuralSearch = option.family === 'lc0' || option.family === 'centipawn';
   const base = isNeuralSearch ? `≈ ${value} visits per move` : `search depth ${value}`;

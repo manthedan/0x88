@@ -17,7 +17,7 @@ import { BIG_NET_LEVELS } from '../src/lc0/play/playSearchSettings.ts';
 // browser, network or model assets. UI writes record what the next mount sees.
 const source = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
 const requestSource = source.slice(source.indexOf('async function ctxRequestEngineMove('), source.indexOf('async function ctxVerifySelectedEngineReady('));
-const strengthSource = source.slice(source.indexOf('function ctxStrengthFor('), source.indexOf('function ctxStrengthCaption('));
+const strengthSource = source.slice(source.indexOf('function ctxStrengthFor('), source.indexOf('function ctxRenderLevelOptions('));
 const preloadSource = source.slice(source.indexOf('async function ctxPreloadLqoAfterBookMove('), source.indexOf('async function ctxRequestEngineMove('));
 
 test('a phone plays the known LQO book reply before its background reclaim wait resolves', async () => {
@@ -61,11 +61,13 @@ test('a phone plays the known LQO book reply before its background reclaim wait 
   await new Promise(setImmediate);
   assert.equal(starts, 1);
 });
-test('Play uses the loaded WASM budget and shows the CPU warning on the first search despite a successful probe', async (t) => {
+test('Play sends and displays the loaded WASM budget on the first search despite a successful probe', async (t) => {
   const config = { ...BT4_NET, modelUrl: '/test/play-first-search.onnx' };
   t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 200 }));
   await checkBigNetAsset(config);
   const warning = { textContent: '', hidden: true };
+  let captionText;
+  let adapterSupported = false;
   const searchPosted = Promise.withResolvers();
   const previousWorker = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
   globalThis.Worker = class extends EventTarget {
@@ -73,7 +75,7 @@ test('Play uses the loaded WASM budget and shows the CPU warning on the first se
       const reply = (data) => this.dispatchEvent(new MessageEvent('message', { data: { id: message.id, ...data } }));
       if (message.type === 'init') queueMicrotask(() => reply({ type: 'ready', backend: 'auto->wasm' }));
       if (message.type === 'search') {
-        searchPosted.resolve({ ...warning, visits: message.visits });
+        searchPosted.resolve({ ...warning, caption: captionText, visits: message.visits });
         queueMicrotask(() => reply({ type: 'searchResult', result: { move: 'e2e4' } }));
       }
       if (message.type === 'dispose') reply({ type: 'disposed' });
@@ -86,10 +88,14 @@ test('Play uses the loaded WASM budget and shows the CPU warning on the first se
     if (previousWorker) Object.defineProperty(globalThis, 'Worker', previousWorker);
     else delete globalThis.Worker;
   });
+  const option = { family: 'lc0', variant: 'bt4' };
   const deps = {
     engines: { retireUnusedEngines: async () => {}, acquireBigNet: async () => searcher },
-    ctxSelectedEngine: () => ({ family: 'lc0', variant: 'bt4' }),
-    bt4SupportedSync: () => true,
+    ctxSelectedEngine: () => option,
+    ctxDraftEngine: () => option,
+    ctxSelectedLevel: (ctx) => ctx.opponent.active.level,
+    peekBigNetSearcher: (key) => (key === config.key ? searcher : null),
+    bt4SupportedSync: () => adapterSupported,
     bigNetBackendUsesWasm,
     BIG_NET_LEVELS,
     BIG_NETS,
@@ -97,19 +103,27 @@ test('Play uses the loaded WASM budget and shows the CPU warning on the first se
     ctxSetEngineNote: () => {},
     ctxShowDownloadProgress: () => {},
     ctxHideDownloadProgress: () => {},
-    ctxRender: () => renderBigNetCpuWarning(warning, [bigNetCpuWarning(config, searcher.backend)]),
+    ctxRender: (ctx) => {
+      renderBigNetCpuWarning(warning, [bigNetCpuWarning(config, searcher.backend)]);
+      captionText = caption(ctx);
+    },
     PLAY_DRAW_SCORE: 0,
     PLAY_SEARCH_CONTEMPT_LIMIT: 0,
   };
-  const request = new Function(...Object.keys(deps), `${stripTypeScriptTypes(strengthSource + requestSource)}; return ctxRequestEngineMove;`)(
-    ...Object.values(deps),
-  );
+  const { request, caption } = new Function(
+    ...Object.keys(deps),
+    `${stripTypeScriptTypes(strengthSource + requestSource)}; return { request: ctxRequestEngineMove, caption: ctxStrengthCaption };`,
+  )(...Object.values(deps));
   const ctx = { opponent: { active: { level: 4 } }, humanColor: 'b', positions: [], moves: [] };
-  deps.ctxRender();
+  assert.match(caption(ctx), /^≈ 8 visits per move/);
+  adapterSupported = true;
+  deps.ctxRender(ctx);
+  assert.match(captionText, /^≈ 800 visits per move/);
   assert.equal(warning.hidden, true, 'no CPU warning was predicted before worker init');
   assert.equal(await request(ctx, new AbortController().signal), 'e2e4');
   const duringSearch = await searchPosted.promise;
   assert.equal(duringSearch.visits, 8);
+  assert.match(duringSearch.caption, /^≈ 8 visits per move/);
   assert.equal(duringSearch.hidden, false);
   assert.match(duringSearch.textContent, /CPU fallback/);
 });
