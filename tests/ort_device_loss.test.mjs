@@ -237,7 +237,8 @@ test('Play’s LQO policy-book evaluation is retried on a fresh worker', async (
   await searcher.dispose();
 });
 
-test('Play retries the same Maia3 move after a lost worker and pins WASM after the second loss', async (t) => {
+test('Play retries the Maia3 move when a readback error precedes device loss', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const workers = fakeWorkers(t);
   const evaluators = [];
   const engines = createPlayEngines({
@@ -253,6 +254,8 @@ test('Play retries the same Maia3 move after a lost worker and pins WASM after t
   const move = engines.maia3Move(1500, ui, ['fake'], new AbortController().signal, START_FEN, { style: 'argmax' });
   await tick();
   ready(workers[0], 'auto->webgpu');
+  await tick();
+  workers[0].emit({ type: 'error', id: workers[0].posted.at(-1).id, message: 'GPUBuffer.mapAsync failed' });
   await tick();
   workers[0].emit(loss);
   assert.ok(evaluators[0].failure instanceof WorkerDeviceLostError);
@@ -274,7 +277,8 @@ test('Play retries the same Maia3 move after a lost worker and pins WASM after t
   await engines.retireUnusedEngines();
 });
 
-test('Critical Moments replaces a lost Lc0 worker during a running comparison', async (t) => {
+test('Critical Moments retries its Lc0 search when a readback error precedes device loss', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const workers = fakeWorkers(t);
   const warnings = [];
   const broker = { register() {}, unregister() {}, acquire: async () => ({ release() {} }) };
@@ -284,6 +288,8 @@ test('Critical Moments replaces a lost Lc0 worker during a running comparison', 
   const evaluation = lane.evaluate({ fen: START_FEN, history: [START_FEN] }, undefined, () => {});
   await tick();
   ready(workers[0], 'auto->webgpu');
+  await tick();
+  workers[0].emit({ type: 'error', id: workers[0].posted.at(-1).id, error: 'GPUBuffer.mapAsync failed' });
   await tick();
   workers[0].emit(loss);
   await tick();

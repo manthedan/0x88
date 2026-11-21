@@ -42,6 +42,40 @@ export async function retryWorkerDeviceLoss<T>(work: () => Promise<T>, signal?: 
   }
 }
 
+export type WorkerPendingRequest = {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  errorDelay?: ReturnType<typeof setTimeout>;
+};
+
+export function workerBackendUsesWebGpu(backend: string): boolean {
+  return /^(?:[^>]+->)?webgpu(?:,|\[|$)/.test(backend);
+}
+
+export function rejectWorkerRequest<T extends WorkerPendingRequest>(
+  requests: Map<number, T>,
+  id: number,
+  request: T,
+  error: Error,
+  waitForDeviceLoss: boolean,
+): void {
+  const reject = () => {
+    requests.delete(id);
+    request.reject(error);
+  };
+  // WebGPU does not order readback failure relative to GPUDevice.lost.
+  if (waitForDeviceLoss) request.errorDelay = setTimeout(reject, 100);
+  else reject();
+}
+
+export function rejectAllWorkerRequests<T extends WorkerPendingRequest>(requests: Map<number, T>, error: Error): void {
+  for (const request of requests.values()) {
+    clearTimeout(request.errorDelay);
+    request.reject(error);
+  }
+  requests.clear();
+}
+
 export function showWorkerDeviceWarning(target: HTMLElement, warning: string): void {
   target.textContent = warning;
   target.hidden = !warning;

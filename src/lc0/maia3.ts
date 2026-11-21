@@ -9,7 +9,15 @@ import { terminateEngineWorker } from './engineRetirement.ts';
 import { MAIA3_ORT_DEFAULTS } from './maia3RuntimeConfig.ts';
 import { clearLc0ModelCacheEntry, type Lc0ModelLoadInfo, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
 import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
-import { retryWorkerDeviceLoss, WorkerDeviceLostError, WorkerDeviceRecovery } from './workerDeviceRecovery.ts';
+import {
+  rejectAllWorkerRequests,
+  rejectWorkerRequest,
+  retryWorkerDeviceLoss,
+  WorkerDeviceLostError,
+  WorkerDeviceRecovery,
+  type WorkerPendingRequest,
+  workerBackendUsesWebGpu,
+} from './workerDeviceRecovery.ts';
 
 const MAIA3_MODEL_CACHE_NAME = 'maia3-browser-models-v1';
 
@@ -114,11 +122,6 @@ export interface Maia3Choice {
 }
 
 export type Maia3EvaluateInput = BoardState | string | { board?: BoardState; fen?: string; positions?: BoardState[]; fens?: string[] };
-
-type PendingRequest = {
-  resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
-};
 
 function clampElo(elo: number): number {
   if (!Number.isFinite(elo)) return MAIA3_DEFAULT_ELO;
@@ -260,7 +263,7 @@ export interface Maia3BrowserEvaluatorOptions {
 export class Maia3BrowserEvaluator {
   private readonly worker: Worker;
   private nextId = 1;
-  private readonly pending = new Map<number, PendingRequest>();
+  private readonly pending = new Map<number, WorkerPendingRequest>();
   readonly modelLoad: Lc0ModelLoadResult;
   readonly selfElo: number;
   readonly oppoElo: number;
@@ -503,9 +506,12 @@ export class Maia3BrowserEvaluator {
     if (typeof data.id !== 'number') return;
     const pending = this.pending.get(data.id);
     if (!pending) return;
+    if (data.type === 'error') {
+      rejectWorkerRequest(this.pending, data.id, pending, new Error(data.message ?? 'Maia3 worker error'), workerBackendUsesWebGpu(this.backend));
+      return;
+    }
     this.pending.delete(data.id);
-    if (data.type === 'error') pending.reject(new Error(data.message ?? 'Maia3 worker error'));
-    else pending.resolve(data);
+    pending.resolve(data);
   }
 
   private post<T>(message: Record<string, unknown>, transfers: Transferable[] = []): Promise<T> {
@@ -598,8 +604,7 @@ export class Maia3BrowserEvaluator {
         void this.closing.catch(() => undefined);
       }
     }
-    for (const pending of this.pending.values()) pending.reject(error);
-    this.pending.clear();
+    rejectAllWorkerRequests(this.pending, error);
   }
 
   private fail(error: Error): void {

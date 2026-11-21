@@ -4,7 +4,13 @@ import test from 'node:test';
 import ts from 'typescript';
 import { disposeOrtWorker } from '../src/lc0/disposeOrtWorker.ts';
 import { terminateEngineWorker } from '../src/lc0/engineRetirement.ts';
-import { WorkerDeviceLostError, WorkerDeviceRecovery } from '../src/lc0/workerDeviceRecovery.ts';
+import {
+  rejectAllWorkerRequests,
+  rejectWorkerRequest,
+  WorkerDeviceLostError,
+  WorkerDeviceRecovery,
+  workerBackendUsesWebGpu,
+} from '../src/lc0/workerDeviceRecovery.ts';
 
 // Exercise the actual controller functions with only browser/transport effects
 // stubbed. Importing the page would mount its DOM and load model assets.
@@ -34,10 +40,12 @@ function controller() {
       for (const listener of this.listeners.get(type) ?? []) listener(data);
     }
     postMessage(message) {
+      this.lastId = message.id;
       if (message.type === 'dispose') queueMicrotask(() => this.emit('message', { data: { id: message.id, type: 'disposed' } }));
       if (message.type === 'init') {
         this.ep = message.ep;
-        queueMicrotask(() => this.emit('message', { data: { id: message.id, type: 'ready', backend: 'fake' } }));
+        const backend = message.ep === 'wasm' ? 'wasm' : 'auto->webgpu';
+        queueMicrotask(() => this.emit('message', { data: { id: message.id, type: 'ready', backend } }));
       }
     }
     terminate() {
@@ -61,15 +69,8 @@ function controller() {
   `,
     { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
   );
-  return {
-    ...new Function('Worker', 'disposeOrtWorker', 'terminateEngineWorker', 'WorkerDeviceRecovery', code)(
-      Worker,
-      disposeOrtWorker,
-      terminateEngineWorker,
-      WorkerDeviceRecovery,
-    ),
-    workers,
-  };
+  const deps = { Worker, disposeOrtWorker, terminateEngineWorker, WorkerDeviceRecovery, workerBackendUsesWebGpu, rejectAllWorkerRequests, rejectWorkerRequest };
+  return { ...new Function(...Object.keys(deps), code)(...Object.values(deps)), workers };
 }
 
 for (const type of ['error', 'messageerror']) {
@@ -91,13 +92,18 @@ for (const type of ['error', 'messageerror']) {
   });
 }
 
-test('Analysis rejects interrupted requests and switches replacement workers to WASM after two losses', async () => {
+test('Analysis recovers from either message order and switches replacement workers to WASM after two losses', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const api = controller();
   for (let i = 0; i < 2; i++) {
     await api.initWorker();
     const worker = api.workers[i];
     assert.equal(worker.ep, 'auto');
     const rejected = assert.rejects(api.postWorker({ type: 'search' }), WorkerDeviceLostError);
+    if (i === 1) {
+      worker.emit('message', { data: { type: 'error', id: worker.lastId, error: 'GPUBuffer.mapAsync failed' } });
+      await new Promise(setImmediate);
+    }
     worker.emit('message', { data: { type: 'deviceLost', loss: { reason: 'unknown', message: 'reset' } } });
     assert.equal(api.snapshot().workerReady, false);
     assert.equal(worker.terminated, true);

@@ -15,7 +15,15 @@ import { MAIA3_DEFAULT_MODEL_URL, Maia3BrowserEvaluator } from './maia3.ts';
 import { untilAborted } from './modelCache.ts';
 import type { EngineResourceBroker } from './resourceBroker.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
-import { retryWorkerDeviceLoss, WorkerDeviceLostError, WorkerDeviceRecovery } from './workerDeviceRecovery.ts';
+import {
+  rejectAllWorkerRequests,
+  rejectWorkerRequest,
+  retryWorkerDeviceLoss,
+  WorkerDeviceLostError,
+  WorkerDeviceRecovery,
+  type WorkerPendingRequest,
+  workerBackendUsesWebGpu,
+} from './workerDeviceRecovery.ts';
 
 export const CRITICAL_LC0_MODEL = resolvePublicAssetUrl(LC0_SMALL_BATCH1_QDQ8_PATH);
 
@@ -35,7 +43,7 @@ export function createCriticalEngines(
   const maiaRecovery = new WorkerDeviceRecovery();
   const constrained = isMemoryConstrainedDevice();
   let sequence = 0;
-  const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; progress: (text: string) => void }>();
+  const pending = new Map<number, WorkerPendingRequest & { progress: (text: string) => void; webGpuSearch: boolean }>();
   const ids = ['critical-sf', 'critical-lc0', ...(rating === undefined ? [] : ['critical-maia'])];
   // Reserve CPU capacity even for neural providers: ORT may fall back to WASM.
   for (const id of ids) broker.register(id, { resourceClass: 'cpu', maxThreads: 1 });
@@ -43,8 +51,7 @@ export function createCriticalEngines(
     terminateEngineWorker(worker);
     worker = undefined;
     lc0Ready = undefined;
-    for (const request of pending.values()) request.reject(error);
-    pending.clear();
+    rejectAllWorkerRequests(pending, error);
   };
   const dispose = () => {
     signal.removeEventListener('abort', dispose);
@@ -65,11 +72,11 @@ export function createCriticalEngines(
   };
   signal.addEventListener('abort', dispose, { once: true });
 
-  const post = <T>(message: Record<string, unknown>, progress: (text: string) => void): Promise<T> => {
+  const post = <T>(message: Record<string, unknown>, progress: (text: string) => void, webGpuSearch = false): Promise<T> => {
     if (!worker) return Promise.reject(new Error('Lc0 worker unavailable.'));
     const id = ++sequence;
     return new Promise<T>((resolve, reject) => {
-      pending.set(id, { resolve: resolve as (value: unknown) => void, reject, progress });
+      pending.set(id, { resolve: resolve as (value: unknown) => void, reject, progress, webGpuSearch });
       worker!.postMessage({ ...message, id });
     });
   };
@@ -91,10 +98,10 @@ export function createCriticalEngines(
         if (!request) return;
         if (data.type === 'downloadProgress') request.progress(`Downloading ${(data.loadedBytes / 1e6).toFixed(1)} MB`);
         else if (data.type === 'searchProgress') request.progress(`${data.progress.visits ?? 0} / 400 visits`);
+        else if (data.type === 'error') rejectWorkerRequest(pending, data.id, request, new Error(data.error ?? 'Lc0 worker failed.'), request.webGpuSearch);
         else {
           pending.delete(data.id);
-          if (data.type === 'error') request.reject(new Error(data.error ?? 'Lc0 worker failed.'));
-          else request.resolve(data);
+          request.resolve(data);
         }
       });
       owned.addEventListener('error', (event) => {
@@ -205,6 +212,7 @@ export function createCriticalEngines(
                 reportProgress: true,
               },
               progress,
+              workerBackendUsesWebGpu(ready.backend),
             );
             return {
               cacheKey: '',

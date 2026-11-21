@@ -20,7 +20,13 @@ import type { Lc0Evaluation, Lc0EvaluatorInput } from './lc0EvaluatorBase.ts';
 import { lc0SplitKUrl } from './lc0ModelUrls.ts';
 import { LC0_MODEL_DOWNLOAD_NOT_APPROVED } from './modelCache.ts';
 import { PHONE_LARGE_NET_SUFFIX, phoneBigNetBlocked } from './phoneLargeNetPolicy.ts';
-import { WorkerDeviceLostError, WorkerDeviceRecovery } from './workerDeviceRecovery.ts';
+import {
+  rejectAllWorkerRequests,
+  rejectWorkerRequest,
+  WorkerDeviceLostError,
+  WorkerDeviceRecovery,
+  type WorkerPendingRequest,
+} from './workerDeviceRecovery.ts';
 
 export interface BigNetConfig {
   key: 'bt4' | 't3' | 'lqo';
@@ -334,9 +340,6 @@ function bigNetDiagnosticRequest(config: BigNetConfig) {
 /** Returns undefined when it does not apply, so desktop init adds no await. */
 type ColdPrefetch = (config: BigNetConfig, options: LargeNetPrefetchOptions) => Promise<LargeNetPrefetchResult> | undefined;
 
-// WebGPU does not order readback failure relative to GPUDevice.lost.
-const DEVICE_LOSS_GRACE_MS = 100;
-
 export class Bt4WorkerSearcher {
   readonly config: BigNetConfig;
   private readonly coldPrefetch: ColdPrefetch;
@@ -345,16 +348,7 @@ export class Bt4WorkerSearcher {
   private ready = false;
   private initPromise: Promise<string> | null = null;
   private seq = 0;
-  private pending = new Map<
-    number,
-    {
-      resolve: (value: unknown) => void;
-      reject: (error: Error) => void;
-      onProgress?: (progress: Bt4SearchProgress) => void;
-      inference: boolean;
-      errorDelay?: ReturnType<typeof setTimeout>;
-    }
-  >();
+  private pending = new Map<number, WorkerPendingRequest & { onProgress?: (progress: Bt4SearchProgress) => void; inference: boolean }>();
   private activeSearchId: number | null = null;
   private closing: Promise<void> | null = null;
   private lifecycleGeneration = 0;
@@ -561,13 +555,13 @@ export class Bt4WorkerSearcher {
         return;
       }
       if (message.type === 'error') {
-        const error = new Error(message.error ?? 'Lc0 BT4 worker error');
-        const reject = () => {
-          this.pending.delete(id);
-          pending.reject(error);
-        };
-        if (pending.inference && !bigNetBackendUsesWasm(this.backend)) pending.errorDelay = setTimeout(reject, DEVICE_LOSS_GRACE_MS);
-        else reject();
+        rejectWorkerRequest(
+          this.pending,
+          id,
+          pending,
+          new Error(message.error ?? 'Lc0 BT4 worker error'),
+          pending.inference && !bigNetBackendUsesWasm(this.backend),
+        );
         return;
       }
       this.pending.delete(id);
@@ -694,11 +688,7 @@ export class Bt4WorkerSearcher {
     this.backend = '';
     this.fallback = undefined;
     this.servedModelUrl = '';
-    for (const pending of this.pending.values()) {
-      clearTimeout(pending.errorDelay);
-      pending.reject(error);
-    }
-    this.pending.clear();
+    rejectAllWorkerRequests(this.pending, error);
     this.activeSearchId = null;
   }
 

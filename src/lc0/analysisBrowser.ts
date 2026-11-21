@@ -297,7 +297,16 @@ import {
   viridithasVariantFromParams,
 } from './viridithasVariants.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
-import { retryWorkerDeviceLoss, showWorkerDeviceWarning, WorkerDeviceLostError, WorkerDeviceRecovery } from './workerDeviceRecovery.ts';
+import {
+  rejectAllWorkerRequests,
+  rejectWorkerRequest,
+  retryWorkerDeviceLoss,
+  showWorkerDeviceWarning,
+  WorkerDeviceLostError,
+  WorkerDeviceRecovery,
+  type WorkerPendingRequest,
+  workerBackendUsesWebGpu,
+} from './workerDeviceRecovery.ts';
 
 const collectOrtRuntimeDiagnostics: typeof CollectOrtRuntimeDiagnostics = async (...args) =>
   (await import('../nn/ortRuntime.ts')).collectOrtRuntimeDiagnostics(...args);
@@ -770,10 +779,7 @@ let workerBackend = '';
 let lc0ServedModelUrl = '';
 let workerRuntime: Lc0AnalysisRuntime | '' = '';
 let workerSeq = 0;
-const workerPending = new Map<
-  number,
-  { resolve: (value: unknown) => void; reject: (error: Error) => void; onProgress?: (progress: WorkerSearchProgress) => void }
->();
+const workerPending = new Map<number, WorkerPendingRequest & { onProgress?: (progress: WorkerSearchProgress) => void; inference: boolean }>();
 let activeWorkerSearchId: number | null = null;
 // A worker loading its first hybrid pack cannot act on a cancel message.
 let workerSearchWarm = false;
@@ -891,7 +897,7 @@ function postWorker<T>(message: Record<string, unknown>, onId?: (id: number) => 
   const id = ++workerSeq;
   onId?.(id);
   return new Promise<T>((resolve, reject) => {
-    workerPending.set(id, { resolve: resolve as (value: unknown) => void, reject, onProgress });
+    workerPending.set(id, { resolve: resolve as (value: unknown) => void, reject, onProgress, inference: message.type === 'search' });
     searchWorker!.postMessage({ ...message, id });
   });
 }
@@ -910,8 +916,7 @@ function resetSearchWorker(reason: string | Error): void {
   workerRuntime = '';
   lc0ServedModelUrl = '';
   const error = typeof reason === 'string' ? new DOMException(reason, 'AbortError') : reason;
-  for (const pending of workerPending.values()) pending.reject(error);
-  workerPending.clear();
+  rejectAllWorkerRequests(workerPending, error);
 }
 
 async function initWorker(operationSignal?: AbortSignal): Promise<string> {
@@ -943,9 +948,18 @@ async function initWorker(operationSignal?: AbortSignal): Promise<string> {
       pending.onProgress?.((message as unknown as { progress: WorkerSearchProgress }).progress);
       return;
     }
+    if (message.type === 'error') {
+      rejectWorkerRequest(
+        workerPending,
+        message.id,
+        pending,
+        new Error(message.error ?? 'worker error'),
+        pending.inference && workerBackendUsesWebGpu(workerBackend),
+      );
+      return;
+    }
     workerPending.delete(message.id);
-    if (message.type === 'error') pending.reject(new Error(message.error ?? 'worker error'));
-    else pending.resolve(message);
+    pending.resolve(message);
   });
   worker.addEventListener('error', (event) => {
     if (searchWorker === worker) resetSearchWorker(new Error(event.message || 'LC0 worker crashed'));
