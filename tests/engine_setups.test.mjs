@@ -104,6 +104,46 @@ test('a large-net setup waits for its nets to become available before asking for
   assert.deepEqual(prompts, ['bt4', 't3']);
 });
 
+for (const action of ['add', 'change']) {
+  test(`Analysis ${action} waits for the hosted CPU default before committing the row`, async () => {
+    const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+    const extract = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+    const handlers = new Map();
+    const rows = [{ family: 'sf', variant: 'lite', strength: 8 }];
+    const probe = Promise.withResolvers();
+    const deps = {
+      mountAbort: new AbortController(),
+      el: (id) => ({ addEventListener: (event, handler) => handlers.set(`${id}:${event}`, handler) }),
+      nextEngineFamily: () => 'reckless',
+      resolveDefaultRecklessVariantAssetFallback: async () => probe.promise,
+      whileAnalysisMounted: (callback) => callback,
+      renderRecklessRuntimeInfo() {},
+      defaultStrength: () => 12,
+      normalizeDeployEngineRow: (row) => row,
+      renderEngineList() {}, renderEngineSetupSummary() {}, persistManualEngineRows() {}, deferAnalysisSettingsRefresh() {},
+      prefetchAnalysisAssetsForAddedRow() {}, cancelAnalysisAssetPrefetch() {}, reconcileActiveRuntimeFallbackWarning() {},
+      lineCache: new Map(), tree: { current: { fen: 'start' } },
+    };
+    const controller = `
+      let REQUESTED_RECKLESS_VARIANT = { key: 'relaxed-simd' };
+      const REQUESTED_RECKLESS_EXPLICIT = false;
+      ${extract('let profileLoadAbort:', 'async function applyEngineProfile(')}
+      ${extract('function defaultVariant(', 'function rowLabel(')}
+      ${extract('async function resolveAnalysisCpuDefault(', 'async function init(mountSignal:')}
+      ${extract("  el('engineList').addEventListener('change'", "  el('engineProfileSelect').addEventListener(")}
+      ${extract('  const addEngineRow =', "  el('lc0RuntimeSelect').addEventListener(")}
+    `;
+    new Function('engineRows', ...Object.keys(deps), stripTypeScriptTypes(controller))(rows, ...Object.values(deps));
+    const updating = action === 'add'
+      ? handlers.get('addEngine:click')()
+      : handlers.get('engineList:change')({ target: { value: 'reckless', dataset: { i: '0' }, classList: { contains: (name) => name === 'row-fam' } } });
+    assert.deepEqual(rows.map(({ variant }) => variant), ['lite'], 'do not start the unavailable relaxed build');
+    probe.resolve({ key: 'simd' });
+    await updating;
+    assert.deepEqual(rows.at(-1), { family: 'reckless', variant: 'simd', strength: 12 });
+  });
+}
+
 test('normal saved setups cannot activate developer-only runtimes, including on restore/import', () => {
   for (const runtime of ['onnx', 'hybrid-wgsl-heads', 'hybrid-ort-heads', 'whole-onnx-webgpu']) {
     assert.equal(engineSetupRuntime(runtime, false), 'onnx');

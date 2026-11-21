@@ -1365,6 +1365,10 @@ function abortEngineSelectionConsent(): void {
   profileLoadAbort?.abort();
   pickerConsentAbort?.abort();
 }
+function beginEnginePickerRequest(): AbortSignal {
+  pickerConsentAbort = new AbortController();
+  return AbortSignal.any([mountAbort.signal, pickerConsentAbort.signal]);
+}
 async function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?: string; persistLast?: boolean; note?: string } = {}): Promise<void> {
   abortEngineSelectionConsent();
   const request = new AbortController();
@@ -5373,6 +5377,10 @@ function wireEvents() {
     const previousRow = engineRows[i];
     if (target.classList.contains('row-fam')) {
       const family = target.value as EngineFamily;
+      const signal = beginEnginePickerRequest();
+      target.value = previousRow.family;
+      await resolveAnalysisCpuDefault(family);
+      if (signal.aborted || engineRows[i] !== previousRow) return;
       engineRows[i].family = family;
       engineRows[i].variant = defaultVariant(family);
       engineRows[i].strength = defaultStrength(family);
@@ -5382,11 +5390,9 @@ function wireEvents() {
         const selectedVariant = target.value;
         const config = BIG_NETS[selectedVariant];
         target.value = engineRows[i].variant;
-        const request = new AbortController();
-        pickerConsentAbort = request;
-        const signal = AbortSignal.any([mountAbort.signal, request.signal]);
+        const signal = beginEnginePickerRequest();
         if (!(await requestAnalysisBigNetConsent(config, signal))) return;
-        if (signal.aborted || pickerConsentAbort !== request || engineRows[i] !== previousRow) return;
+        if (signal.aborted || engineRows[i] !== previousRow) return;
         if (!bigNetSelectable(config)) {
           el('message').textContent = bigNetUnavailableText(config);
           renderEngineList();
@@ -5459,9 +5465,12 @@ function wireEvents() {
     lineCache.delete(tree.current.fen);
     deferAnalysisSettingsRefresh({ disposeUnusedEngines: true });
   });
-  const addEngineRow = () => {
+  const addEngineRow = async () => {
     abortEngineSelectionConsent();
+    const signal = beginEnginePickerRequest();
     const family = nextEngineFamily();
+    await resolveAnalysisCpuDefault(family);
+    if (signal.aborted) return;
     const row = normalizeDeployEngineRow({ family, variant: defaultVariant(family), strength: defaultStrength(family) }, 'analysis', engineRows.length);
     engineRows.push(row);
     persistManualEngineRows();
@@ -6018,7 +6027,7 @@ async function reloadLc0Backend(
 
 async function resolveAnalysisCpuDefault(family: EngineFamily): Promise<void> {
   const onChange = whileAnalysisMounted(renderRecklessRuntimeInfo);
-  if (family === 'reckless' && !isV0DeployProfile()) {
+  if (family === 'reckless') {
     REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, onChange);
   } else if (family === 'viridithas') {
     REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, onChange);
