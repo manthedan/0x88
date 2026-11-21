@@ -148,12 +148,26 @@ export async function probeAssetUrls(
   const timer = setTimeout(abort, Math.max(1, timeoutMs));
   (timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
   if (signal?.aborted) abort();
+  const head = globalThis.navigator?.onLine === false ? undefined : new AbortController();
+  const headSignal = head && AbortSignal.any([controller.signal, head.signal]);
+  let headTimer: ReturnType<typeof setTimeout> | undefined;
+  const headDeadline =
+    head &&
+    new Promise<undefined>((resolve) => {
+      headTimer = setTimeout(
+        () => {
+          resolve(undefined);
+          head.abort();
+        },
+        Math.max(1, Math.floor(timeoutMs * 0.75)),
+      );
+      (headTimer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
+    });
   try {
-    const offline = globalThis.navigator?.onLine === false;
     const statuses = Promise.all(
       urls.map(async (url): Promise<AssetProbeStatus> => {
-        if (!offline) {
-          const response = await fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal }).catch(() => undefined);
+        if (headSignal) {
+          const response = await Promise.race([fetch(url, { method: 'HEAD', cache: 'no-store', signal: headSignal }).catch(() => undefined), headDeadline]);
           if (response?.ok) return 'present';
           if (response?.status === 404 || response?.status === 410) {
             finish('missing');
@@ -182,6 +196,7 @@ export async function probeAssetUrls(
   } finally {
     notifyAssetProbeChange(urls);
     clearTimeout(timer);
+    clearTimeout(headTimer);
     signal?.removeEventListener('abort', abort);
   }
 }

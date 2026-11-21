@@ -55,6 +55,30 @@ test('transient HEAD failures probe the cache even when the browser reports onli
   }
 });
 
+test('a stalled HEAD is aborted in time to probe the cache within the overall deadline', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let headSignal;
+  const fetch = t.mock.method(globalThis, 'fetch', (_url, options) => {
+    assert.equal(options.method, 'HEAD');
+    headSignal = options.signal;
+    return new Promise(() => {});
+  });
+  const probeCached = t.mock.fn((_url, signal) => {
+    assert.equal(headSignal.aborted, true);
+    assert.equal(signal.aborted, false);
+    return new Promise((resolve) => setTimeout(() => resolve(!signal.aborted), 100));
+  });
+  const result = probeAssetUrls(['/stalled-head'], { probeCached });
+  assert.equal(fetch.mock.callCount(), 1);
+  t.mock.timers.tick(6_000);
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  t.mock.timers.tick(1_000);
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  t.mock.timers.tick(1_000);
+  assert.equal(await result, 'present');
+  assert.equal(probeCached.mock.callCount(), 1);
+});
+
 for (const code of [404, 410]) {
   test(`confirmed ${code} resolves missing even when another required HEAD hangs`, async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
