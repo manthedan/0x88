@@ -142,6 +142,7 @@ export interface Bt4SearchProgress extends Bt4SearchResult {
 export interface Bt4SearchOptions {
   visits?: number | ((backend: string) => number);
   retryOnDeviceLoss?: boolean;
+  reclaimBeforeRecovery?: () => Promise<void> | undefined;
   recoveryNoDownload?: () => boolean;
   approveRecoveryDownload?: () => Promise<void>;
   movetimeMs?: number;
@@ -583,6 +584,12 @@ export class Bt4WorkerSearcher {
     let backend: string;
     const noDownload = !!this.deviceFailure && (options.recoveryNoDownload?.() ?? this.cacheOnly);
     try {
+      const reclaim = this.deviceFailure && options.reclaimBeforeRecovery?.();
+      if (reclaim) {
+        const generation = this.lifecycleGeneration;
+        await reclaim;
+        if (generation !== this.lifecycleGeneration) throw new Error('Lc0 BT4 worker disposed');
+      }
       try {
         backend = await this.init({ evalCacheEntries, noDownload, signal });
       } catch (error) {

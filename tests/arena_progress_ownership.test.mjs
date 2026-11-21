@@ -155,11 +155,13 @@ for (const operation of ['warmup', 'move']) {
 }
 
 for (const approved of [false, true]) {
-  test(`Arena does not inherit a warm worker's prior download approval during recovery (approved=${approved})`, async (t) => {
+  test(`Arena reclaims phone memory and checks current consent before recovering a warm worker (approved=${approved})`, async (t) => {
     const prevWorker = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
     const inits = [];
     const searches = [];
     const prompts = [];
+    const reclaim = Promise.withResolvers();
+    let cpuRetirements = 0;
     const arenaRunDownloads = new Set(['bt4']);
     globalThis.Worker = class extends EventTarget {
       postMessage(message) {
@@ -196,8 +198,15 @@ for (const approved of [false, true]) {
       isMemoryConstrainedDevice: () => true,
       arenaCacheEntries: () => 2048,
       peekBigNetSearcher: () => searcher,
-      preparePhoneBigNet: () => undefined,
-      disposeArenaCpuEngines() {},
+      preparePhoneBigNet: (key, entries, _signal, retireCpu, _onWait, exclusive) => {
+        assert.deepEqual([key, entries, exclusive], ['bt4', 2048, true]);
+        if (searcher.loaded) return;
+        retireCpu();
+        return reclaim.promise;
+      },
+      disposeArenaCpuEngines() {
+        cpuRetirements++;
+      },
       acquireBigNetSearcherAsync: async () => searcher,
       inspectLargeNetDownload: async () => ({ cached: true }),
       requestLargeNetDownloadConsent: async (config, _signal, _warn, _notice, inspect) => {
@@ -222,8 +231,14 @@ for (const approved of [false, true]) {
     )(deps);
     const positions = [parseFen(START_FEN)];
     const move = factory('seat-1', { variant: 'bt4', strength: 10 }, 'bt4')(positions, new AbortController().signal);
-    if (approved) assert.equal(await move, 'e2e4');
-    else await assert.rejects(move, /no longer cached and its download was not approved/);
+    const outcome = approved ? move : assert.rejects(move, /no longer cached and its download was not approved/);
+    await new Promise(setImmediate);
+    assert.equal(cpuRetirements, 1, 'loss runs the same reclaim step as a cold load');
+    assert.equal(inits.length, 1, 'replacement waits for reclaim before initializing');
+    reclaim.resolve();
+    if (approved) assert.equal(await outcome, 'e2e4');
+    else await outcome;
+    assert.equal(cpuRetirements, 2, 'both device losses reclaim before initializing a replacement');
     assert.deepEqual(prompts, [{ cached: false }]);
     assert.deepEqual(
       inits.map(({ ep, noModelDownload }) => [ep, noModelDownload]),
