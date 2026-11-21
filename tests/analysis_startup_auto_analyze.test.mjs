@@ -61,13 +61,20 @@ test('Analysis fetches the opening index once when the position leaves the start
   const label = {};
   let requests = 0;
   const deps = {
-    tree, START_FEN: 'start', retry: false, mountAbort: new AbortController(),
+    tree,
+    START_FEN: 'start',
+    retry: false,
+    mountAbort: new AbortController(),
     el: () => label,
-    fetch: async () => { requests++; return Response.json({ named: ['B00', 'King’s Pawn Game'] }); },
+    fetch: async () => {
+      requests++;
+      return Response.json({ named: ['B00', 'King’s Pawn Game'] });
+    },
     resolvePublicAssetUrl: (url) => url,
     isStaleMount: () => false,
     openingNameAt: (index) => index.named,
-    fitMoveList() {}, keepCurrentMoveInView() {},
+    fitMoveList() {},
+    keepCurrentMoveInView() {},
   };
   const render = new Function(...Object.keys(deps), `${stripTypeScriptTypes(controller)}; return renderOpeningName;`)(...Object.values(deps));
   render();

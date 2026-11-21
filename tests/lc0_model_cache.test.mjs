@@ -117,7 +117,8 @@ test('channel and release requests can finish before the app manifest, but the b
     urls.push(url);
     if (url === MANIFEST_URL) return manifest.promise;
     if (url === CHANNEL_URL) return Response.json({ releaseManifestUrl: RELEASE_URL });
-    if (url === RELEASE_URL) return Response.json({ artifacts: [{ logicalUrl: '/models/lc0/test.onnx', artifactUrl: MODEL_ARTIFACT_URL, bytes: 3, sha256: ABC_SHA256 }] });
+    if (url === RELEASE_URL)
+      return Response.json({ artifacts: [{ logicalUrl: '/models/lc0/test.onnx', artifactUrl: MODEL_ARTIFACT_URL, bytes: 3, sha256: ABC_SHA256 }] });
     assert.equal(url, MODEL_ARTIFACT_URL);
     return new Response(bytesOf('abc'));
   });

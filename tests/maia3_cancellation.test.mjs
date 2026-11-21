@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
-import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
 import { disposeOrtWorker } from '../src/lc0/disposeOrtWorker.ts';
+import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
 
 class WorkerStub extends EventTarget {
   terminated = false;
@@ -18,7 +18,12 @@ class WorkerStub extends EventTarget {
 test('Maia worker initialization can be aborted without waiting for ready', async () => {
   const worker = new WorkerStub();
   const controller = new AbortController();
-  const pending = Maia3BrowserEvaluator.postInit(worker, async () => ({ model: 'model' }), { ep: 'auto', signal: controller.signal }, () => disposeOrtWorker(worker));
+  const pending = Maia3BrowserEvaluator.postInit(
+    worker,
+    async () => ({ model: 'model' }),
+    { ep: 'auto', signal: controller.signal },
+    () => disposeOrtWorker(worker),
+  );
   controller.abort();
   await assert.rejects(pending, { name: 'AbortError' });
   assert.equal(worker.terminated, true);

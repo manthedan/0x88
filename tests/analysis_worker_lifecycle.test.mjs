@@ -70,7 +70,10 @@ test('stopping a run retires pending Lc0 init and ignores its late progress', as
   worker.emit('message', { data: { id, type: 'downloadProgress', loadedBytes: 10 } });
   assert.equal(api.progress.length, 1);
   run.abort();
-  assert.deepEqual(worker.posted.map(({ type }) => type), ['init', 'cancel', 'dispose']);
+  assert.deepEqual(
+    worker.posted.map(({ type }) => type),
+    ['init', 'cancel', 'dispose'],
+  );
   worker.emit('message', { data: { id, type: 'downloadProgress', loadedBytes: 20 } });
   await assert.rejects(initializing, { name: 'AbortError' });
   assert.equal(api.progress.length, 1);

@@ -120,9 +120,15 @@ for (const action of ['add', 'change']) {
       renderRecklessRuntimeInfo() {},
       defaultStrength: () => 12,
       normalizeDeployEngineRow: (row) => row,
-      renderEngineList() {}, renderEngineSetupSummary() {}, persistManualEngineRows() {}, deferAnalysisSettingsRefresh() {},
-      prefetchAnalysisAssetsForAddedRow() {}, cancelAnalysisAssetPrefetch() {}, reconcileActiveRuntimeFallbackWarning() {},
-      lineCache: new Map(), tree: { current: { fen: 'start' } },
+      renderEngineList() {},
+      renderEngineSetupSummary() {},
+      persistManualEngineRows() {},
+      deferAnalysisSettingsRefresh() {},
+      prefetchAnalysisAssetsForAddedRow() {},
+      cancelAnalysisAssetPrefetch() {},
+      reconcileActiveRuntimeFallbackWarning() {},
+      lineCache: new Map(),
+      tree: { current: { fen: 'start' } },
     };
     const controller = `
       let REQUESTED_RECKLESS_VARIANT = { key: 'relaxed-simd' };
@@ -134,10 +140,15 @@ for (const action of ['add', 'change']) {
       ${extract('  const addEngineRow =', "  el('lc0RuntimeSelect').addEventListener(")}
     `;
     new Function('engineRows', ...Object.keys(deps), stripTypeScriptTypes(controller))(rows, ...Object.values(deps));
-    const updating = action === 'add'
-      ? handlers.get('addEngine:click')()
-      : handlers.get('engineList:change')({ target: { value: 'reckless', dataset: { i: '0' }, classList: { contains: (name) => name === 'row-fam' } } });
-    assert.deepEqual(rows.map(({ variant }) => variant), ['lite'], 'do not start the unavailable relaxed build');
+    const updating =
+      action === 'add'
+        ? handlers.get('addEngine:click')()
+        : handlers.get('engineList:change')({ target: { value: 'reckless', dataset: { i: '0' }, classList: { contains: (name) => name === 'row-fam' } } });
+    assert.deepEqual(
+      rows.map(({ variant }) => variant),
+      ['lite'],
+      'do not start the unavailable relaxed build',
+    );
     probe.resolve({ key: 'simd' });
     await updating;
     assert.deepEqual(rows.at(-1), { family: 'reckless', variant: 'simd', strength: 12 });

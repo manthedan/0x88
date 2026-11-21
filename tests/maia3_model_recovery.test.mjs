@@ -101,7 +101,10 @@ test('a Maia worker boot failure cancels its pending model load', async (t) => {
   workers[0].dispatchEvent(Object.assign(new Event('error'), { message: 'worker bootstrap failed' }));
   await assert.rejects(creating, /worker bootstrap failed/);
   assert.equal(loadSignal.aborted, true);
-  assert.deepEqual(posted.mock.calls.map(({ arguments: [message] }) => message.type), ['cancel', 'dispose']);
+  assert.deepEqual(
+    posted.mock.calls.map(({ arguments: [message] }) => message.type),
+    ['cancel', 'dispose'],
+  );
   assert.equal(workers[0].terminated, true);
 });
 

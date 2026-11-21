@@ -1256,13 +1256,19 @@ test('Stockfish Lite publishes a line while Lc0 Small is loading in the same run
   const running = page.analyzeCurrent();
   try {
     await new Promise(setImmediate);
-    assert.deepEqual(page.published.at(-1)?.map((line) => line.engine), ['SF Lite']);
+    assert.deepEqual(
+      page.published.at(-1)?.map((line) => line.engine),
+      ['SF Lite'],
+    );
     assert.deepEqual(page.smallSearchLog, []);
   } finally {
     release();
     await running;
   }
-  assert.deepEqual(page.published.at(-1).map((line) => line.engine), ['Lc0', 'SF Lite']);
+  assert.deepEqual(
+    page.published.at(-1).map((line) => line.engine),
+    ['Lc0', 'SF Lite'],
+  );
   assert.equal(page.admissions.length, 1);
   assert.deepEqual([...page.completeAnalysisKeys], [page.analysisSelectionCacheKey()]);
   assert.ok(page.engineLineCache.has(page.engineAnalysisCacheKey(small)), 'cache under the URL actually served');

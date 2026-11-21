@@ -4,7 +4,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { arenaMoveDelay, guardArenaUnload } from '../src/lc0/arenaNavigation.ts';
 import { subscribeAssetProbeRetry } from '../src/lc0/assetProbe.ts';
-import { bigNetAssetStatusSync, BT4_NET, checkBigNetAsset, T3_NET } from '../src/lc0/bt4Engine.ts';
+import { BT4_NET, bigNetAssetStatusSync, checkBigNetAsset, T3_NET } from '../src/lc0/bt4Engine.ts';
 
 test('Arena leave confirmation reports checkpoint failure instead of promising saved results', () => {
   const route = readFileSync(new URL('../src/routes/app/arena/+page.svelte', import.meta.url), 'utf8');
@@ -120,21 +120,30 @@ function arenaAvailability(prefix, extra = {}) {
     t3: { ...T3_NET, modelUrl: `https://example.test/${prefix}-t3.onnx` },
   };
   const deps = {
-    BIG_NETS, checkBigNetAsset, bigNetAssetStatusSync, subscribeAssetProbeRetry,
+    BIG_NETS,
+    checkBigNetAsset,
+    bigNetAssetStatusSync,
+    subscribeAssetProbeRetry,
     probeBt4Support: async () => true,
     mountAbort: new AbortController(),
     isStaleMount: (signal) => signal.aborted,
     whileArenaMounted: (callback) => callback,
     activeSeatRows: () => [],
-    el: () => ({}), document: { activeElement: null },
-    buildEngines() {}, renderSeatSelectors() {}, refreshSeatControls() {},
+    el: () => ({}),
+    document: { activeElement: null },
+    buildEngines() {},
+    renderSeatSelectors() {},
+    refreshSeatControls() {},
     ...extra,
   };
-  const load = new Function(...Object.keys(deps), `
+  const load = new Function(
+    ...Object.keys(deps),
+    `
     let bt4AvailabilityResolved = false, probingSeatOptions = false, running = false, startPending = false;
     ${stripTypeScriptTypes(body)}
     return { refresh: refreshBigNetAvailability, resolved: () => bt4AvailabilityResolved };
-  `)(...Object.values(deps));
+  `,
+  )(...Object.values(deps));
   return { ...load, BIG_NETS };
 }
 
@@ -161,14 +170,22 @@ test('Arena restores focus to the same seat control after availability changes',
   const label = 'Engine 1 version';
   const original = { getAttribute: (name) => (name === 'aria-label' ? label : null) };
   const document = { activeElement: original };
-  const replacement = { focus: () => { document.activeElement = replacement; } };
+  const replacement = {
+    focus: () => {
+      document.activeElement = replacement;
+    },
+  };
   const host = {
     contains: (element) => element === original,
-    querySelector: (selector) => selector === `[aria-label="${label}"]` ? replacement : null,
+    querySelector: (selector) => (selector === `[aria-label="${label}"]` ? replacement : null),
   };
   const api = arenaAvailability('focus', {
-    document, CSS: { escape: (value) => value }, el: () => host,
-    renderSeatSelectors: () => { document.activeElement = null; },
+    document,
+    CSS: { escape: (value) => value },
+    el: () => host,
+    renderSeatSelectors: () => {
+      document.activeElement = null;
+    },
   });
   await api.refresh();
   assert.equal(document.activeElement, replacement);

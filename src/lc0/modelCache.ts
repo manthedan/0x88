@@ -650,9 +650,8 @@ async function resolveModelMetadata(modelUrl: string, options: Lc0ModelLoadOptio
   const manifestFlight = options.manifestEntry
     ? Promise.resolve({ entry: options.manifestEntry, manifestUrl: options.manifestUrl ?? modelUrl, elapsedMs: 0 })
     : fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl));
-  const channelUrl = options.channelUrl === null || options.manifestEntry?.artifactUrl
-    ? undefined
-    : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
+  const channelUrl =
+    options.channelUrl === null || options.manifestEntry?.artifactUrl ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
   const parallelChannel = options.requireManifestEntry ? undefined : resolveChannelArtifactUrl(modelUrl, channelUrl);
   const manifest = await untilAborted(manifestFlight, options.signal);
   if (options.requireManifestEntry && !/^[a-f0-9]{64}$/i.test(manifest.entry?.sha256 ?? '')) {

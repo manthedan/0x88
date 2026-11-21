@@ -52,8 +52,15 @@ for (const variant of ['lqo', 'bt4', 't3']) {
     };
     const verify = new Function(...Object.keys(deps), `${stripTypeScriptTypes(readinessSource)}; return ctxVerifySelectedEngineReady;`)(...Object.values(deps));
     const ctx = {
-      board: { turn: 'w' }, humanColor: 'w', startFen: 'odds-fen', moves: [], positions: [],
-      opponent: { active: {} }, abort: new AbortController(), enginePreparationGeneration: 0, dom: { buttonEl: () => ({}) },
+      board: { turn: 'w' },
+      humanColor: 'w',
+      startFen: 'odds-fen',
+      moves: [],
+      positions: [],
+      opponent: { active: {} },
+      abort: new AbortController(),
+      enginePreparationGeneration: 0,
+      dom: { buttonEl: () => ({}) },
     };
     const preparing = verify(ctx);
     if (variant === 'lqo') {

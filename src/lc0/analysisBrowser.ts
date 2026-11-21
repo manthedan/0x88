@@ -946,9 +946,9 @@ async function initWorker(operationSignal?: AbortSignal): Promise<string> {
     if (searchWorker === worker) resetSearchWorker('LC0 backend load cancelled');
   };
   operationSignal?.addEventListener('abort', cancelInit, { once: true });
-  const ready = await postWorker<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback']; servedModelUrl?: string }>(lc0InitMessage(runtime)).finally(() =>
-    operationSignal?.removeEventListener('abort', cancelInit),
-  );
+  const ready = await postWorker<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback']; servedModelUrl?: string }>(
+    lc0InitMessage(runtime),
+  ).finally(() => operationSignal?.removeEventListener('abort', cancelInit));
   if (operationSignal?.aborted) throw new DOMException('LC0 backend load cancelled', 'AbortError');
   if (searchWorker !== worker) throw new Error('LC0 worker invalidated during initialization');
   workerReady = true;
@@ -6034,7 +6034,11 @@ async function resolveAnalysisCpuDefault(family: EngineFamily): Promise<void> {
   } else if (family === 'berserk') {
     REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, onChange);
   } else if (family === 'plentychess') {
-    REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, onChange);
+    REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(
+      REQUESTED_PLENTYCHESS_VARIANT,
+      REQUESTED_PLENTYCHESS_EXPLICIT,
+      onChange,
+    );
   } else if (family === 'stormphrax') {
     REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(REQUESTED_STORMPHRAX_VARIANT, REQUESTED_STORMPHRAX_EXPLICIT, onChange);
   }
