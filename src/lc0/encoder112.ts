@@ -1,5 +1,6 @@
 import { type BoardState, type Color, type PieceRole, parseFen, START_FEN } from '../chess/board.ts';
 import { repetitionKey, rootRepetitionKey } from '../chess/drawRules.ts';
+import { f32ToF16Bits } from '../nn/float16.ts';
 
 export const LC0_CLASSICAL_112_PLANES = 112;
 export const LC0_HISTORY_PLANES = 8;
@@ -53,14 +54,21 @@ function perspectiveSquare(squareIndex: number, turn: Color): number {
   return turn === 'w' ? squareIndex : mirrorRanks(squareIndex);
 }
 
-function setAll(planes: Float32Array, maskWords: Uint32Array, values: number[], plane: number, value = 1): void {
-  maskWords[plane * 2] = 0xffffffff;
-  maskWords[plane * 2 + 1] = 0xffffffff;
-  values[plane] = value;
-  planes.fill(value, plane * LC0_BOARD_SQUARES, (plane + 1) * LC0_BOARD_SQUARES);
+type PlaneTarget = { planes: Float32Array | Uint16Array; offset: number; one: number; maskWords?: Uint32Array; values?: number[] };
+
+function setAll(target: PlaneTarget, plane: number, value = 1): void {
+  const { planes, offset, one, maskWords, values } = target;
+  if (maskWords && values) {
+    maskWords[plane * 2] = 0xffffffff;
+    maskWords[plane * 2 + 1] = 0xffffffff;
+    values[plane] = value;
+  }
+  const encoded = value === 1 ? one : one === 1 ? value : f32ToF16Bits(value);
+  const start = offset + plane * LC0_BOARD_SQUARES;
+  planes.fill(encoded, start, start + LC0_BOARD_SQUARES);
 }
 
-function setPiecePlanes(board: BoardState, planes: Float32Array, maskWords: Uint32Array, historySlot: number, perspectiveTurn: Color): void {
+function setPiecePlanes(board: BoardState, { planes, offset, one, maskWords }: PlaneTarget, historySlot: number, perspectiveTurn: Color): void {
   const base = historySlot * LC0_PLANES_PER_HISTORY;
   for (let source = 0; source < 64; source++) {
     const piece = board.squares[source];
@@ -70,8 +78,8 @@ function setPiecePlanes(board: BoardState, planes: Float32Array, maskWords: Uint
     const sideOffset = color === perspectiveTurn ? 0 : 6;
     const plane = base + sideOffset + ROLE_TO_OFFSET[role];
     const target = perspectiveSquare(source, perspectiveTurn);
-    planes[plane * LC0_BOARD_SQUARES + target] = 1;
-    maskWords[plane * 2 + (target >>> 5)] |= 1 << (target & 31);
+    planes[offset + plane * LC0_BOARD_SQUARES + target] = one;
+    if (maskWords) maskWords[plane * 2 + (target >>> 5)] |= 1 << (target & 31);
   }
 }
 
@@ -110,7 +118,7 @@ function boardBeforeEpDoublePush(board: BoardState): BoardState {
   };
 }
 
-function setClassicalAuxPlanes(board: BoardState, planes: Float32Array, maskWords: Uint32Array, values: number[]): void {
+function setClassicalAuxPlanes(board: BoardState, target: PlaneTarget): void {
   const us = board.turn;
   const them = opposite(us);
   const rights = board.castling === '-' ? '' : board.castling;
@@ -119,14 +127,14 @@ function setClassicalAuxPlanes(board: BoardState, planes: Float32Array, maskWord
   const theirQueenSide = them === 'w' ? 'Q' : 'q';
   const theirKingSide = them === 'w' ? 'K' : 'k';
 
-  if (rights.includes(queenSide)) setAll(planes, maskWords, values, LC0_AUX_PLANE_BASE + 0);
-  if (rights.includes(kingSide)) setAll(planes, maskWords, values, LC0_AUX_PLANE_BASE + 1);
-  if (rights.includes(theirQueenSide)) setAll(planes, maskWords, values, LC0_AUX_PLANE_BASE + 2);
-  if (rights.includes(theirKingSide)) setAll(planes, maskWords, values, LC0_AUX_PLANE_BASE + 3);
-  if (board.turn === 'b') setAll(planes, maskWords, values, LC0_AUX_PLANE_BASE + 4);
-  setAll(planes, maskWords, values, LC0_AUX_PLANE_BASE + 5, board.halfmove);
+  if (rights.includes(queenSide)) setAll(target, LC0_AUX_PLANE_BASE + 0);
+  if (rights.includes(kingSide)) setAll(target, LC0_AUX_PLANE_BASE + 1);
+  if (rights.includes(theirQueenSide)) setAll(target, LC0_AUX_PLANE_BASE + 2);
+  if (rights.includes(theirKingSide)) setAll(target, LC0_AUX_PLANE_BASE + 3);
+  if (board.turn === 'b') setAll(target, LC0_AUX_PLANE_BASE + 4);
+  setAll(target, LC0_AUX_PLANE_BASE + 5, board.halfmove);
   // Plane 110 (kAuxPlaneBase + 6) is the retired move-count plane and stays zero.
-  setAll(planes, maskWords, values, LC0_AUX_PLANE_BASE + 7);
+  setAll(target, LC0_AUX_PLANE_BASE + 7);
 }
 
 function parseHistoryInput(input: Lc0EncoderInput): { board: BoardState; historyBoards: BoardState[]; explicitHistory: boolean } {
@@ -141,12 +149,8 @@ function parseHistoryInput(input: Lc0EncoderInput): { board: BoardState; history
   return { board, historyBoards: [board], explicitHistory: false };
 }
 
-export function encodeLc0Classical112(boardOrFen: Lc0EncoderInput, options?: { historyFill?: Lc0HistoryFill }): Lc0EncodedPlanes112 {
+function encodePlanes(boardOrFen: Lc0EncoderInput, historyFill: Lc0HistoryFill, target: PlaneTarget): void {
   const { board, historyBoards, explicitHistory } = parseHistoryInput(boardOrFen);
-  const historyFill = options?.historyFill ?? 'fen_only';
-  const planes = new Float32Array(LC0_CLASSICAL_112_PLANES * LC0_BOARD_SQUARES);
-  const maskWords = new Uint32Array(LC0_CLASSICAL_112_PLANES * 2);
-  const values = Array<number>(LC0_CLASSICAL_112_PLANES).fill(1);
 
   // Repetition flags come from real positions only; synthetic slots repeat the
   // oldest position, which has no earlier position to repeat.
@@ -169,7 +173,7 @@ export function encodeLc0Classical112(boardOrFen: Lc0EncoderInput, options?: { h
   }
 
   for (let i = 0; i < Math.min(historyBoards.length, LC0_HISTORY_PLANES); i++) {
-    setPiecePlanes(historyBoards[i], planes, maskWords, i, board.turn);
+    setPiecePlanes(historyBoards[i], target, i, board.turn);
     if (i >= realSlots || !explicitHistory) continue;
     // Each slot has its own reversible horizon: slots before a recent pawn
     // move/capture can still repeat positions outside the current board's horizon.
@@ -179,11 +183,23 @@ export function encodeLc0Classical112(boardOrFen: Lc0EncoderInput, options?: { h
     for (let j = i + 1; j <= end; j++) {
       const earlierKey = j === realSlots - 1 ? rootRepetitionKey(historyBoards[j]) : repetitionKey(historyBoards[j]);
       if (key !== earlierKey) continue;
-      setAll(planes, maskWords, values, i * LC0_PLANES_PER_HISTORY + 12);
+      setAll(target, i * LC0_PLANES_PER_HISTORY + 12);
       break;
     }
   }
-  setClassicalAuxPlanes(board, planes, maskWords, values);
+  setClassicalAuxPlanes(board, target);
+}
+
+export function encodeLc0PlanesInto(input: Lc0EncoderInput, planes: Float32Array | Uint16Array, offset: number, historyFill: Lc0HistoryFill): void {
+  planes.fill(0, offset, offset + LC0_CLASSICAL_112_PLANES * LC0_BOARD_SQUARES);
+  encodePlanes(input, historyFill, { planes, offset, one: planes instanceof Uint16Array ? 0x3c00 : 1 });
+}
+
+export function encodeLc0Classical112(boardOrFen: Lc0EncoderInput, options?: { historyFill?: Lc0HistoryFill }): Lc0EncodedPlanes112 {
+  const planes = new Float32Array(LC0_CLASSICAL_112_PLANES * LC0_BOARD_SQUARES);
+  const maskWords = new Uint32Array(LC0_CLASSICAL_112_PLANES * 2);
+  const values = Array<number>(LC0_CLASSICAL_112_PLANES).fill(1);
+  encodePlanes(boardOrFen, options?.historyFill ?? 'fen_only', { planes, offset: 0, one: 1, maskWords, values });
 
   // Only diagnostic/test callers read masks. Keep that API without BigInt work
   // on the inference path, including an all-squares mask for a zero rule50 plane.
