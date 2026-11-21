@@ -101,6 +101,39 @@ test('fold rejection lazily rederives verified raw input once and preserves unfo
   await created.evaluator.dispose();
 });
 
+for (const fold of [false, true]) {
+  test(`same-model WASM fallback works offline after WebGPU fails (fold=${fold})`, async (t) => {
+    const runtime = await import(`../src/nn/ortRuntime.ts?offlineFallback=${fold}`);
+    runtime.setRequestedOrtExecutionProviderForCurrentThread('auto');
+    runtime.setOrtDequantFoldForCurrentThread(fold);
+    t.mock.getter(globalThis, 'navigator', () => ({
+      gpu: { requestAdapter: async () => ({ features: new Set(['shader-f16']) }) },
+    }));
+    t.mock.method(console, 'warn', () => {});
+    const bytes = model();
+    const attempts = [];
+    const session = { async release() {} };
+    t.mock.method(runtime.InferenceSession, 'create', async (input, { executionProviders }) => {
+      attempts.push({ input, executionProviders });
+      if (executionProviders.includes('webgpu')) throw new Error('WebGPU backend init failed');
+      return session;
+    });
+    const reloadModel = t.mock.fn(async () => {
+      if (fold && attempts.length === 1) return bytes;
+      throw new Error('Network unavailable');
+    });
+
+    assert.equal(await runtime.createOrtSession(bytes, { reloadModel }), session);
+    assert.deepEqual(
+      attempts.map(({ executionProviders }) => executionProviders),
+      fold ? [['webgpu'], ['webgpu'], ['wasm']] : [['webgpu'], ['wasm']],
+    );
+    assert.equal(attempts.at(-1).input, attempts.at(-2).input);
+    assert.equal(reloadModel.mock.callCount(), fold ? 1 : 0);
+    await runtime.releaseOrtSession(session);
+  });
+}
+
 test('owned unfolded input is collectible while native creation of the folded session is still pending', () => {
   const selector = new URL('../src/lc0/lc0SmallModelSelection.ts', import.meta.url).href;
   const evaluator = new URL('../src/lc0/onnxEvaluator.ts', import.meta.url).href;
