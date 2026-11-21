@@ -378,6 +378,7 @@ function ctxRenderMaia3Controls(ctx: PlayContext): void {
   const isMaia3 = ctxDraftEngine(ctx).family === 'maia3';
   ctx.dom.el('maia3Controls').hidden = !isMaia3;
   ctx.dom.el('maia3Advanced').hidden = !isMaia3;
+  ctx.dom.el('detailsLabel').textContent = isMaia3 ? 'Exact rating & opponent details' : 'Opponent details';
   const elo = ctxSelectedMaia3Elo(ctx);
   ctx.dom.el('maia3EloValue').textContent = String(elo);
   ctx.dom.el('maia3Elo').setAttribute('aria-valuetext', `${elo} rating · ${maiaRatingBand(elo)}`);
@@ -1449,8 +1450,6 @@ function ctxRenderChrome(ctx: PlayContext, shownPly: number): void {
   change.setAttribute('aria-expanded', String(ctx.configOpen));
   change.textContent = ctx.configOpen ? 'Done' : 'Change opponent';
   change.title = ctx.configOpen ? '' : 'Change opponent (asks before restarting the game)';
-  const detailsLabel = ctx.dom.maybeEl('detailsLabel');
-  if (detailsLabel) detailsLabel.textContent = option.family === 'maia3' ? 'Exact rating & opponent details' : 'Opponent details';
 
   const newGame = ctx.dom.buttonEl('newGame');
   newGame.classList.toggle('primary', phase === 'setup');

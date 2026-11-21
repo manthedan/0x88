@@ -121,3 +121,10 @@ test('Play looks up nothing in document: every lookup is confined to its mount r
   const page = readFileSync(new URL('../src/routes/app/play/+page.svelte', import.meta.url), 'utf8');
   assert.doesNotMatch(page, /document\.(getElementById|querySelector|querySelectorAll)\(/);
 });
+
+test('Play’s mid-game setup uses the sidebar scroll area instead of clipping the colour picker in an inner pane', () => {
+  const page = readFileSync(new URL('../src/routes/app/play/+page.svelte', import.meta.url), 'utf8');
+  assert.match(page, /\[data-config=open\]\) \.setup-pane\{flex:none;/);
+  assert.match(page, /\.play-workspace \.play-sidebar\{[^}]*overflow:auto;/);
+  assert.doesNotMatch(page, /\.setup-pane\{[^}]*max-height:/);
+});
