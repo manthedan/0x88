@@ -168,6 +168,39 @@ for (const cancel of [false, true]) {
   });
 }
 
+for (const stage of ['prefetch', 'session init']) {
+  test(`Arena Stop settles a warm search while its replacement is stalled in ${stage}`, async (t) => {
+    const workers = fakeWorkers(t);
+    let prefetchSignal;
+    let loads = 0;
+    const searcher = new Bt4WorkerSearcher(BT4_NET, (_config, { signal }) => {
+      if (++loads !== 2 || stage !== 'prefetch') return;
+      prefetchSignal = signal;
+      return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+    });
+    t.after(() => searcher.dispose());
+    const init = searcher.init();
+    ready(workers[0], 'auto->webgpu');
+    await init;
+    const controller = new AbortController();
+    const search = searcher.search(START_FEN, { signal: controller.signal, visits: 10 });
+    await tick();
+    assert.equal(workers[0].posted.at(-1).type, 'search');
+    workers[0].emit(loss);
+    await tick();
+    if (stage === 'prefetch') assert.equal(prefetchSignal.aborted, false);
+    else assert.equal(workers[1].posted[0].type, 'init');
+    controller.abort();
+    assert.equal(await Promise.race([search.then((result) => result.cancelled), tick().then(() => 'stuck')]), true);
+    if (stage === 'prefetch') {
+      assert.equal(prefetchSignal.aborted, true);
+      assert.equal(workers.length, 1);
+    } else {
+      assert.equal(workers[1].terminated, true);
+    }
+  });
+}
+
 test('a big-net inference error without device loss is reported without starting another worker', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const workers = fakeWorkers(t);

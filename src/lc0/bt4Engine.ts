@@ -420,6 +420,7 @@ export class Bt4WorkerSearcher {
    * LC0_MODEL_DOWNLOAD_NOT_APPROVED instead. An init already in flight is shared as is.
    */
   async init(options: { evalCacheEntries?: number; noDownload?: boolean; signal?: AbortSignal } = {}): Promise<string> {
+    options.signal?.throwIfAborted();
     const evalCacheEntries = normalizedEvalCacheEntries(options.evalCacheEntries);
     const diagnostics = bigNetDiagnosticRequest(this.config);
     const diagnosticKey = JSON.stringify(diagnostics);
@@ -436,7 +437,9 @@ export class Bt4WorkerSearcher {
     }
     // Pool/page teardown during the wait must not resurrect an unowned worker.
     if (generation !== this.lifecycleGeneration) throw new Error('Lc0 BT4 worker disposed');
+    options.signal?.throwIfAborted();
     if (this.initPromise) return this.initPromise;
+    const recoverySignal = this.deviceFailure ? options.signal : undefined;
     const initializing = (async () => {
       // WebGPU-first with wasm-CPU fallback: 'auto' resolves to
       // ['webgpu','wasm'] when an adapter is usable and ['wasm'] otherwise,
@@ -514,7 +517,16 @@ export class Bt4WorkerSearcher {
       throw error;
     });
     this.initPromise = initializing;
-    return initializing;
+    if (!recoverySignal) return initializing;
+    const stopRecovery = () => {
+      if (this.initPromise === initializing) void this.dispose();
+    };
+    recoverySignal.addEventListener('abort', stopRecovery, { once: true });
+    try {
+      return await initializing;
+    } finally {
+      recoverySignal.removeEventListener('abort', stopRecovery);
+    }
   }
 
   private startWorker(): Worker {
