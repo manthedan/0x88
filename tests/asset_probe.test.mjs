@@ -306,7 +306,7 @@ test('the shared helper keeps exhausted probes missing without more requests', a
   assert.equal(await probeAssetUrls(urls), 'missing');
   t.mock.timers.tick(120_000);
   assert.equal(await probeAssetUrls(urls), 'missing');
-  assert.equal(fetch.mock.callCount(), 3);
+  assert.equal(fetch.mock.callCount(), 6, 'three HEADs plus three cache attempts');
 });
 
 // Match Analysis/Arena: every callback is a fresh closure, and each render
@@ -473,14 +473,12 @@ for (const exit of ['unsubscribe', 'abort', 'never called again']) {
     const controller = new AbortController();
     let notifications = 0;
     let finish;
-    t.mock.method(
-      globalThis,
-      'fetch',
-      () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        }),
-    );
+    t.mock.method(globalThis, 'fetch', (_url, options) => {
+      if (options.method !== 'HEAD') return Promise.resolve(new Response(null, { status: 503 }));
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    });
     const unsubscribe = subscribeAssetProbeChange(urls, () => notifications++, controller.signal);
     const probe = probeAssetUrls(urls);
     if (exit === 'unsubscribe') unsubscribe();
