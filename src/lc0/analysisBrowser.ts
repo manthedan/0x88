@@ -1152,6 +1152,7 @@ async function workerLc0Lines(
   positions: BoardState[],
   requestedMultiPv: number,
   label = 'Lc0',
+  onFirstLine?: () => void,
 ): Promise<AnalysisLine[]> {
   let searchId: number | null = null;
   try {
@@ -1163,6 +1164,7 @@ async function workerLc0Lines(
       },
       (progress) => {
         workerSearchWarm = true;
+        if (progress.visits > 0) onFirstLine?.();
         showAnalysisProgress(runId, fen, label, progress);
       },
     );
@@ -4220,6 +4222,13 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     };
     if (lineGroups.some((lines) => lines.length > 0)) publishLines();
     else renderEngineComparison([]);
+    const smallFirstLine =
+      runRows.length === 2 &&
+      needsSmallLc0Backend &&
+      runRows.some((row) => row.family === 'sf' && row.variant === 'lite') &&
+      (smallLc0Pending || (workerReady && !workerSearchWarm))
+        ? Promise.withResolvers<void>()
+        : undefined;
     const tasks: Promise<void>[] = [];
     let hadTaskFailure = false;
     let retryAfterDeviceLoss = false;
@@ -4262,7 +4271,11 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     for (let index = 0; index < runRows.length; index++) {
       const row = runRows[index];
       const cacheKey = snapshot.rowKeys[index];
-      if (!options.force && engineLineCache.has(cacheKey) && !(smallLc0Pending && row.family === 'lc0' && !isLc0BigNetVariant(row.variant))) continue;
+      const smallRow = row.family === 'lc0' && !isLc0BigNetVariant(row.variant);
+      if (!options.force && engineLineCache.has(cacheKey) && !(smallLc0Pending && smallRow)) {
+        if (smallRow) smallFirstLine?.resolve();
+        continue;
+      }
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
         const key = row.variant;
         const initError = bigNetInitErrors.get(key);
@@ -4277,16 +4290,16 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       } else if (row.family === 'lc0') {
         const label = 'Lc0';
         pushTask(index, label, async () => {
-          if (smallLc0Pending) {
-            const loaded = await untilAborted(ensureSmallLc0ForAnalysis(), controller.signal);
-            controller.signal.throwIfAborted();
-            if (!loaded) throw new Error('Lc0 Small failed to load');
-            rowKeys[index] = analysisRunRowKey({ ...snapshot, servedModels: { ...snapshot.servedModels, small: lc0ServedModelUrl } }, row);
-            activeAnalysisSelectionKey = selectionCacheKey = rowKeys.join('\u0001');
-          }
-          if (workerReady) return workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label);
-          return searcher!
-            .search(
+          try {
+            if (smallLc0Pending) {
+              const loaded = await untilAborted(ensureSmallLc0ForAnalysis(), controller.signal);
+              controller.signal.throwIfAborted();
+              if (!loaded) throw new Error('Lc0 Small failed to load');
+              rowKeys[index] = analysisRunRowKey({ ...snapshot, servedModels: { ...snapshot.servedModels, small: lc0ServedModelUrl } }, row);
+              activeAnalysisSelectionKey = selectionCacheKey = rowKeys.join('\u0001');
+            }
+            if (workerReady) return await workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label, smallFirstLine?.resolve);
+            const result = await searcher!.search(
               { positions: analysisPositions },
               {
                 visits: row.strength,
@@ -4294,10 +4307,16 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
                 multiPv: analysisMultiPv,
                 signal: controller.signal,
                 yieldEveryMs: 16,
-                onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
+                onProgress: (progress) => {
+                  if (progress.visits > 0) smallFirstLine?.resolve();
+                  showAnalysisProgress(runId, fen, label, progress);
+                },
               },
-            )
-            .then((result) => lc0AnalysisLines(result, fen, 'Lc0'));
+            );
+            return lc0AnalysisLines(result, fen, 'Lc0');
+          } finally {
+            smallFirstLine?.resolve();
+          }
         });
       } else if (row.family === 'centipawn') {
         const positions = analysisPositions;
@@ -4335,8 +4354,9 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         const stockfishUrl = stockfishFlavorUrl(
           threadedStockfishAvailable() ? (kind === 'lite' ? 'lite-threaded' : 'threaded') : kind === 'lite' ? 'lite-single' : 'single',
         );
-        pushTask(index, label, (beginSearch) =>
-          engines.withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
+        pushTask(index, label, async (beginSearch) => {
+          if (smallFirstLine) await untilAborted(smallFirstLine.promise, controller.signal);
+          return engines.withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
             const engine = engines.getStockfish(kind);
             engines.cpuSessions.setThreads(engine, Math.min(lease.threads, engine.maxThreads()));
             await engines.prepareCpuEngine(
@@ -4354,8 +4374,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
               engines.analyzeCpuPosition(engine, row, fen, cpuPosition, { multipv: analysisMultiPv, depth: row.strength, signal }),
             );
             return stockfishAnalysisLines(infos, fen, label);
-          }),
-        );
+          });
+        });
       } else if (row.family === 'viridithas') {
         const variant = viridithasVariantForKey(row.variant);
         const label = `${variant.label}`;

@@ -240,7 +240,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     const criticalDeferredMaia = false;
     // Lc0 Small: the selected runtime vs the one the loaded worker backend runs.
     let currentRuntime = smallLc0Runtime ?? 'onnx', backendRuntime = currentRuntime;
-    let workerReady = smallLc0Runtime !== null;
+    let workerReady = smallLc0Runtime !== null, workerSearchWarm = workerReady;
     const smallSearchLog = [];
     const workerLc0Lines = async (_runId, _fen, _visits, _positions, searchedMultiPv, engine) => {
       smallSearchLog.push(backendRuntime);
@@ -1279,7 +1279,7 @@ test('changing engines after Stop does not wait for a cancelled big-net init to 
     }
   }));
 
-test('Stockfish Lite publishes a line while Lc0 Small is loading in the same run', async () => {
+test('the default pair gives a cold Lc0 Small the first line before starting Stockfish Lite', async () => {
   const small = { family: 'lc0', variant: 'small', strength: 64 };
   const sf = { family: 'sf', variant: 'lite', strength: 12 };
   const page = analysisPage({ rows: [small, sf], searchers: new Map() });
@@ -1287,18 +1287,15 @@ test('Stockfish Lite publishes a line while Lc0 Small is loading in the same run
   const running = page.analyzeCurrent();
   try {
     await new Promise(setImmediate);
-    assert.deepEqual(
-      page.published.at(-1)?.map((line) => line.engine),
-      ['SF Lite'],
-    );
+    assert.equal(page.published.length, 0);
     assert.deepEqual(page.smallSearchLog, []);
   } finally {
     release();
     await running;
   }
   assert.deepEqual(
-    page.published.at(-1).map((line) => line.engine),
-    ['Lc0', 'SF Lite'],
+    page.published.map((lines) => lines.map((line) => line.engine)),
+    [['Lc0'], ['Lc0', 'SF Lite']],
   );
   assert.equal(page.admissions.length, 1);
   assert.deepEqual([...page.completeAnalysisKeys], [page.analysisSelectionCacheKey()]);
