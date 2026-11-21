@@ -71,19 +71,19 @@ export const ENGINE_ARTIFACT_PINS = {
     br: '6145c2820e3fc85150f8dcc49b99b16d3085bf7a2432b47b59c25ada59f6fd20',
   },
   '/reckless/reckless-browser-api-simd128-external.wasm': {
-    sha256: '70e6e51e05005c74731ed86f188df307c20b67aa55d34ade82eeec48c711b881',
-    bytes: 1260734,
-    br: 'bc04fd5fe17eeff451b7aef65d1184c8cda223dac4e72a09d6e3ad7ad47d57de',
+    sha256: '0d94778815cb15891404f324ecf19b4aa1faadd0877b6f6382feb7755a60733a',
+    bytes: 1259758,
+    br: 'db03a2de379e8146c5dfb047be859f63ce82e3e48c95079a9ddce940d6de21c7',
   },
   '/reckless/reckless-browser-api-simd128.wasm': {
-    sha256: '0508ea093f2abcf7486c17ac1ec4a1051e2591030473d834f49eab44c7528f39',
-    bytes: 64527528,
-    br: '83eaf6ab780dff1bbdf265844eb5ae409325a36bc5e8a2bd770fefff2bd6d51d',
+    sha256: '9d79c86077f56688424c8dc4ad84a97a0d39eadb6a41bce76e3dcd55a2dcc84b',
+    bytes: 64526504,
+    br: '2d2ff835625e0ece1b370f8c9a9e6f63c82c1c8844d4e523ea031419a843dfda',
   },
   '/reckless/reckless-browser-api.wasm': {
-    sha256: 'f95e77137f503ef7a90537312ea13cf567ecac0ed1a29402e22a74a4dc07c264',
-    bytes: 64525912,
-    br: 'ae2c759296844fcdd5f6450de2147b26f487e86a4c589cfe592741a12e503ccb',
+    sha256: '5598ed8c4e60cd231cd4da5b08be52f6b2e1e390b3bd25aaf0f2cc4addc438df',
+    bytes: 64524888,
+    br: 'd1db5fc254d8130d39f16cb60963ba3b90d1706133481a76b856607a281768b1',
   },
   '/reckless/reckless-relaxed-simd128.wasm': {
     sha256: '9f7a707306870793b483a7dd920a6fb33b9b45339dc7c5e1807dbe4a24261ec5',

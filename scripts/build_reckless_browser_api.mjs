@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { configureRecklessWasiStop } from './lib/reckless_wasi_stop.mjs';
 
 const source = resolve(process.env.RECKLESS_SOURCE_DIR ?? '.local_engines/reckless-wasi-src');
 const workdir = resolve(process.env.RECKLESS_BROWSER_API_BUILD_DIR ?? '.local_engines/reckless-browser-api-build');
@@ -242,6 +243,7 @@ if (sourceL1Size !== 768 && !allowCustomNnueShape) {
 rmSync(workdir, { recursive: true, force: true });
 mkdirSync(dirname(workdir), { recursive: true });
 run('rsync', ['-a', '--exclude', '.git', '--exclude', 'target', `${source}/`, `${workdir}/`]);
+configureRecklessWasiStop(workdir, false);
 
 replace(
   `${workdir}/Cargo.toml`,

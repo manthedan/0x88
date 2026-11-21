@@ -1,6 +1,6 @@
 {
   "schema": "0x88.hosted-artifact-index.v1",
-  "generatedAt": "2026-11-21T17:45:21.592Z",
+  "generatedAt": "2026-11-21T18:24:07.944Z",
   "generatedBy": "scripts/write_artifact_index.mjs (npm run artifact-index)",
   "documentationPath": "docs/hosted_artifacts.md",
   "distributionPolicyPath": "docs/engine_artifact_distribution.md",
