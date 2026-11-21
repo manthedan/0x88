@@ -9,11 +9,13 @@ import { terminateEngineWorker } from '../src/lc0/engineRetirement.ts';
 // stubbed. Importing the page would mount its DOM and load model assets.
 const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
 const functions = source.slice(source.indexOf('function postWorker<T>'), source.indexOf('function analysisProgressText('));
-function controller() {
+function controller({ holdInit = false } = {}) {
   const workers = [];
+  const progress = [];
   class Worker {
     listeners = new Map();
     terminated = false;
+    posted = [];
     constructor() {
       workers.push(this);
     }
@@ -32,8 +34,9 @@ function controller() {
       for (const listener of this.listeners.get(type) ?? []) listener(data);
     }
     postMessage(message) {
+      this.posted.push(message);
       if (message.type === 'dispose') queueMicrotask(() => this.emit('message', { data: { id: message.id, type: 'disposed' } }));
-      if (message.type === 'init') queueMicrotask(() => this.emit('message', { data: { id: message.id, type: 'ready', backend: 'fake' } }));
+      if (message.type === 'init' && !holdInit) queueMicrotask(() => this.emit('message', { data: { id: message.id, type: 'ready', backend: 'fake' } }));
     }
     terminate() {
       this.terminated = true;
@@ -47,15 +50,32 @@ function controller() {
     const trackEngineRetirement = (promise) => promise;
     const selectedLc0Runtime = () => 'onnx', lc0InitMessage = () => ({ type: 'init' });
     const publishBrowserRuntimeAudit = () => {}, lc0ResolvedRuntime = () => 'fake', multiPv = () => 1;
-    const showModelProgress = () => {}, MODEL_URL = '/unused', LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole';
+    const showModelProgress = (...args) => progress.push(args), MODEL_URL = '/unused', LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole';
     const LC0_WHOLE_MODEL_MANIFEST_URL = '', PACK_URL = '';
     ${functions.replaceAll('import.meta.url', "'file:///test/analysisBrowser.ts'")}
     return { initWorker, postWorker, resetSearchWorker, snapshot: () => ({ workerReady, workerBackend, workerRuntime }) };
   `,
     { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
   );
-  return { ...new Function('Worker', 'disposeOrtWorker', 'terminateEngineWorker', code)(Worker, disposeOrtWorker, terminateEngineWorker), workers };
+  const api = new Function('Worker', 'disposeOrtWorker', 'terminateEngineWorker', 'progress', code)(Worker, disposeOrtWorker, terminateEngineWorker, progress);
+  return { ...api, workers, progress };
 }
+
+test('stopping a run retires pending Lc0 init and ignores its late progress', async () => {
+  const api = controller({ holdInit: true });
+  const run = new AbortController();
+  const initializing = api.initWorker(run.signal);
+  const worker = api.workers[0];
+  const [{ id }] = worker.posted;
+  worker.emit('message', { data: { id, type: 'downloadProgress', loadedBytes: 10 } });
+  assert.equal(api.progress.length, 1);
+  run.abort();
+  assert.deepEqual(worker.posted.map(({ type }) => type), ['init', 'cancel', 'dispose']);
+  worker.emit('message', { data: { id, type: 'downloadProgress', loadedBytes: 20 } });
+  await assert.rejects(initializing, { name: 'AbortError' });
+  assert.equal(api.progress.length, 1);
+  assert.equal(worker.terminated, true);
+});
 
 for (const type of ['error', 'messageerror']) {
   test(`S01: Analysis post-init ${type} invalidates the backend and retry creates a new worker`, async () => {

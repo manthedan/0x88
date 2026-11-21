@@ -942,9 +942,15 @@ async function initWorker(operationSignal?: AbortSignal): Promise<string> {
     if (searchWorker === worker) resetSearchWorker(new Error('LC0 worker message could not be decoded'));
   });
   const runtime = selectedLc0Runtime();
-  const ready = await postWorker<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback']; servedModelUrl?: string }>(lc0InitMessage(runtime));
-  if (searchWorker !== worker) throw new Error('LC0 worker invalidated during initialization');
+  const cancelInit = () => {
+    if (searchWorker === worker) resetSearchWorker('LC0 backend load cancelled');
+  };
+  operationSignal?.addEventListener('abort', cancelInit, { once: true });
+  const ready = await postWorker<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback']; servedModelUrl?: string }>(lc0InitMessage(runtime)).finally(() =>
+    operationSignal?.removeEventListener('abort', cancelInit),
+  );
   if (operationSignal?.aborted) throw new DOMException('LC0 backend load cancelled', 'AbortError');
+  if (searchWorker !== worker) throw new Error('LC0 worker invalidated during initialization');
   workerReady = true;
   workerBackend = ready.backend;
   workerRuntime = runtime;
