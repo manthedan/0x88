@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { ENGINE_PROFILE_BACKUP_KIND, engineSetupRuntime, normalizeEngineProfiles } from '../src/lc0/engineSetups.ts';
 
@@ -65,6 +66,42 @@ test('large-net setup confirmation reads metadata without allocating an engine s
   );
   assert.match(guard, /if \(!allowed\) next.variant = 'small'/);
   assert.doesNotMatch(guard, /bigNetFor\(|acquireBigNetSearcher\(/);
+});
+
+test('a large-net setup waits for its nets to become available before asking for consent', async () => {
+  const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+  const loader = source.slice(source.indexOf('async function profileRowsForUse('), source.indexOf('function loadEngineProfiles('));
+  const pending = Promise.withResolvers();
+  const checks = [];
+  const prompts = [];
+  const present = new Set();
+  const deps = {
+    BIG_NETS: { bt4: { key: 'bt4' }, t3: { key: 't3' } },
+    normalizeDeployEngineRow: (row) => row,
+    clampStrengthForRow: (row) => row.strength,
+    isLc0BigNetVariant: (key) => key === 'bt4' || key === 't3',
+    phoneBigNetBlocked: () => false,
+    bigNetSelectable: ({ key }) => present.has(key),
+    checkBigNetAsset: async ({ key }) => {
+      checks.push(key);
+      await pending.promise;
+      present.add(key);
+      return 'present';
+    },
+    requestAnalysisBigNetConsent: async ({ key }) => {
+      prompts.push(key);
+      return true;
+    },
+  };
+  const load = new Function(...Object.keys(deps), `${stripTypeScriptTypes(loader)}; return profileRowsForUse;`)(...Object.values(deps));
+  const rows = ['bt4', 't3'].map((variant) => ({ family: 'lc0', variant, strength: 100 }));
+  const loading = load(rows, true, new AbortController().signal);
+  assert.deepEqual(checks, ['bt4']);
+  assert.deepEqual(prompts, []);
+  pending.resolve();
+  assert.deepEqual(await loading, rows);
+  assert.deepEqual(checks, ['bt4', 't3']);
+  assert.deepEqual(prompts, ['bt4', 't3']);
 });
 
 test('normal saved setups cannot activate developer-only runtimes, including on restore/import', () => {

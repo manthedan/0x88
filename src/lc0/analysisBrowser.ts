@@ -1293,6 +1293,8 @@ async function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean, sig
     const next = normalizeDeployEngineRow({ ...row, strength: clampStrengthForRow(row) }, 'analysis', index);
     if (next.family === 'lc0' && isLc0BigNetVariant(next.variant)) {
       const config = BIG_NETS[next.variant];
+      if (allowBt4Prompt && !phoneBigNetBlocked(config.key) && !bigNetSelectable(config)) await checkBigNetAsset(config);
+      if (signal?.aborted) return [];
       const allowed =
         !phoneBigNetBlocked(config.key) &&
         bigNetSelectable(config) &&
