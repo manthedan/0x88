@@ -907,8 +907,8 @@ function recordSessionAttempt(providers: string[], ok: boolean, ms: number, erro
 
 function logOrtSessionReady(providers: string[], ms: number, note?: string) {
   const message = providers.includes('webgpu')
-    ? 'Centipawn ORT: session ready with WebGPU provider requested/accepted.'
-    : 'Centipawn ORT: session ready with WASM provider.';
+    ? 'ORT: session ready with WebGPU provider requested/accepted.'
+    : 'ORT: session ready with WASM provider.';
   console.info(message, {
     requestedEp: requestedOrtExecutionProvider(),
     sessionProviders: providers,
@@ -1055,7 +1055,7 @@ async function ensureWebGpuAdapterProbed(requested = requestedOrtExecutionProvid
     const adapter = await requestOrtWebGpuAdapter();
     probedWebGpuAdapterUsable = !!adapter;
     probedWebGpuShaderF16 = gpuAdapterShaderF16(adapter);
-    if (probedWebGpuShaderF16 === false) console.info('Centipawn ORT: WebGPU adapter lacks shader-f16; ORT sessions run on WASM.');
+    if (probedWebGpuShaderF16 === false) console.info('ORT: WebGPU adapter lacks shader-f16; ORT sessions run on WASM.');
     if (adapter) probedWebGpuAdapterVendor = (await gpuAdapterVendor(adapter)) ?? '';
   } catch {
     probedWebGpuAdapterUsable = false;

@@ -78,7 +78,7 @@ export function createAdapter(dir) {
       if (html.split(BODY_TARGET).length !== 2) throw new Error(`404.html: expected one ${BODY_TARGET} from src/app.html`);
       await writeFile(file, html.replace(BODY_TARGET, BODY_TARGET + STATIC_NOT_FOUND));
       const pages = [...builder.prerendered.pages.values()].map((page) => join(dir, page.file));
-      await linkRootErrorNode(builder.getServerDirectory(), [...pages, file]);
+      await linkRootErrorNode(builder.getServerDirectory(), pages, file);
     },
   };
 }
@@ -86,15 +86,12 @@ export function createAdapter(dir) {
 // SvelteKit 3's client start() awaits the root error node (nodes/1) before hydrating any page, but
 // pages link only their own nodes. Linking it here starts that fetch with the others, and lets
 // public/sw.js precache it with the offline shell: without it an offline start never hydrates.
-// Kit's server output records each node's client chunks and SSR stylesheets; paths.base and
-// paths.assets are unset, so they live at /<file>. CSS is a preload, not a render-blocking sheet.
-async function linkRootErrorNode(serverDir, htmlFiles) {
+async function linkRootErrorNode(serverDir, pages, fallback) {
   const node = await import(pathToFileURL(join(serverDir, 'nodes', '1.js')).href);
-  const links = [
-    ...node.imports.map((path) => ({ href: `/${path}`, tag: `<link href="/${path}" rel="modulepreload">` })),
-    ...node.stylesheets.map((path) => ({ href: `/${path}`, tag: `<link href="/${path}" rel="preload" as="style">` })),
-  ];
-  for (const file of htmlFiles) {
+  const scripts = node.imports.map((path) => ({ href: `/${path}`, tag: `<link href="/${path}" rel="modulepreload">` }));
+  const styles = node.stylesheets.map((path) => ({ href: `/${path}`, tag: `<link href="/${path}" rel="stylesheet">` }));
+  for (const file of [...pages, fallback]) {
+    const links = file === fallback ? [...scripts, ...styles] : scripts;
     const html = await readFile(file, 'utf8');
     if (html.split('</head>').length !== 2) throw new Error(`${file}: expected one </head>`);
     const missing = links.filter((link) => !html.includes(`href="${link.href}"`)).map((link) => link.tag);

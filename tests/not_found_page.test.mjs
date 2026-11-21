@@ -59,11 +59,11 @@ test('the static adapter writes its fallback shell to 404.html with static not-f
   // Kit 3 hydration awaits the root error node, so every page links it (and sw.js precaches it).
   // Links a page already has are skipped: 404.html gets every chunk, the play page all but shared.js.
   const link = (path) => `<link href="/_app/immutable/${path}" rel="modulepreload">`;
-  const css = '<link href="/_app/immutable/assets/1.e.css" rel="preload" as="style">';
+  const css = '<link href="/_app/immutable/assets/1.e.css" rel="stylesheet">';
   assert.ok(html.startsWith(`<head>${link('nodes/1.e.js')}${link('chunks/shared.js')}${link('chunks/err.js')}${css}</head>`), html);
   assert.equal(
     await readFile(join(out, 'app/play/index.html'), 'utf8'),
-    `${playHead.replace('</head>', `${link('nodes/1.e.js')}${link('chunks/err.js')}${css}</head>`)}<body></body>`,
+    `${playHead.replace('</head>', `${link('nodes/1.e.js')}${link('chunks/err.js')}</head>`)}<body></body>`,
   );
   assert.equal(config.paths.relative, false, 'cached pages served at other depths need root-absolute build URLs');
   const errorPage = await readFile(join(repoRoot, 'src/routes/+error.svelte'), 'utf8');
