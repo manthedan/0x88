@@ -16,8 +16,8 @@ export interface AnalysisLine {
   scoreCp?: number;
   mateIn?: number;
   scoreText: string;
-  /** Depth (Stockfish) or visit count (LC0) summary. */
   detail: string;
+  engineSummary?: string;
   nodes?: number;
   nps?: number;
   pvUci: string[];
@@ -209,6 +209,7 @@ export function lc0AnalysisLines(result: Lc0SearchLike, fen: string, engine = 'L
       scoreCp,
       scoreText: formatCentipawns(scoreCp),
       detail: `${visits} visits`,
+      ...(index === 0 ? { engineSummary: `${result.visits} total visits` } : {}),
       nodes: visits,
       pvUci,
       pvSan: uciLineToSan(board, pvUci, 12),
