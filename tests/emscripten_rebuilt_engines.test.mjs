@@ -107,7 +107,7 @@ for (const [engine, suffixes] of Object.entries(tiers)) {
         mod.FS_createDataFile('/', unlinked[engine], new Uint8Array(), true, false, false);
       }
       command('uci');
-      command('setoption name Hash value 128');
+      command(`setoption name Hash value ${suffix ? 128 : 256}`);
       command('ucinewgame');
       command('isready');
       assert(stdout.includes('readyok'));

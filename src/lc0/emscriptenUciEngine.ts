@@ -61,8 +61,10 @@ export function emscriptenSearchTimeoutMs(options: EmscriptenUciOptions): number
   return 120000;
 }
 
+const MAX_HASH_MB = 256;
+
 function hashCommand(hashMb: number): string {
-  return `setoption name Hash value ${Math.max(2, Math.min(33554432, Math.floor(hashMb)))}`;
+  return `setoption name Hash value ${Math.max(2, Math.floor(hashMb))}`;
 }
 
 function threadsCommand(threads: number): string {
@@ -246,14 +248,21 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
   constructor(config: EmscriptenUciEngineConfig, options: Options, jsUrl: string, wasmUrl?: string, dataUrl?: string) {
     this.config = config;
     this.name = config.name;
-    this.options = options;
+    this.options = this.validateOptions(options);
     this.jsUrl = jsUrl;
     this.wasmUrl = wasmUrl;
     this.dataUrl = dataUrl;
   }
 
   setOptions(next: Options): void {
-    this.options = { ...this.options, ...next };
+    this.options = this.validateOptions({ ...this.options, ...next });
+  }
+
+  private validateOptions(options: Options): Options {
+    if (Math.floor(options.hashMb ?? 0) > MAX_HASH_MB) {
+      throw new RangeError(`${this.config.label} supports at most ${MAX_HASH_MB} MiB of Hash in the browser`);
+    }
+    return options;
   }
 
   private abortError(message = `${this.config.label} search aborted`): Error {

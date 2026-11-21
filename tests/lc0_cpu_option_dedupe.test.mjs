@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
 import { BerserkEngine } from '../src/lc0/berserkEngine.ts';
+import { PlentyChessEngine } from '../src/lc0/plentychessEngine.ts';
 import { StockfishEngine } from '../src/lc0/stockfishEngine.ts';
 import { StormphraxEngine } from '../src/lc0/stormphraxEngine.ts';
 
@@ -109,6 +110,27 @@ for (const Engine of [BerserkEngine, StormphraxEngine]) {
         await engine.bestMove(START_FEN);
         assert.notEqual(UciWorker.instances.at(-1), replacement);
         assert.deepEqual(options(UciWorker.instances.at(-1)), ['setoption name Hash value 32', 'setoption name Threads value 1']);
+      } finally {
+        engine.dispose();
+      }
+    }),
+  );
+}
+
+for (const Engine of [BerserkEngine, PlentyChessEngine, StormphraxEngine]) {
+  test(
+    `${Engine.name} rejects oversized Hash before starting or changing a worker`,
+    withWorkers(async () => {
+      const rangeError = { name: 'RangeError', message: /at most 256 MiB of Hash/ };
+      assert.throws(() => new Engine({ hashMb: 512 }), rangeError);
+      assert.equal(UciWorker.instances.length, 0);
+      const engine = new Engine({ hashMb: 256 });
+      try {
+        await engine.prewarm();
+        assert.throws(() => engine.setOptions({ hashMb: 1024 }), rangeError);
+        assert.equal(await engine.bestMove(START_FEN), 'e2e4');
+        assert.equal(UciWorker.instances.length, 1);
+        assert.deepEqual(options(UciWorker.instances[0]), ['setoption name Hash value 256']);
       } finally {
         engine.dispose();
       }
