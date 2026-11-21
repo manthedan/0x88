@@ -1,6 +1,6 @@
 {
   "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
-  "generatedAt": "2026-07-27T04:22:36.010Z",
+  "generatedAt": "2026-11-21T17:39:22.310Z",
   "distributionPolicy": "docs/engine_artifact_distribution.md",
   "engine": "stormphrax",
   "flavor": "emscripten-single-thread",
@@ -18,38 +18,38 @@
     "patches": [
       "patches/stormphrax-emscripten.patch"
     ],
-    "toolchain": "Emscripten 6.0.2, WebAssembly SIMD plus an explicit Relaxed SIMD candidate, synchronous single-thread search, tablebases disabled by leaving SyzygyPath empty."
+    "toolchain": "Emscripten 6.0.5 (1db513782be24469589d7cb8a1f1834e9a33f271)"
   },
   "artifacts": [
     {
       "path": "public/stormphrax/stormphrax-emscripten.js",
-      "bytes": 70611,
-      "sha256": "4c95a359f1c09760611d09ea6a3fa4a451407c699d14ef559940d37365a4bfec",
+      "bytes": 71340,
+      "sha256": "3e67d3529a9224013df3ade29294c243102c3de08e1e13080ec6b9fff3ceb294",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 19969,
-          "ratio": 0.2828
+          "bytes": 20214,
+          "ratio": 0.2833
         },
         "brotli": {
-          "bytes": 17708,
-          "ratio": 0.2508
+          "bytes": 17884,
+          "ratio": 0.2507
         }
       }
     },
     {
       "path": "public/stormphrax/stormphrax-emscripten.wasm",
-      "bytes": 697070,
-      "sha256": "0db54ba63defc45c55208545b6507f64bc9d277e47d3c4203e8070d9c7b1b294",
+      "bytes": 697948,
+      "sha256": "312720bec66068fff879d23db2cf4b4cbca945865fedecd4abf4dedfee0fe237",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 262418,
+          "bytes": 262779,
           "ratio": 0.3765
         },
         "brotli": {
-          "bytes": 201349,
-          "ratio": 0.2889
+          "bytes": 201363,
+          "ratio": 0.2885
         }
       }
     },
@@ -71,32 +71,32 @@
     },
     {
       "path": "public/stormphrax/stormphrax-emscripten-relaxed-simd128.js",
-      "bytes": 70691,
-      "sha256": "1a57e31fdfe4df209f0bfd1bddf250e5a9f621ea74c033091dfa7376a88f9f0f",
+      "bytes": 71420,
+      "sha256": "40b9fb42adebc947f24e3cfcac9dd7696e19155187391df03adf976557858b10",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 19984,
-          "ratio": 0.2827
+          "bytes": 20229,
+          "ratio": 0.2832
         },
         "brotli": {
-          "bytes": 17696,
-          "ratio": 0.2503
+          "bytes": 17940,
+          "ratio": 0.2512
         }
       }
     },
     {
       "path": "public/stormphrax/stormphrax-emscripten-relaxed-simd128.wasm",
-      "bytes": 697337,
-      "sha256": "cb39b34a7302b969ebe13c3137f00b0e950232fecc62d6c0c0b2296cf3faa4a6",
+      "bytes": 698215,
+      "sha256": "773ab96960036fc29de7ba63aa3b36a9b8d5e20b6e6b880bc2f10ab30e1b4628",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 11; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 262549,
-          "ratio": 0.3765
+          "bytes": 262929,
+          "ratio": 0.3766
         },
         "brotli": {
-          "bytes": 201411,
+          "bytes": 201678,
           "ratio": 0.2888
         }
       }
@@ -112,17 +112,17 @@
     }
   ],
   "totals": {
-    "bytes": 57450557,
-    "gzipBytes": 36445338,
-    "brotliBytes": 34367872,
+    "bytes": 57453771,
+    "gzipBytes": 36446569,
+    "brotliBytes": 34368573,
     "gzipRatio": 0.6344,
     "brotliRatio": 0.5982
   },
   "sourceArchive": {
     "required": true,
     "path": "public/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz",
-    "bytes": 37267795,
-    "sha256": "f6e043ae1f7dcef7f798f71614abb8cca2a272a6a3acb86a9b26fe7bc7d1252a",
+    "bytes": 37237924,
+    "sha256": "66022f4fa08024784fab42a9c1784fcf83de33a3fc48cdf510e5a39664441bbd",
     "url": "/stormphrax/stormphrax-emscripten-single-thread-corresponding-source.tar.gz",
     "note": "Source archive recorded for public distribution."
   }

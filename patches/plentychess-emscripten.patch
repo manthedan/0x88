@@ -2,10 +2,11 @@ diff --git a/src/nnue.cpp b/src/nnue.cpp
 index ecf36ce..62b9891 100644
 --- a/src/nnue.cpp
 +++ b/src/nnue.cpp
-@@ -3,6 +3,7 @@
+@@ -3,6 +3,8 @@
  #include <string.h>
  #include <cassert>
  #include <cmath>
++#include <cstdio>
 +#include <cstdlib>
  
  #include "nnue.h"
@@ -18,7 +19,7 @@ index ecf36ce..62b9891 100644
  #ifdef _MSC_VER
  #define SP_MSVC
  #pragma push_macro("_MSC_VER")
-@@ -29,6 +31,15 @@ INCBIN(NETWORK, EVALFILE);
+@@ -29,6 +32,15 @@ INCBIN(NETWORK, EVALFILE);
  #pragma pop_macro("_MSC_VER")
  #undef SP_MSVC
  #endif
@@ -34,7 +35,7 @@ index ecf36ce..62b9891 100644
  
  NetworkData* globalNetworkData;
  alignas(ALIGNMENT) uint16_t nnzLookup[256][8];
-@@ -38,6 +49,34 @@ NNZ nnz;
+@@ -38,6 +50,36 @@ NNZ nnz;
  #endif
  
  void initNetworkData() {
@@ -61,6 +62,8 @@ index ecf36ce..62b9891 100644
 +        std::cerr << "Unable to read network file " << EVALFILE << std::endl;
 +        std::abort();
 +    }
++    netFile.close();
++    std::remove(EVALFILE);
 +    globalNetworkData = reinterpret_cast<NetworkData*>(netPtr);
 +#else
 +    globalNetworkData = (NetworkData*)gNETWORKData;
@@ -69,7 +72,7 @@ index ecf36ce..62b9891 100644
      ThreatInputs::initialise();
  
      for (size_t i = 0; i < 256; i++) {
-@@ -48,7 +87,6 @@ void initNetworkData() {
+@@ -48,7 +90,6 @@ void initNetworkData() {
          }
      }
  
@@ -77,7 +80,7 @@ index ecf36ce..62b9891 100644
  }
  
  void NNUE::reset(Board* board) {
-@@ -585,7 +623,7 @@ Eval NNUE::evaluate(Board* board) {
+@@ -585,7 +626,7 @@ Eval NNUE::evaluate(Board* board) {
      // ---------------------- CONVERT TO FLOATS & ACTIVATE L1 ----------------------
  
      alignas(ALIGNMENT) float l1Outputs[2 * L2_SIZE];
@@ -86,7 +89,7 @@ index ecf36ce..62b9891 100644
  
      VecF psNorm = set1Ps(L1_NORMALISATION);
      VecF psZero = set1Ps(0.0f);
-@@ -613,7 +651,7 @@ Eval NNUE::evaluate(Board* board) {
+@@ -613,7 +654,7 @@ Eval NNUE::evaluate(Board* board) {
      alignas(ALIGNMENT) float l2Outputs[L3_SIZE];
      memcpy(l2Outputs, networkData->l2Biases[bucket], sizeof(l2Outputs));
  
@@ -95,7 +98,7 @@ index ecf36ce..62b9891 100644
      VecF* l2OutputsVec = reinterpret_cast<VecF*>(l2Outputs);
      for (int l1 = 0; l1 < 2 * L2_SIZE; l1++) {
          VecF l1Vec = set1Ps(l1Outputs[l1]);
-@@ -640,7 +678,7 @@ Eval NNUE::evaluate(Board* board) {
+@@ -640,7 +681,7 @@ Eval NNUE::evaluate(Board* board) {
  
      // ---------------------- L3 PROPAGATION ----------------------
  
@@ -104,6 +107,37 @@ index ecf36ce..62b9891 100644
      constexpr int chunks = 64 / sizeof(VecF);
  
      VecF resultSums[chunks];
+diff --git a/src/time.cpp b/src/time.cpp
+--- a/src/time.cpp
++++ b/src/time.cpp
+@@ -1,6 +1,13 @@
+ #include <chrono>
+ #include <atomic>
+ 
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++EM_JS(int, browserStopRequested, (), {
++    return Module['shouldStop']?.() ?? 0;
++});
++#endif
++
+ #include "time.h"
+ #include "uci.h"
+ #include "spsa.h"
+@@ -18,5 +25,12 @@ int64_t getTime() {
+ bool timeOver(SearchParameters& parameters, SearchData& data) {
+     if (parameters.ponder)
+         return false;
+-    return (data.maxTime && (data.nodesSearched.load(std::memory_order_relaxed) % 1024) == 0 && getTime() >= data.maxTime) || (parameters.nodes && data.nodesSearched.load(std::memory_order_relaxed) >= parameters.nodes * (1 + 9 * UCI::Options.datagen.value));
++    const auto nodes = data.nodesSearched.load(std::memory_order_relaxed);
++    if (nodes % 1024 == 0) {
++#ifdef __EMSCRIPTEN__
++        if (browserStopRequested()) return true;
++#endif
++        if (data.maxTime && getTime() >= data.maxTime) return true;
++    }
++    return parameters.nodes && nodes >= parameters.nodes * (1 + 9 * UCI::Options.datagen.value);
+ }
 diff --git a/src/simd.h b/src/simd.h
 index 97efedc..881e96d 100644
 --- a/src/simd.h

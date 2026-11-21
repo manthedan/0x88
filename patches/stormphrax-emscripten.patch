@@ -78,8 +78,9 @@ diff --git a/src/eval/nnue.cpp b/src/eval/nnue.cpp
 index f815c50..5bdacd7 100644
 --- a/src/eval/nnue.cpp
 +++ b/src/eval/nnue.cpp
-@@ -21,8 +21,9 @@
+@@ -21,8 +21,10 @@
  #include <cassert>
++#include <cstdio>
  #include <cstring>
  #include <fstream>
 +#include <limits>
@@ -88,7 +89,7 @@ index f815c50..5bdacd7 100644
  
  #include "../../3rdparty/zstd/zstd.h"
  
-@@ -34,23 +36,70 @@
+@@ -34,23 +37,72 @@
  #include "nnue/features/threats/geometry.h"
  #include "nnue/loader.h"
  
@@ -161,6 +162,8 @@ index f815c50..5bdacd7 100644
 +            g_defaultNetStorage = nullptr;
 +            return false;
 +        }
++        stream.close();
++        std::remove(SP_NETWORK_FILE);
 +        g_defaultNetData = g_defaultNetStorage;
 +        g_defaultNetSize = static_cast<unsigned int>(bytes);
 +        return true;
@@ -170,7 +173,7 @@ index f815c50..5bdacd7 100644
  
  namespace stormphrax::eval {
      namespace {
-@@ -198,6 +247,9 @@ namespace stormphrax::eval {
+@@ -198,6 +250,9 @@ namespace stormphrax::eval {
      } // namespace
  
      void init() {
@@ -328,6 +331,19 @@ diff --git a/src/search.cpp b/src/search.cpp
 index 94ebce1..c555ea3 100644
 --- a/src/search.cpp
 +++ b/src/search.cpp
+@@ -26,5 +26,12 @@
+ #include "uci/uci.h"
+ #include "util/numa/numa.h" // iei
+ #include "wdl.h"
++
++#ifdef SP_SYNC_SEARCH
++#include <emscripten.h>
++EM_JS(int, browserStopRequested, (), {
++    return Module['shouldStop']?.() ?? 0;
++});
++#endif
+ 
+ namespace stormphrax::search {
 @@ -59,8 +59,21 @@ namespace stormphrax::search {
      Searcher::Searcher(usize ttSizeMib) :
              m_ttable{ttSizeMib}, m_startTime{Instant::now()} {
@@ -418,6 +434,26 @@ index 94ebce1..c555ea3 100644
      }
  
      void Searcher::run(u32 threadId) {
+@@ -616,3 +647,8 @@ namespace stormphrax::search {
+         if (!kRootNode && thread.isMainThread() && thread.search.rootDepth > 1) {
+-            if (m_limiter->stopHard(thread.search.loadNodes())) {
++            const auto nodes = thread.search.loadNodes();
++            if (
++#ifdef SP_SYNC_SEARCH
++                (nodes % 1024 == 0 && browserStopRequested()) ||
++#endif
++                m_limiter->stopHard(nodes)) {
+                 m_stop.store(true, std::memory_order::relaxed);
+@@ -1462,3 +1498,8 @@ namespace stormphrax::search {
+         if (thread.isMainThread() && thread.search.rootDepth > 1) {
+-            if (m_limiter->stopHard(thread.search.loadNodes())) {
++            const auto nodes = thread.search.loadNodes();
++            if (
++#ifdef SP_SYNC_SEARCH
++                (nodes % 1024 == 0 && browserStopRequested()) ||
++#endif
++                m_limiter->stopHard(nodes)) {
+                 m_stop.store(true, std::memory_order::relaxed);
 diff --git a/src/ttable.cpp b/src/ttable.cpp
 index d6fee40..af91954 100644
 --- a/src/ttable.cpp

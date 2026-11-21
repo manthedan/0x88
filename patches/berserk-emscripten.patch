@@ -2052,17 +2052,35 @@ diff --git a/src/search.c b/src/search.c
 index 8fd10db..c0287b9 100644
 --- a/src/search.c
 +++ b/src/search.c
-@@ -31,7 +31,9 @@
+@@ -31,7 +31,16 @@
  #include "movegen.h"
  #include "movepick.h"
  #include "nn/accumulator.h"
++#ifdef __EMSCRIPTEN__
++#include <emscripten.h>
++EM_JS(int, browserStopRequested, (void), {
++  return Module['shouldStop']?.() ?? 0;
++});
++#endif
++
 +#ifndef BERSERK_NO_TB
  #include "pyrrhic/tbprobe.h"
 +#endif
  #include "see.h"
  #include "tb.h"
  #include "thread.h"
-@@ -99,7 +101,12 @@ void StartSearch(Board* board, uint8_t ponder) {
+@@ -69,6 +78,10 @@ INLINE int CheckLimits(ThreadData* thread) {
+   if (--thread->calls > 0)
+     return 0;
+   thread->calls = Limits.hitrate;
++#ifdef __EMSCRIPTEN__
++  if (browserStopRequested())
++    return 1;
++#endif
+ 
+   if (Threads.ponder)
+     return 0;
+@@ -99,7 +112,12 @@ void StartSearch(Board* board, uint8_t ponder) {
    SetupOtherThreads(board);
  
    Threads.searching = 1;

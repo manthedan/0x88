@@ -71,6 +71,7 @@ function threadsCommand(threads: number): string {
 
 /** Output lines kept between exclusive sections, for timeout diagnostics only. */
 const RETAINED_OUTPUT_LINES = 16;
+const STOP_GRACE_MS = 100;
 
 function abortError(message: string): Error {
   const error = new Error(message);
@@ -115,7 +116,7 @@ function importEmscriptenGlue(resolvedJsUrl, glueBytes) {
     URL.revokeObjectURL(blobUrl);
   }
 }
-async function init(id, jsUrl, wasmUrl, dataUrl, trustedJsUrl) {
+async function init(jsUrl, wasmUrl, dataUrl, trustedJsUrl, stopBuffer) {
   if (!modulePromise) {
     const resolvedJsUrl = resolveUrl(jsUrl);
     const resolvedWasmUrl = wasmUrl ? resolveUrl(wasmUrl) : null;
@@ -140,7 +141,9 @@ async function init(id, jsUrl, wasmUrl, dataUrl, trustedJsUrl) {
     }
     const factory = self.${factory} || (typeof ${factory} !== 'undefined' ? ${factory} : null);
     if (!factory) throw new Error(ENGINE_LABEL + ' Emscripten factory was not found after importScripts()');
+    const stop = stopBuffer ? new Int32Array(stopBuffer) : null;
     modulePromise = factory({
+      ...(stop ? { shouldStop: () => Atomics.load(stop, 0) } : {}),
       wasmBinary: new Uint8Array(wasmBytes),
       getPreloadedPackage() {
         if (!dataBytes) throw new Error('Missing verified ' + ENGINE_LABEL + ' preload data');
@@ -174,18 +177,17 @@ async function init(id, jsUrl, wasmUrl, dataUrl, trustedJsUrl) {
   } catch (error) {
     throw artifactLoadError(error, artifactUrls);
   }
-  self.postMessage({ type: 'ready', id });
 }
 self.onmessage = (event) => {
   const message = event.data || {};
   const id = message.id;
   Promise.resolve().then(async () => {
     if (message.type === 'init') {
-      await init(id, message.jsUrl, message.wasmUrl, message.dataUrl, message.trustedJsUrl);
+      await init(message.jsUrl, message.wasmUrl, message.dataUrl, message.trustedJsUrl, message.stopBuffer);
+      self.postMessage({ type: 'ready', id });
       return;
     }
     if (message.type === 'command') {
-      await init(id, message.jsUrl, message.wasmUrl, message.dataUrl, message.trustedJsUrl);
       engine.ccall('command', null, ['string'], [String(message.command)]);
       self.postMessage({ type: 'commandDone', id });
       return;
@@ -218,6 +220,7 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
   readonly name: string;
   private readonly config: EmscriptenUciEngineConfig;
   private worker: Worker | null = null;
+  private sharedStop: Int32Array<SharedArrayBuffer> | null = null;
   private workerObjectUrl: string | null = null;
   private nextId = 1;
   private pending = new Map<number, Waiter<void>>();
@@ -292,6 +295,9 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
       if (this.worker === worker) this.failAll(new Error(event.message || `${this.config.label} worker error`));
     };
     this.worker = worker;
+    if (globalThis.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined') {
+      this.sharedStop = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+    }
     return worker;
   }
 
@@ -359,22 +365,23 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
     const worker = this.makeWorker();
     const id = this.nextId++;
     return new Promise<void>((resolve, reject) => {
-      const onAbort = () => {
-        this.pending.delete(id);
-        this.restartAfterAbort();
-        reject(this.abortError());
-      };
-      const cleanup = () => signal?.removeEventListener('abort', onAbort);
+      const initSignal = this.initialized ? undefined : signal;
+      const onAbort = () => this.failAll(this.abortError());
+      const cleanup = () => initSignal?.removeEventListener('abort', onAbort);
       this.pending.set(id, { resolve, reject, cleanup });
-      signal?.addEventListener('abort', onAbort, { once: true });
+      initSignal?.addEventListener('abort', onAbort, { once: true });
       worker.postMessage({
         type,
         id,
-        jsUrl: this.resolvedJsUrl(),
-        wasmUrl: this.resolvedWasmUrl(),
-        dataUrl: this.resolvedDataUrl(),
-        trustedJsUrl: this.trustedJsUrl(),
-        ...payload,
+        ...(type === 'init'
+          ? {
+              jsUrl: this.resolvedJsUrl(),
+              wasmUrl: this.resolvedWasmUrl(),
+              dataUrl: this.resolvedDataUrl(),
+              trustedJsUrl: this.trustedJsUrl(),
+              stopBuffer: this.sharedStop?.buffer,
+            }
+          : payload),
       });
     });
   }
@@ -384,20 +391,9 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
     for (let i = startIndex; i < this.stdout.length; i += 1) if (predicate(this.stdout[i])) return Promise.resolve(this.stdout[i]);
     return new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.lineWaiters = this.lineWaiters.filter((entry) => entry !== waiter);
-        waiter.cleanup?.();
-        const error = new Error(`Timed out waiting for ${label}; last ${this.config.label} lines: ${this.stdout.slice(-8).join(' | ')}`);
-        // A synchronous Emscripten search cannot process `stop`; terminate it
-        // so the next command starts from a known-clean worker.
-        this.failAll(error);
-        reject(error);
+        this.failAll(new Error(`Timed out waiting for ${label}; last ${this.config.label} lines: ${this.stdout.slice(-8).join(' | ')}`));
       }, timeoutMs);
-      const onAbort = () => {
-        clearTimeout(timer);
-        this.lineWaiters = this.lineWaiters.filter((entry) => entry !== waiter);
-        this.restartAfterAbort();
-        reject(this.abortError());
-      };
+      const onAbort = () => this.failAll(this.abortError());
       const waiter: LineWaiter = {
         startIndex,
         predicate,
@@ -431,16 +427,11 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
   private terminateWorker(): void {
     terminateEngineWorker(this.worker);
     this.worker = null;
+    this.sharedStop = null;
     if (this.workerObjectUrl) URL.revokeObjectURL(this.workerObjectUrl);
     this.workerObjectUrl = null;
     this.initialized = false;
     this.appliedOptions.clear();
-  }
-
-  private restartAfterAbort(): void {
-    this.terminateWorker();
-    this.pending.clear();
-    this.lineWaiters = [];
   }
 
   private positionCommand(fen: string, moves: readonly string[] = []): string {
@@ -491,8 +482,8 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
   }
 
   private async prewarmUnlocked(signal?: AbortSignal): Promise<void> {
-    await this.request('init', {}, signal);
     if (this.initialized) return;
+    await this.request('init', {}, signal);
     const uciStart = this.stdout.length;
     await this.sendCommand('uci', signal);
     await this.waitForLine((line) => line === 'uciok', 'uciok', uciStart, signal);
@@ -512,22 +503,9 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
       await this.sendCommand('setoption name MultiPV value 1', signal);
       await this.sendCommand(position, signal);
       const searchStart = this.stdout.length;
-      const commandPromise = this.sendCommand(emscriptenGoCommand(this.options), signal);
-      try {
-        const bestLine = await this.waitForLine(
-          (line) => line.startsWith('bestmove '),
-          'bestmove',
-          searchStart,
-          signal,
-          emscriptenSearchTimeoutMs(this.options),
-        );
-        await commandPromise;
-        this.lastInfoLines = this.collectInfoLines(searchStart);
-        return parseBestMove(bestLine);
-      } catch (error) {
-        commandPromise.catch(() => undefined);
-        throw error;
-      }
+      const bestLine = await this.search(this.options, searchStart, signal);
+      this.lastInfoLines = this.collectInfoLines(searchStart);
+      return parseBestMove(bestLine);
     }, signal);
   }
 
@@ -541,17 +519,37 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
       await this.sendCommand(this.positionCommand(fen, opts.moves), opts.signal);
       const searchStart = this.stdout.length;
       const searchOptions = { ...this.options, depth: opts.depth ?? this.options.depth, movetimeMs: opts.movetimeMs };
-      const commandPromise = this.sendCommand(emscriptenGoCommand(searchOptions), opts.signal);
-      try {
-        await this.waitForLine((line) => line.startsWith('bestmove '), 'analysis bestmove', searchStart, opts.signal, emscriptenSearchTimeoutMs(searchOptions));
-        await commandPromise;
-        this.lastInfoLines = this.collectInfoLines(searchStart);
-        return this.lastInfo();
-      } catch (error) {
-        commandPromise.catch(() => undefined);
-        throw error;
-      }
+      await this.search(searchOptions, searchStart, opts.signal);
+      this.lastInfoLines = this.collectInfoLines(searchStart);
+      return this.lastInfo();
     }, opts.signal);
+  }
+
+  private async search(options: EmscriptenUciOptions, startIndex: number, signal?: AbortSignal): Promise<string> {
+    if (signal?.aborted) throw this.abortError();
+    const stop = this.sharedStop;
+    if (stop) Atomics.store(stop, 0, 0);
+    let abortTimer: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = () => {
+      if (stop) {
+        Atomics.store(stop, 0, 1);
+        abortTimer = setTimeout(() => this.failAll(this.abortError()), STOP_GRACE_MS);
+      } else {
+        this.failAll(this.abortError());
+      }
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      const [bestmove] = await Promise.all([
+        this.waitForLine((line) => line.startsWith('bestmove '), 'bestmove', startIndex, undefined, emscriptenSearchTimeoutMs(options)),
+        this.sendCommand(emscriptenGoCommand(options)),
+      ]);
+      return bestmove;
+    } finally {
+      clearTimeout(abortTimer);
+      signal?.removeEventListener('abort', onAbort);
+      if (signal?.aborted) throw this.abortError();
+    }
   }
 
   private collectInfoLines(startIndex: number): BrowserUciInfoLine[] {

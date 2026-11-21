@@ -18,6 +18,7 @@ const flush = async () => {
 function sandbox(tamper) {
   const messages = [];
   let imports = 0;
+  let factoryOptions;
   const context = {
     location: new URL('https://0x88.app/worker.js'),
     URL,
@@ -35,6 +36,7 @@ function sandbox(tamper) {
     importScripts: () => {
       imports++;
       context.Factory = async (options) => {
+        factoryOptions = options;
         assert.deepEqual([...options.wasmBinary], [...files['/fixture/engine.wasm']]);
         assert.deepEqual([...new Uint8Array(options.getPreloadedPackage())], [...files['/fixture/engine.data']]);
         return {};
@@ -52,7 +54,7 @@ function sandbox(tamper) {
     },
   };
   context.self = context;
-  return { context, messages, imports: () => imports };
+  return { context, messages, imports: () => imports, factoryOptions: () => factoryOptions };
 }
 function withPins(script) {
   return script.replace(JSON.stringify(ENGINE_ARTIFACT_PINS), JSON.stringify(pins));
@@ -118,7 +120,16 @@ test('Emscripten starts all asset fetches before the binaries finish and clears 
   assert.equal('wasmBinary' in module, false);
   assert.equal('getPreloadedPackage' in module, false);
 });
-
+test('the Emscripten factory can read the stop flag without a worker message', async () => {
+  const env = sandbox();
+  vm.runInNewContext(withPins(emscriptenUciWorkerScript({ label: 'Fixture', factoryGlobal: 'Factory' })), env.context);
+  const stopBuffer = new SharedArrayBuffer(4);
+  env.context.onmessage({ data: { type: 'init', id: 1, jsUrl: '/fixture/engine.js', trustedJsUrl: true, stopBuffer } });
+  await flush();
+  assert.equal(env.factoryOptions().shouldStop(), 0);
+  Atomics.store(new Int32Array(stopBuffer), 0, 1);
+  assert.equal(env.factoryOptions().shouldStop(), 1);
+});
 test('Emscripten default constructors verify the sibling preload requested by glue', async () => {
   const env = sandbox();
   vm.runInNewContext(withPins(emscriptenUciWorkerScript({ label: 'Fixture', factoryGlobal: 'Factory' })), env.context);
