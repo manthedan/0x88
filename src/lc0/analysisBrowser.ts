@@ -7,7 +7,6 @@ import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { describePgnWarning, gameTreeToPgn, parseFirstPgnGame } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
-import type { createBrowserSquareformerRuntimeEvaluator as CreateBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import type { Evaluator } from '../nn/evaluator.ts';
 import { ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortConfig.ts';
 import type { collectOrtRuntimeDiagnostics as CollectOrtRuntimeDiagnostics, OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
@@ -232,9 +231,9 @@ import {
   transitionHiddenTab,
 } from './hiddenTabPause.ts';
 import { requestLargeNetDownloadConsent, requestLargeNetRedownloadConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
+import { createBrowserSquareformerRuntimeEvaluator, createLc0OnnxEvaluatorFromUrl } from './lazyOrtEvaluators.ts';
 import { CachedLc0Evaluator, type Lc0EvaluationProvider } from './lc0EvaluatorBase.ts';
 import { lc0SmallModelRequest } from './lc0ModelUrls.ts';
-import type { createLc0OnnxEvaluatorFromUrl as CreateLc0OnnxEvaluatorFromUrl } from './lc0SmallModelSelection.ts';
 import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
 import { type OpeningNameIndex, openingNameAt } from './openingNames.ts';
 import {
@@ -298,12 +297,8 @@ import {
 } from './viridithasVariants.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
 
-const createBrowserSquareformerRuntimeEvaluator: typeof CreateBrowserSquareformerRuntimeEvaluator = async (...args) =>
-  (await import('../nn/browserRuntimeEvaluator.ts')).createBrowserSquareformerRuntimeEvaluator(...args);
 const collectOrtRuntimeDiagnostics: typeof CollectOrtRuntimeDiagnostics = async (...args) =>
   (await import('../nn/ortRuntime.ts')).collectOrtRuntimeDiagnostics(...args);
-const createLc0OnnxEvaluatorFromUrl: typeof CreateLc0OnnxEvaluatorFromUrl = async (...args) =>
-  (await import('./lc0SmallModelSelection.ts')).createLc0OnnxEvaluatorFromUrl(...args);
 
 type Ground = ReturnType<typeof Chessground>;
 

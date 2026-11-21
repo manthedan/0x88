@@ -10,7 +10,6 @@ import { sanToMove } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
 import type { RouteDom } from '../features/dom.ts';
 import type { RouteId } from '../features/registry.ts';
-import type { createBrowserSquareformerRuntimeEvaluator as CreateBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import {
   BROWSER_RUNTIME_AUDIT_EVENT,
   type BrowserRuntimeAuditDetail,
@@ -44,6 +43,7 @@ import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryC
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
+import { createBrowserSquareformerRuntimeEvaluator } from './lazyOrtEvaluators.ts';
 import { LC0_SMALL_BATCH1_QDQ8_PATH, lc0SmallModelRequest } from './lc0ModelUrls.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
 import { LQO_BLACK_MISSING_QUEEN_FEN, LQO_WHITE_MISSING_QUEEN_FEN } from './lqoStartingPositions.ts';
@@ -123,10 +123,6 @@ const SF_LEVELS = [
   { skill: 15, depth: 12, label: '4 · Strong (skill 15)' },
   { skill: 20, depth: 18, label: '5 · Full strength' },
 ] as const;
-
-// Engines outlive page mounts; see play/playEngines.ts.
-const createBrowserSquareformerRuntimeEvaluator: typeof CreateBrowserSquareformerRuntimeEvaluator = async (...args) =>
-  (await import('../nn/browserRuntimeEvaluator.ts')).createBrowserSquareformerRuntimeEvaluator(...args);
 
 const engines = createPlayEngines({ loadCentipawn: createBrowserSquareformerRuntimeEvaluator });
 

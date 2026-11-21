@@ -11,14 +11,12 @@ import { inactiveCpuEnginesToEvict, PendingCpuNewGames } from '../cpuEngineResid
 import type { EngineFamily } from '../engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from '../engineProvision.ts';
 import { awaitEngineRetirements, trackEngineRetirement } from '../engineRetirement.ts';
+import { createLc0OnnxEvaluatorFromUrl as loadDefaultLc0Small } from '../lazyOrtEvaluators.ts';
 import { CachedLc0Evaluator } from '../lc0EvaluatorBase.ts';
 import type { createLc0OnnxEvaluatorFromUrl } from '../lc0SmallModelSelection.ts';
 import { Maia3BrowserEvaluator, maia3ModelFallbackUrls } from '../maia3.ts';
 import { Lc0PuctSearcher } from '../search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from '../stockfishEngine.ts';
-
-const loadDefaultLc0Small: typeof createLc0OnnxEvaluatorFromUrl = async (...args) =>
-  (await import('../lc0SmallModelSelection.ts')).createLc0OnnxEvaluatorFromUrl(...args);
 
 export type PlayFamily = 'maia3' | EngineFamily;
 
