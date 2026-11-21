@@ -844,6 +844,7 @@ function lc0WholeModelTensorCache(): boolean {
 function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown> {
   const common = {
     type: 'init',
+    memoryConstrained: isMemoryConstrainedDevice(),
     modelUrl: MODEL_URL,
     deviceModelSelection: LC0_DEVICE_MODEL_SELECTION,
     ep: requestedEp(),

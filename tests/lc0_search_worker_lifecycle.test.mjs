@@ -82,6 +82,43 @@ test('worker loss during replacement init has no request ID and cannot settle in
   }
 });
 
+test('constrained worker releases the old evaluator before allocating a different one', async (t) => {
+  const worker = new EventTarget();
+  globalThis.self = worker;
+  t.after(() => delete globalThis.self);
+  const releasing = Promise.withResolvers();
+  const finishRelease = Promise.withResolvers();
+  let creations = 0;
+  startSearchWorker({ createHybridEvaluator: () => {
+    creations++;
+    return { dispose: () => {
+      releasing.resolve();
+      return finishRelease.promise;
+    } };
+  } });
+  let reply;
+  let id = 0;
+  worker.postMessage = (message) => reply.resolve(message);
+  const send = (message) => {
+    reply = Promise.withResolvers();
+    worker.dispatchEvent(new MessageEvent('message', { data: { id: ++id, ...message } }));
+    return reply.promise;
+  };
+  const init = (packUrl) => send({ type: 'init', runtime: 'hybrid', modelUrl: 'unused', packUrl, ep: 'wasm', memoryConstrained: true });
+  assert.equal((await init('old')).type, 'ready');
+  assert.match((await init('old')).modelCache, /reused existing worker session/);
+  const next = init('replacement');
+  await releasing.promise;
+  try {
+    assert.equal(creations, 1, 'replacement allocation waits for old session release');
+  } finally {
+    finishRelease.resolve();
+  }
+  assert.equal((await next).type, 'ready');
+  assert.equal(creations, 2);
+  assert.equal((await send({ type: 'dispose' })).type, 'disposed');
+});
+
 test('worker search ignores rootMoves supplied in a message', async (t) => {
   const originalSelf = Object.getOwnPropertyDescriptor(globalThis, 'self');
   const worker = new EventTarget();
@@ -150,7 +187,7 @@ test('worker disposes a replacement after diagnostics fail and keeps its working
       handleMessage({ data: { ...message, id } });
     });
   const init = (modelUrl, evalCacheEntries = 0) =>
-    send({ type: 'init', modelUrl, ep: 'wasm', cacheModel: false, allowUnverifiedModel: true, evalCacheEntries });
+    send({ type: 'init', modelUrl, ep: 'wasm', cacheModel: false, allowUnverifiedModel: true, evalCacheEntries, memoryConstrained: false });
   try {
     startSearchWorker();
     assert.equal((await init('https://test.invalid/old.onnx')).type, 'ready');
