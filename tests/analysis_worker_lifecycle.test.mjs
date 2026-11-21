@@ -72,7 +72,16 @@ function controller({ holdInit = false } = {}) {
   `,
     { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
   );
-  const deps = { Worker, disposeOrtWorker, terminateEngineWorker, WorkerDeviceRecovery, workerBackendUsesWebGpu, rejectAllWorkerRequests, rejectWorkerRequest, progress };
+  const deps = {
+    Worker,
+    disposeOrtWorker,
+    terminateEngineWorker,
+    WorkerDeviceRecovery,
+    workerBackendUsesWebGpu,
+    rejectAllWorkerRequests,
+    rejectWorkerRequest,
+    progress,
+  };
   return { ...new Function(...Object.keys(deps), code)(...Object.values(deps)), workers, progress };
 }
 

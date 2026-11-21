@@ -759,7 +759,11 @@ async function resolveLoaderArtifact(modelUrl: string, options: Lc0ModelLoadOpti
   const resolved = appPinMissing
     ? undefined
     : await untilAborted(
-        resolveArtifactUrl(modelUrl, { entry, manifestUrl }, parallelChannel ?? resolveChannelArtifactUrl(modelUrl, entry?.artifactUrl ? undefined : channelUrl)),
+        resolveArtifactUrl(
+          modelUrl,
+          { entry, manifestUrl },
+          parallelChannel ?? resolveChannelArtifactUrl(modelUrl, entry?.artifactUrl ? undefined : channelUrl),
+        ),
         options.signal,
       );
   if (resolved?.metadataUnreachable || (lookup === unreachable && (!resolved || resolved.url === modelUrl))) {
