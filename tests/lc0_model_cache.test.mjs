@@ -189,6 +189,34 @@ test('offline lookup restores a verified immutable model, but never trusts repla
   }, { serveBytes: () => bytesOf('abc'), manifestArtifactUrl: MODEL_ARTIFACT_URL, manifestBytes: 3, manifestSha256: ABC_SHA256 });
 });
 
+test('shipped pins recover old content-addressed records offline without trusting unrelated models or corrupt cached bytes', async (t) => {
+  globalThis.__SHIPPED_MODEL_PINS__ = {
+    '/models/lc0/manifest.json': { '/models/lc0/test.onnx': { expectedSha256: ABC_SHA256, expectedBytes: 3 } },
+  };
+  t.after(() => delete globalThis.__SHIPPED_MODEL_PINS__);
+  const metadataStore = new MemoryMetadataStore();
+  const options = { cache: true, manifestUrl: MANIFEST_URL, channelUrl: null, metadataStore, requireManifestEntry: true };
+  await withMockedEnv(async () => {
+    await loadLc0ModelForOrt(MODEL_URL, options);
+    const legacy = [...metadataStore.entries.values()][0];
+    delete legacy.provenance;
+    assert.equal(legacy.url, MODEL_ARTIFACT_URL);
+    const requests = [];
+    globalThis.fetch = async (input) => {
+      requests.push(input);
+      throw new TypeError('offline');
+    };
+    assert.equal((await inspectLc0ModelDownload(MODEL_URL, options)).cached, true);
+    const restored = await loadLc0ModelForOrt(MODEL_URL, options);
+    assert.equal(restored.verification, 'hashed');
+    assert.equal(restored.url, MODEL_ARTIFACT_URL);
+    await assert.rejects(loadLc0ModelForOrt(MODEL_URL.replace('test.onnx', 'unknown.onnx'), options), /App-origin model integrity metadata is unavailable/);
+    await (await caches.open('lc0-browser-models-v1')).put(MODEL_ARTIFACT_URL, new Response('bad'));
+    await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /No verified cached model available offline/);
+    assert.ok(requests.every((input) => input === MANIFEST_URL));
+  }, { serveBytes: () => bytesOf('abc'), manifestArtifactUrl: MODEL_ARTIFACT_URL, manifestBytes: 3, manifestSha256: ABC_SHA256 });
+});
+
 test('exact manifest URL pins precede filename fallback and tolerate non-UTF-8 URL octets', async () => {
   const url = MODEL_URL.replace('test.onnx', '%E9.onnx');
   assert.equal(modelFileName(url), '%E9.onnx');

@@ -684,10 +684,20 @@ export async function inspectLc0ModelDownload(modelUrl: string, options: Lc0Mode
   }
 }
 
+declare const __SHIPPED_MODEL_PINS__: Record<string, Record<string, Lc0ModelBytesExpectation>>;
+
+function shippedModelPin(provenance: ModelPinProvenance): Lc0ModelBytesExpectation | undefined {
+  if (typeof __SHIPPED_MODEL_PINS__ === 'undefined') return undefined;
+  const manifest = new URL(provenance.manifestUrl);
+  if (provenance.manifestUrl !== absoluteUrl(manifest.pathname)) return undefined;
+  return __SHIPPED_MODEL_PINS__[manifest.pathname]?.[new URL(provenance.logicalUrl).pathname];
+}
+
 async function resolveOfflineArtifact(
   provenance: ModelPinProvenance,
   options: Lc0ModelLoadOptions,
   expectation: Lc0ModelBytesExpectation | undefined,
+  legacyPin: Lc0ModelBytesExpectation | undefined,
 ): Promise<ResolvedModelArtifact | undefined> {
   if (options.cache === false || options.forceReload || !cacheApiAvailable()) return undefined;
   const store = options.metadataStore ?? browserMetadataStore();
@@ -698,8 +708,13 @@ async function resolveOfflineArtifact(
     const pin = record.provenance;
     if (pin) {
       if (pin.logicalUrl !== provenance.logicalUrl || pin.manifestUrl !== provenance.manifestUrl || pin.channelUrl !== provenance.channelUrl) return false;
-    } else if (record.url !== provenance.logicalUrl || provenance.manifestUrl !== absoluteUrl(defaultManifestUrlForModel(provenance.logicalUrl))) return false;
-    if (options.requireManifestEntry && !pin?.appManifestPin) return false;
+    } else {
+      const pinnedLegacy = metadataMatches(record, record.observedBytes, legacyPin ?? {}, Infinity);
+      const directLegacy = !legacyPin && !options.requireManifestEntry && record.url === provenance.logicalUrl &&
+        provenance.manifestUrl === absoluteUrl(defaultManifestUrlForModel(provenance.logicalUrl));
+      if (!pinnedLegacy && !directLegacy) return false;
+    }
+    if (options.requireManifestEntry && pin && !pin.appManifestPin) return false;
     return (
       record.key === metadataKey(cacheName, record.url) &&
       record.cacheName === cacheName &&
@@ -733,7 +748,8 @@ async function resolveLoaderArtifact(modelUrl: string, options: Lc0ModelLoadOpti
   const appPinMissing = options.requireManifestEntry && !provenance.appManifestPin;
   const resolved = appPinMissing ? undefined : await untilAborted(resolveArtifactUrl(modelUrl, { entry, manifestUrl }, channelUrl), options.signal);
   if (resolved?.metadataUnreachable || (lookup === unreachable && (!resolved || resolved.url === modelUrl))) {
-    const offline = await untilAborted(resolveOfflineArtifact(provenance, options, resolved), options.signal);
+    const legacyPin = lookup === unreachable ? shippedModelPin(provenance) : provenance.appManifestPin ? resolved : undefined;
+    const offline = await untilAborted(resolveOfflineArtifact(provenance, options, resolved, legacyPin), options.signal);
     if (offline) return { resolved: offline, provenance, manifestMs };
   }
   if (!resolved) throw new Error(`App-origin model integrity metadata is unavailable for ${modelUrl}. Please retry loading the model.`);
