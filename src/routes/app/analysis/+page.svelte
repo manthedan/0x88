@@ -4,6 +4,7 @@ import BrowserCapabilities from '#lib/components/BrowserCapabilities.svelte';
 import PhoneLargeNetPreference from '#lib/components/PhoneLargeNetPreference.svelte';
 import RestoreNotice from '#lib/components/RestoreNotice.svelte';
 import SiteHeader from '#lib/components/SiteHeader.svelte';
+import { showRouteControllerFailure } from '#lib/chunkLoadError.ts';
 import { afterNavigate } from '$app/navigation';
 
 let mountedUrl: URL | null = null;
@@ -26,8 +27,7 @@ onMount(() => {
     .catch((error) => {
       if (!mounted) return;
       console.error('[analysis] failed to load page controller', error);
-      const node = document.getElementById('message');
-      if (node) node.textContent = `Page failed to initialize: ${error instanceof Error ? error.message : String(error)}`;
+      showRouteControllerFailure(document.getElementById('message'), error);
     });
   const multiPv = document.getElementById('multiPvInput') as HTMLInputElement | null;
   const dec = document.getElementById('multiPvDec');

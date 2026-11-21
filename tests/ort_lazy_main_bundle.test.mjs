@@ -104,7 +104,14 @@ test('a failed evaluator import asks for a reload and preserves its cause, but c
   controller.abort(reason);
   await assert.rejects(pending, (error) => error === reason);
   await assert.rejects(lazyOrtEvaluators.createLc0OnnxEvaluatorFromUrl('/small.onnx'), {
-    message: 'The app was updated. Reload this page to load this engine.',
+    message: 'Part of the app could not load. Reload this page to try again.',
+    cause,
+  });
+  const online = Object.getOwnPropertyDescriptor(globalThis.navigator, 'onLine');
+  Object.defineProperty(globalThis.navigator, 'onLine', { configurable: true, value: false });
+  t.after(() => online ? Object.defineProperty(globalThis.navigator, 'onLine', online) : delete globalThis.navigator.onLine);
+  await assert.rejects(lazyOrtEvaluators.createLc0OnnxEvaluatorFromUrl('/small.onnx'), {
+    message: 'You appear to be offline. Reconnect and reload this page to try again.',
     cause,
   });
 });
@@ -113,21 +120,29 @@ test('Play tells users to reload instead of letting Retry loop on a failed evalu
   const source = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
   const failures = source.slice(source.indexOf('function ctxActionableEngineError('), source.indexOf('type SearchProgress ='));
   class EvaluatorImportError extends Error {}
-  const button = { hidden: true, disabled: false, textContent: '' };
+  const button = { dataset: {}, hidden: true, disabled: false, textContent: '' };
   const note = t.mock.fn();
-  const ctx = { dom: { buttonEl: () => button } };
-  const setFailure = new Function('ctx', 'EvaluatorImportError', 'ctxSetEngineNote', `
+  const reload = t.mock.fn();
+  const retry = t.mock.fn();
+  const ctx = { dom: { buttonEl: () => button }, board: { turn: 'w' }, humanColor: 'w' };
+  const run = new Function('ctx', 'EvaluatorImportError', 'ctxSetEngineNote', 'location', 'ctxVerifySelectedEngineReady', `
     ${stripTypeScriptTypes(failures)}
     const ctxSelectedEngine = () => ({ label: 'Lc0 Small' });
-    return (error) => ctxSetEngineFailure(ctx, error);
-  `)(ctx, EvaluatorImportError, note);
-  const error = new EvaluatorImportError('The app was updated. Reload this page to load this engine.');
-  setFailure(error);
+    return { fail: (error) => ctxSetEngineFailure(ctx, error), click: () => ctxRetryEngine(ctx) };
+  `)(ctx, EvaluatorImportError, note, { reload }, retry);
+  const error = new EvaluatorImportError('Part of the app could not load.');
+  run.fail(error);
   assert.deepEqual(note.mock.calls[0].arguments, [ctx, error.message, true]);
-  assert.deepEqual(button, { textContent: 'Reload required', hidden: false, disabled: true });
+  assert.deepEqual(button, { dataset: { action: 'reload' }, textContent: 'Reload page', hidden: false, disabled: false });
+  run.click();
+  assert.equal(reload.mock.callCount(), 1);
+  assert.equal(retry.mock.callCount(), 0);
 
-  setFailure(new Error('Engine stopped'));
-  assert.deepEqual(button, { textContent: 'Retry engine', hidden: false, disabled: false });
+  run.fail(new Error('Engine stopped'));
+  assert.deepEqual(button, { dataset: { action: 'retry' }, textContent: 'Retry engine', hidden: false, disabled: false });
+  run.click();
+  assert.equal(retry.mock.callCount(), 1);
+  assert.equal(reload.mock.callCount(), 1);
 });
 
 test('Arena mount renders basic runtime status without importing ORT', async () => {

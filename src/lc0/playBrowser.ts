@@ -432,8 +432,8 @@ function ctxActionableEngineError(ctx: PlayContext, error: unknown): string {
 
 function ctxShowEngineRetry(ctx: PlayContext, action: 'retry' | 'reload'): void {
   const button = ctx.dom.buttonEl('retryEngine');
-  button.disabled = action === 'reload';
-  button.textContent = action === 'reload' ? 'Reload required' : 'Retry engine';
+  button.dataset.action = action;
+  button.textContent = action === 'reload' ? 'Reload page' : 'Retry engine';
   button.hidden = false;
 }
 
@@ -441,6 +441,19 @@ function ctxSetEngineFailure(ctx: PlayContext, error: unknown): void {
   const reload = error instanceof EvaluatorImportError;
   ctxSetEngineNote(ctx, reload ? error.message : ctxActionableEngineError(ctx, error), true);
   ctxShowEngineRetry(ctx, reload ? 'reload' : 'retry');
+}
+
+function ctxRetryEngine(ctx: PlayContext): void {
+  const button = ctx.dom.buttonEl('retryEngine');
+  if (button.dataset.action === 'reload') {
+    location.reload();
+    return;
+  }
+  if (ctx.engineThinking || ctx.preparingEngine || ctx.gameOver) return;
+  button.hidden = true;
+  ctxSetEngineNote(ctx, 'Retrying engine…');
+  if (ctx.board.turn === ctx.humanColor) void ctxVerifySelectedEngineReady(ctx);
+  else void ctxEngineTurn(ctx);
 }
 
 type SearchProgress = { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number };
@@ -1399,7 +1412,7 @@ function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shownPly: nu
   else if (!isHuman && ctx.practicePosition && !ctx.started && !ctx.engineReady) [text, kind] = ['Loads on Play', 'ready'];
   else if (!isHuman && !ctx.engineReady && !ctx.gameOver) {
     const retry = ctx.dom.buttonEl('retryEngine');
-    [text, kind] = retry.hidden ? ['Loading…', 'thinking'] : [`Error · ${retry.disabled ? 'reload' : 'retry'}`, 'error'];
+    [text, kind] = retry.hidden ? ['Loading…', 'thinking'] : [`Error · ${retry.dataset.action === 'reload' ? 'reload' : 'retry'}`, 'error'];
   } else if (!isHuman && phase === 'setup') [text, kind] = ['Ready', 'ready'];
   else if (isHuman && phase === 'playing' && ctx.viewPly === null && ctx.board.turn === color && ctx.engineReady && !ctx.pendingPromotion)
     [text, kind] = ['Your move', 'turn'];
@@ -1921,13 +1934,7 @@ function ctxInit(ctx: PlayContext): void {
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
-  ctx.scope.listen(ctx.dom.el('retryEngine'), 'click', () => {
-    if (ctx.engineThinking || ctx.preparingEngine || ctx.gameOver) return;
-    ctx.dom.buttonEl('retryEngine').hidden = true;
-    ctxSetEngineNote(ctx, 'Retrying engine…');
-    if (ctx.board.turn === ctx.humanColor) void ctxVerifySelectedEngineReady(ctx);
-    else void ctxEngineTurn(ctx);
-  });
+  ctx.scope.listen(ctx.dom.el('retryEngine'), 'click', () => ctxRetryEngine(ctx));
   ctx.scope.listen(window, BROWSER_RUNTIME_AUDIT_EVENT, (event: Event) => {
     const detail = (event as CustomEvent<BrowserRuntimeAuditDetail>).detail;
     if (detail.surface && detail.surface !== 'play') return;

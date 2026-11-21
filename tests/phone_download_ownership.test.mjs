@@ -736,7 +736,7 @@ for (const key of Object.keys(BIG_NETS)) {
         const permission = Promise.withResolvers();
         let prompts = 0;
         let admissions = 0;
-        const retry = { hidden: true };
+        const retry = { dataset: {}, hidden: true };
         const ctx = {
           abort: new AbortController(),
           consentAbort: new AbortController(),
@@ -881,7 +881,7 @@ for (const action of ['dismiss', 'confirm']) {
       ctxRender() {},
       ctxNewGame() {},
       ctxSetEngineNote() {},
-      buttonEl: () => ({}),
+      buttonEl: () => ({ dataset: {} }),
       ctxSetEngineFailure: (_ctx, error) => assert.fail(String(error)),
       engines: { opponentCommitted() {} },
     };

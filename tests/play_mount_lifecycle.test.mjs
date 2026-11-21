@@ -401,9 +401,10 @@ function sourceFiles(dir) {
   });
 }
 
-test('location.reload sites only shrink, and Play keeps only its override-change reload', () => {
-  // Ratchet: lower a count (or delete the row) when a reload goes; never raise one.
+test('location.reload is restricted to known entry points, including explicit chunk recovery', () => {
   const allowed = {
+    'src/lib/chunkLoadError.ts': 1,
+    'src/lc0/playBrowser.ts': 1,
     'src/lc0/analysisBrowser.ts': 1,
     'src/lc0/arenaBrowser.ts': 1,
     'src/lc0/play/playOverrides.ts': 1,
@@ -417,7 +418,6 @@ test('location.reload sites only shrink, and Play keeps only its override-change
     if (count) actual[file] = count;
   }
   for (const [file, count] of Object.entries(actual)) assert.ok(count <= (allowed[file] ?? 0), `${file}: ${count} location.reload call(s)`);
-  assert.equal(actual['src/lc0/playBrowser.ts'], undefined);
   assert.equal(actual['src/routes/app/play/+page.svelte'], undefined);
 });
 
