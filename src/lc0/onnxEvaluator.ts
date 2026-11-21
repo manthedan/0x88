@@ -139,19 +139,9 @@ export interface Lc0EvaluationCacheOptions {
   maxEntries?: number;
 }
 
-function fileOf(square: number): number {
-  return square % 8;
-}
-
 function isStandardCastlingMove(board: BoardState, move: Move): boolean {
   const piece = board.squares[move.from];
-  return piece?.[1] === 'k' && Math.abs(fileOf(move.to) - fileOf(move.from)) === 2;
-}
-
-function float32ToFloat16Array(values: Float32Array): Uint16Array {
-  const out = new Uint16Array(values.length);
-  for (let i = 0; i < values.length; i++) out[i] = f32ToF16Bits(values[i]);
-  return out;
+  return piece?.[1] === 'k' && Math.abs((move.to % 8) - (move.from % 8)) === 2;
 }
 
 function coerceTensorData(tensor: { type?: string }, rawData: unknown): number[] | Float32Array {
@@ -175,8 +165,7 @@ async function tensorDataTimed(
   if (!tensor) throw new Error(`LC0 ONNX output ${name} missing`);
   const started = ort.tinyLeelaNowMs();
   try {
-    const rawData = await ort.ortTensorData(tensor);
-    return coerceTensorData(tensor, rawData);
+    return coerceTensorData(tensor, await ort.ortTensorData(tensor));
   } finally {
     timing[`${timingKey}GetDataMs`] = ort.tinyLeelaNowMs() - started;
   }
@@ -186,14 +175,6 @@ function sessionInputMetadata(session: ort.InferenceSession): { type?: string; s
   return (session.inputMetadata?.find?.((entry: { name?: string }) => entry.name === LC0_ONNX_INPUT_PLANES) ?? session.inputMetadata?.[0]) as
     | { type?: string; shape?: unknown[] }
     | undefined;
-}
-
-function sessionInputType(session: ort.InferenceSession): 'float32' | 'float16' {
-  return sessionInputMetadata(session)?.type === 'float16' ? 'float16' : 'float32';
-}
-
-function sessionDeclaredFirstDim(session: ort.InferenceSession): unknown {
-  return sessionInputMetadata(session)?.shape?.[0];
 }
 
 function arraySlice<T extends ArrayLike<number>>(values: T, start: number, length: number): ArrayLike<number> {
@@ -222,17 +203,6 @@ function cloneCachedEvaluation(evaluation: Lc0Evaluation): Lc0Evaluation {
   const cloned = cloneEvaluation(evaluation);
   delete cloned.timing;
   return cloned;
-}
-
-function approximateCacheKeyBytes(key: string): number {
-  return key.length * 2;
-}
-
-function approximateCachedEvaluationBytes(evaluation: Lc0Evaluation): number {
-  const stringBytes = evaluation.fen.length * 2 + (evaluation.bestMove?.length ?? 0) * 2;
-  const scalarBytes = 5 * 8; // WDL[3], q, mlh as JS numbers; object overhead is excluded.
-  const legalPriorBytes = evaluation.legalPriors.reduce((sum, prior) => sum + prior.uci.length * 2 + 3 * 8, 0);
-  return stringBytes + scalarBytes + legalPriorBytes;
 }
 
 export function prepareLc0EvaluatorInput(
@@ -300,9 +270,8 @@ export function legalPolicyPriors(
     if ('policyIndex' in entry) {
       return { uci: entry.uci, index: entry.policyIndex, actionId: entry.actionId, logit: Number(logits[entry.policyIndex]) / policyTemperature };
     }
-    const move = entry;
-    const uci = moveToUci(move);
-    const index = uciToLc0PolicyIndex(uci, moveTransform, { standardCastling: isStandardCastlingMove(board, move) });
+    const uci = moveToUci(entry);
+    const index = uciToLc0PolicyIndex(uci, moveTransform, { standardCastling: isStandardCastlingMove(board, entry) });
     if (index === undefined) throw new Error(`No LC0 policy index for legal move ${uci}`);
     return { uci, index, logit: Number(logits[index]) / policyTemperature };
   });
@@ -316,12 +285,21 @@ export function legalPolicyPriors(
   return legal.map((entry) => ({ ...entry, prior: Math.exp(entry.logit - max) / sum })).sort((a, b) => b.prior - a.prior);
 }
 
+type PendingMiss = {
+  key: string;
+  input: Lc0EvaluatorInput;
+  promise: Promise<Lc0Evaluation>;
+  resolve: (value: Lc0Evaluation) => void;
+  reject: (error: unknown) => void;
+};
+
 export class CachedLc0Evaluator implements Lc0EvaluationProvider {
   readonly inner: Lc0EvaluationProvider;
   private maxEntries: number;
   private hits = 0;
   private misses = 0;
   private readonly cache = new Map<string, Lc0Evaluation>();
+  private readonly inFlight = new Map<string, Promise<Lc0Evaluation>>();
 
   constructor(inner: Lc0EvaluationProvider, options: Lc0EvaluationCacheOptions = {}) {
     this.inner = inner;
@@ -352,8 +330,13 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
     let approxKeyBytes = 0;
     let approxEvaluationBytes = 0;
     for (const [key, evaluation] of this.cache.entries()) {
-      approxKeyBytes += approximateCacheKeyBytes(key);
-      approxEvaluationBytes += approximateCachedEvaluationBytes(evaluation);
+      approxKeyBytes += key.length * 2;
+      // WDL[3], q, mlh as JS numbers (5 * 8); object overhead is excluded.
+      approxEvaluationBytes +=
+        evaluation.fen.length * 2 +
+        (evaluation.bestMove?.length ?? 0) * 2 +
+        40 +
+        evaluation.legalPriors.reduce((sum, prior) => sum + prior.uci.length * 2 + 24, 0);
     }
     return {
       entries: this.cache.size,
@@ -386,19 +369,19 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
       if (group) group.slots.push(i);
       else groups.set(key, { input: inputs[i], slots: [i], promise: this.inFlight.get(key) });
     }
+    if (!groups.size) return results;
 
-    const fresh = [...groups.entries()].filter(([, group]) => !group.promise);
-    if (fresh.length) {
-      const deferred = fresh.map(([key, group]) => {
-        const pending = this.createInFlight(key);
-        group.promise = pending.promise;
-        return { key, input: group.input, ...pending };
-      });
-      void this.runMissBatch(deferred);
+    const deferred: PendingMiss[] = [];
+    for (const [key, group] of groups) {
+      if (group.promise) continue;
+      const pending = this.createInFlight(key, group.input);
+      group.promise = pending.promise;
+      deferred.push(pending);
     }
+    if (deferred.length) void this.runMissBatch(deferred);
 
     await Promise.all(
-      [...groups.entries()].map(async ([, group]) => {
+      [...groups.values()].map(async (group) => {
         const value = await group.promise!;
         for (const slot of group.slots) results[slot] = cloneEvaluation(value);
       }),
@@ -428,23 +411,15 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
         else groups.set(key, { input, slots: [{ batch: batchIndex, slot }], sourceBatch: batchIndex, promise: this.inFlight.get(key) });
       }
     }
+    if (!groups.size) return out;
 
-    const newBySourceBatch = new Map<
-      number,
-      Array<{
-        key: string;
-        input: Lc0EvaluatorInput;
-        promise: Promise<Lc0Evaluation>;
-        resolve: (value: Lc0Evaluation) => void;
-        reject: (error: unknown) => void;
-      }>
-    >();
+    const newBySourceBatch = new Map<number, PendingMiss[]>();
     for (const [key, group] of groups) {
       if (group.promise) continue;
-      const pending = this.createInFlight(key);
+      const pending = this.createInFlight(key, group.input);
       group.promise = pending.promise;
       const entries = newBySourceBatch.get(group.sourceBatch) ?? [];
-      entries.push({ key, input: group.input, ...pending });
+      entries.push(pending);
       newBySourceBatch.set(group.sourceBatch, entries);
     }
     if (newBySourceBatch.size) void this.runMissSequence([...newBySourceBatch.values()]);
@@ -458,8 +433,6 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
     return out;
   }
 
-  private readonly inFlight = new Map<string, Promise<Lc0Evaluation>>();
-
   private cachedValue(key: string): Lc0Evaluation | undefined {
     const cached = this.cache.get(key);
     if (!cached) return undefined;
@@ -469,7 +442,7 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
     return cloneCachedEvaluation(cached);
   }
 
-  private createInFlight(key: string): { promise: Promise<Lc0Evaluation>; resolve: (value: Lc0Evaluation) => void; reject: (error: unknown) => void } {
+  private createInFlight(key: string, input: Lc0EvaluatorInput): PendingMiss {
     let resolve!: (value: Lc0Evaluation) => void;
     let reject!: (error: unknown) => void;
     const promise = new Promise<Lc0Evaluation>((res, rej) => {
@@ -477,68 +450,65 @@ export class CachedLc0Evaluator implements Lc0EvaluationProvider {
       reject = rej;
     });
     this.inFlight.set(key, promise);
-    return { promise, resolve, reject };
+    return { key, input, promise, resolve, reject };
   }
 
-  private settleMiss(key: string, value: Lc0Evaluation): Lc0Evaluation {
-    const cloned = cloneEvaluation(value);
-    this.store(key, cloned);
-    this.inFlight.delete(key);
-    return cloned;
+  private settleMissBatch(entries: PendingMiss[], evals: Lc0Evaluation[]): void {
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      const cloned = cloneEvaluation(evals[i]);
+      if (this.maxEntries > 0) {
+        this.cache.set(entry.key, cloneCachedEvaluation(cloned));
+        this.evictIfNeeded();
+      }
+      this.inFlight.delete(entry.key);
+      entry.resolve(cloned);
+    }
   }
 
-  private async runMissBatch(
-    entries: Array<{ key: string; input: Lc0EvaluatorInput; resolve: (value: Lc0Evaluation) => void; reject: (error: unknown) => void }>,
-  ): Promise<void> {
+  private rejectMissBatch(entries: PendingMiss[], error: unknown): void {
+    for (const entry of entries) {
+      this.inFlight.delete(entry.key);
+      entry.reject(error);
+    }
+  }
+
+  private async runMissBatch(entries: PendingMiss[]): Promise<void> {
     try {
       const evals = this.inner.evaluateBatch
         ? await this.inner.evaluateBatch(entries.map((entry) => entry.input))
         : await Promise.all(entries.map((entry) => this.inner.evaluate(entry.input)));
       if (evals.length !== entries.length) throw new Error(`LC0 evaluator returned ${evals.length} result(s), expected ${entries.length}`);
-      for (let i = 0; i < entries.length; i++) entries[i].resolve(this.settleMiss(entries[i].key, evals[i]));
+      this.settleMissBatch(entries, evals);
     } catch (error) {
-      for (const entry of entries) {
-        this.inFlight.delete(entry.key);
-        entry.reject(error);
-      }
+      this.rejectMissBatch(entries, error);
     }
   }
 
-  private async runMissSequence(
-    batchEntries: Array<Array<{ key: string; input: Lc0EvaluatorInput; resolve: (value: Lc0Evaluation) => void; reject: (error: unknown) => void }>>,
-  ): Promise<void> {
+  private async runMissSequence(batchEntries: PendingMiss[][]): Promise<void> {
     try {
       const inputs = batchEntries.map((batch) => batch.map((entry) => entry.input));
-      const results = this.inner.evaluateBatchSequence ? await this.inner.evaluateBatchSequence(inputs) : [];
-      if (!this.inner.evaluateBatchSequence) {
+      let results: Lc0Evaluation[][];
+      if (this.inner.evaluateBatchSequence) {
+        results = await this.inner.evaluateBatchSequence(inputs);
+      } else {
+        results = [];
         for (const batch of inputs) {
           results.push(this.inner.evaluateBatch ? await this.inner.evaluateBatch(batch) : await Promise.all(batch.map((input) => this.inner.evaluate(input))));
         }
       }
-      if (results.length !== batchEntries.length)
+      if (results.length !== batchEntries.length) {
         throw new Error(`LC0 evaluator returned ${results.length} sequence batch(es), expected ${batchEntries.length}`);
+      }
       for (let batch = 0; batch < batchEntries.length; batch++) {
-        if (results[batch].length !== batchEntries[batch].length)
+        if (results[batch].length !== batchEntries[batch].length) {
           throw new Error(`LC0 evaluator returned ${results[batch].length} result(s) for sequence batch ${batch}, expected ${batchEntries[batch].length}`);
-        for (let i = 0; i < batchEntries[batch].length; i++) {
-          const entry = batchEntries[batch][i];
-          entry.resolve(this.settleMiss(entry.key, results[batch][i]));
         }
+        this.settleMissBatch(batchEntries[batch], results[batch]);
       }
     } catch (error) {
-      for (const entries of batchEntries) {
-        for (const entry of entries) {
-          this.inFlight.delete(entry.key);
-          entry.reject(error);
-        }
-      }
+      for (const entries of batchEntries) this.rejectMissBatch(entries, error);
     }
-  }
-
-  private store(key: string, value: Lc0Evaluation): void {
-    if (this.maxEntries <= 0) return;
-    this.cache.set(key, cloneCachedEvaluation(value));
-    this.evictIfNeeded();
   }
 
   private evictIfNeeded(): void {
@@ -557,11 +527,6 @@ function gpuIoOutput(outputs: OrtGpuIoOutputs, binding: OrtGpuIoBinding, name: s
   return coerceTensorData({ type: spec?.type }, data);
 }
 
-function fixedDims(shape: readonly unknown[] | undefined): number[] | null {
-  if (!shape?.length) return null;
-  return shape.every((d) => typeof d === 'number' && Number.isInteger(d) && d > 0) ? (shape as number[]) : null;
-}
-
 /**
  * Tensor specs for GPU-resident IO, or the reason the session cannot use it.
  * Needs one float input and float outputs, all with fixed (numeric) shapes.
@@ -575,9 +540,8 @@ export function lc0GpuIoSpecs(
     const m = meta as { isTensor?: boolean; type?: string; shape?: readonly unknown[] } | undefined;
     if (!m) return `${name}: no metadata`;
     if (m.type !== 'float16' && m.type !== 'float32') return `${name}: type ${m.type}`;
-    const dims = fixedDims(m.shape);
-    if (!dims) return `${name}: dynamic shape`;
-    return { name, type: m.type, dims };
+    if (!m.shape?.length || !m.shape.every((d) => typeof d === 'number' && Number.isInteger(d) && d > 0)) return `${name}: dynamic shape`;
+    return { name, type: m.type, dims: m.shape as number[] };
   };
   if (session.inputNames.length !== 1 || session.inputNames[0] !== LC0_ONNX_INPUT_PLANES) return { reason: `inputs ${session.inputNames.join(',')}` };
   const input = spec(
@@ -774,12 +738,8 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
 
   /** Effective fixed physical IO batch; capture bindings may resolve symbolic ORT metadata. */
   get fixedBatchSize(): number | undefined {
-    const first = this.gpuIo?.input.dims[0] ?? sessionDeclaredFirstDim(this.session);
+    const first = this.gpuIo?.input.dims[0] ?? sessionInputMetadata(this.session)?.shape?.[0];
     return typeof first === 'number' && first > 0 ? first : undefined;
-  }
-
-  private assertNotDisposed(): void {
-    if (this.disposed) throw new Error('LC0 ONNX evaluator has been disposed');
   }
 
   async evaluate(boardOrFen: Lc0EvaluatorInput): Promise<Lc0Evaluation> {
@@ -788,7 +748,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
 
   // Admit whole logical calls so later physical batches can finish during close.
   private admit<T>(work: () => Promise<T>): Promise<T> {
-    this.assertNotDisposed();
+    if (this.disposed) throw new Error('LC0 ONNX evaluator has been disposed');
     const pending = Promise.resolve().then(work);
     this.admitted.add(pending);
     const settled = () => {
@@ -802,18 +762,11 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     if (!inputs.length) return [];
     const totalStarted = ort.tinyLeelaNowMs();
     const encodedPlanes = new Float32Array(physicalBatchSize * LC0_INPUT_PLANES_SIZE);
-    const boards: BoardState[] = [];
-    const fens: string[] = [];
-    const preparedLegalMoves: Array<readonly Lc0PreparedLegalMove[] | undefined> = [];
     const encodeStarted = ort.tinyLeelaNowMs();
-    for (let i = 0; i < inputs.length; i++) {
-      const input = inputs[i];
-      const current = currentBoardAndFen(input);
-      boards.push(current.board);
-      fens.push(current.fen);
-      preparedLegalMoves.push(current.preparedLegalMoves);
+    const currents = inputs.map((input, i) => {
       encodedPlanes.set(encodeLc0Classical112(input as Lc0EncoderInput, { historyFill: this.historyFill }).planes, i * LC0_INPUT_PLANES_SIZE);
-    }
+      return currentBoardAndFen(input);
+    });
     // Fixed batch-N artifacts require a full physical batch. Pad by copying the
     // last encoded position rather than re-encoding it for every unused slot;
     // callers only receive the real `inputs.length` outputs below.
@@ -821,10 +774,15 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       encodedPlanes.copyWithin(i * LC0_INPUT_PLANES_SIZE, (inputs.length - 1) * LC0_INPUT_PLANES_SIZE, inputs.length * LC0_INPUT_PLANES_SIZE);
     }
     const encodeMs = ort.tinyLeelaNowMs() - encodeStarted;
-    const inputType = sessionInputType(this.session);
     // f16 inputs as Uint16Array bits: the GPU-IO path writes these bytes as they are
     // (an ort.Tensor may re-wrap them as a Float16Array in browsers that have one).
-    const f16Input = inputType === 'float16' ? float32ToFloat16Array(encodedPlanes) : undefined;
+    let f16Input: Uint16Array | undefined;
+    if (sessionInputMetadata(this.session)?.type === 'float16') {
+      f16Input = new Uint16Array(encodedPlanes.length);
+      for (let i = 0; i < encodedPlanes.length; i++) {
+        f16Input[i] = f32ToF16Bits(encodedPlanes[i]);
+      }
+    }
     const webgpuBefore = ort.getOrtWebGpuDiagnosticsSnapshot();
     const ortRunStarted = ort.tinyLeelaNowMs();
     const downloadTiming: Record<string, number> = {};
@@ -845,18 +803,15 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       const inputTensor = f16Input
         ? new ort.Tensor('float16', f16Input, [physicalBatchSize, 112, 8, 8])
         : new ort.Tensor('float32', encodedPlanes, [physicalBatchSize, 112, 8, 8]);
-      const outputs = await this.session.run({
-        [LC0_ONNX_INPUT_PLANES]: inputTensor,
-      });
+      const outputs = await this.session.run({ [LC0_ONNX_INPUT_PLANES]: inputTensor });
       ortRunMs = ort.tinyLeelaNowMs() - ortRunStarted;
       const allGetDataStarted = ort.tinyLeelaNowMs();
       // Older/smaller nets (e.g. Maia) have no moves-left head; treat MLH as 0.
-      const hasMlh = LC0_ONNX_OUTPUT_MLH in outputs;
       try {
         [policy, wdlRaw, mlhRaw] = await Promise.all([
           tensorDataTimed(outputs, LC0_ONNX_OUTPUT_POLICY, 'ortPolicy', downloadTiming),
           tensorDataTimed(outputs, LC0_ONNX_OUTPUT_WDL, 'ortWdl', downloadTiming),
-          hasMlh ? tensorDataTimed(outputs, LC0_ONNX_OUTPUT_MLH, 'ortMlh', downloadTiming) : Promise.resolve(undefined),
+          LC0_ONNX_OUTPUT_MLH in outputs ? tensorDataTimed(outputs, LC0_ONNX_OUTPUT_MLH, 'ortMlh', downloadTiming) : Promise.resolve(undefined),
         ]);
       } finally {
         ort.releaseOrtGpuOutputs(outputs);
@@ -897,14 +852,19 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       ortPhysicalBatchSize: physicalBatchSize,
       ...downloadTiming,
     };
-    const results: Lc0Evaluation[] = inputs.map((_, i) => {
+    const results: Lc0Evaluation[] = currents.map((current, i) => {
       const legalPriorsStarted = ort.tinyLeelaNowMs();
       const wdlSlice = arraySlice(wdlRaw, i * LC0_WDL_SIZE, LC0_WDL_SIZE);
       const wdl: [number, number, number] = [Number(wdlSlice[0]), Number(wdlSlice[1]), Number(wdlSlice[2])];
-      const legalPriors = legalPolicyPriors(boards[i], arraySlice(policy, i * LC0_POLICY_SIZE, LC0_POLICY_SIZE), this.policyTemperature, preparedLegalMoves[i]);
+      const legalPriors = legalPolicyPriors(
+        current.board,
+        arraySlice(policy, i * LC0_POLICY_SIZE, LC0_POLICY_SIZE),
+        this.policyTemperature,
+        current.preparedLegalMoves,
+      );
       const legalPriorsMs = ort.tinyLeelaNowMs() - legalPriorsStarted;
       return {
-        fen: fens[i],
+        fen: current.fen,
         wdl,
         q: wdl[0] - wdl[2],
         mlh: mlhRaw === undefined ? 0 : Number(arraySlice(mlhRaw, i * LC0_MLH_SIZE, LC0_MLH_SIZE)[0]),
@@ -929,7 +889,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
 
   private async evaluateBatchNow(inputs: Lc0EvaluatorInput[]): Promise<Lc0Evaluation[]> {
     if (!inputs.length) return [];
-    const declared = this.gpuIo?.input.dims[0] ?? sessionDeclaredFirstDim(this.session);
+    const declared = this.gpuIo?.input.dims[0] ?? sessionInputMetadata(this.session)?.shape?.[0];
     const out: Lc0Evaluation[] = [];
     let offset = 0;
     while (offset < inputs.length) {
@@ -945,7 +905,9 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   async evaluateBatchSequence(batches: Lc0EvaluatorInput[][]): Promise<Lc0Evaluation[][]> {
     return this.admit(async () => {
       const out: Lc0Evaluation[][] = [];
-      for (const batch of batches) out.push(await this.evaluateBatchNow(batch));
+      for (const batch of batches) {
+        out.push(await this.evaluateBatchNow(batch));
+      }
       return out;
     });
   }

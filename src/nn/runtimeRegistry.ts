@@ -20,9 +20,9 @@ export const S4FIX_V_EMA_MODEL_ID = 's4fix-v-ema';
 /** Registered Centipawn model id named by served file URLs, or null for an unregistered model. */
 export function centipawnModelIdForUrls(...urls: string[]): string | null {
   const text = urls.join(' ');
-  if (text.includes('s4fix_v_ema') || text.includes('s4fix-v-ema')) return S4FIX_V_EMA_MODEL_ID;
-  if (text.includes('bt4_anneal_muon_best') || text.includes('bt4-anneal-muon-best')) return BT4_ANNEAL_MUON_BEST_MODEL_ID;
-  if (text.includes('bt4_soap_rem_c19000_final') || text.includes('bt4-soap-rem-c19000-final')) return BT4_SOAP_REM_C19000_FINAL_MODEL_ID;
+  if (text.includes('s4fix_v_ema') || text.includes(S4FIX_V_EMA_MODEL_ID)) return S4FIX_V_EMA_MODEL_ID;
+  if (text.includes('bt4_anneal_muon_best') || text.includes(BT4_ANNEAL_MUON_BEST_MODEL_ID)) return BT4_ANNEAL_MUON_BEST_MODEL_ID;
+  if (text.includes('bt4_soap_rem_c19000_final') || text.includes(BT4_SOAP_REM_C19000_FINAL_MODEL_ID)) return BT4_SOAP_REM_C19000_FINAL_MODEL_ID;
   return null;
 }
 
@@ -62,7 +62,7 @@ export const SQUAREFORMER_TVM_HYBRID_V1: RuntimeRegistryEntry = {
   promotionGate: 'squareformer-rc-v1',
 };
 
-const PROMOTED_RUNTIMES: RuntimeRegistryEntry[] = [CENTIPAWN_TVMJS_WEBGPU_V2, SQUAREFORMER_TVM_HYBRID_V1].filter((entry) => entry.status === 'promoted');
+const PROMOTED_RUNTIMES: RuntimeRegistryEntry[] = [CENTIPAWN_TVMJS_WEBGPU_V2, SQUAREFORMER_TVM_HYBRID_V1];
 
 export function normalizeRuntimeModelKey(modelKey: string): string {
   return modelKey === BT4_ANNEAL_MUON_BEST_TVM_HYBRID_LEGACY_MODEL_ID ? BT4_ANNEAL_MUON_BEST_MODEL_ID : modelKey;
@@ -81,16 +81,13 @@ export function parseBrowserRuntimeSelector(value: string | null | undefined, op
   return 'auto';
 }
 
-function boolRuntimeParam(value: string | null | undefined, fallback: boolean): boolean {
-  if (value === null || value === undefined) return fallback;
-  const normalized = String(value).trim().toLowerCase();
+export function runtimeFallbackEnabled(params: URLSearchParams, fallback = true): boolean {
+  const raw = params.get('runtimeFallback') ?? params.get('hybridFallback');
+  if (raw === null) return fallback;
+  const normalized = raw.trim().toLowerCase();
   if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
   return fallback;
-}
-
-export function runtimeFallbackEnabled(params: URLSearchParams, fallback = true): boolean {
-  return boolRuntimeParam(params.get('runtimeFallback') ?? params.get('hybridFallback'), fallback);
 }
 
 export function promotedCustomRuntimeForModel(modelId: string): RuntimeRegistryEntry | undefined {
@@ -103,12 +100,10 @@ export function promotedTvmjsRuntimeForModel(modelId: string): RuntimeRegistryEn
 
 export function shouldAttemptCustomRuntime(modelId: string, selector: BrowserRuntimeSelector): boolean {
   if (modelId === S4FIX_V_EMA_MODEL_ID || selector === 'ort') return false;
-  if (selector === 'custom-webgpu') return true;
-  return promotedCustomRuntimeForModel(modelId)?.status === 'promoted';
+  return selector === 'custom-webgpu' || Boolean(promotedCustomRuntimeForModel(modelId));
 }
 
 export function shouldAttemptTvmjsRuntime(modelId: string, selector: BrowserRuntimeSelector): boolean {
   if (modelId === S4FIX_V_EMA_MODEL_ID || selector === 'ort' || selector === 'custom-webgpu') return false;
-  if (selector === 'tvmjs-webgpu') return true;
-  return promotedTvmjsRuntimeForModel(modelId)?.status === 'promoted';
+  return selector === 'tvmjs-webgpu' || Boolean(promotedTvmjsRuntimeForModel(modelId));
 }

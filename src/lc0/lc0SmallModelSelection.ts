@@ -137,14 +137,6 @@ export const DEFAULT_LC0_ORT_EVALUATOR_DEPS: Lc0OrtEvaluatorDeps = {
   createEvaluator: (model, options) => Lc0OnnxEvaluator.create(model, options),
 };
 
-function isAbortError(error: unknown): boolean {
-  return (error as { name?: unknown } | null)?.name === 'AbortError';
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 /**
  * Load an Lc0 ONNX model and create its ORT session, applying the device rule
  * when asked. Every product path that loads Lc0 Small goes through here (the
@@ -180,8 +172,8 @@ export async function createLc0OnnxEvaluatorFromUrl(
       modelLoad = loadedModel(await deps.load(selectedUrl, loadOptions));
       servedUrl = selectedUrl;
     } catch (error) {
-      if (isAbortError(error)) throw error;
-      fallbackReason = `split-K model unavailable: ${errorMessage(error)}`;
+      if ((error as { name?: unknown } | null)?.name === 'AbortError') throw error;
+      fallbackReason = `split-K model unavailable: ${error instanceof Error ? error.message : String(error)}`;
       console.warn(`Lc0: ${fallbackReason}; loading the original model.`);
     }
   }

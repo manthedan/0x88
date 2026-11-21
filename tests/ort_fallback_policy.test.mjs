@@ -7,6 +7,7 @@ import {
   coerceOrtRuntimeArtifactKind,
   gpuOrtRuntimeArtifactForThread,
   ORT_RUNTIME_ARTIFACT_FILES,
+  env as ortEnv,
   ortJspiApiAvailable,
   ortRuntimeArtifactKindForCurrentThread,
   requestedOrtWasmArtifact,
@@ -14,6 +15,7 @@ import {
   resolveOrtJspiPreference,
   resolveOrtPthreadRuntimeUrls,
   resolveOrtWasmThreads,
+  sessionOptions,
   setOrtRuntimeArtifactKindForCurrentThread,
   setRequestedOrtExecutionProviderForCurrentThread,
   setRequestedOrtWasmArtifactForCurrentThread,
@@ -319,4 +321,43 @@ test('an explicit ORT thread request still overrides every default', () => {
   // 0 / garbage means "let ORT decide".
   assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: '0' })), 0);
   assert.equal(resolveOrtWasmThreads(builtWorkerContext({ raw: 'nonsense' })), 0);
+});
+
+test('empty ortWasmPath query parameter falls back to staged /ort/ URLs', () => {
+  const prevDoc = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  const prevLoc = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  const prevWasmPaths = ortEnv.wasm.wasmPaths;
+  const prevNumThreads = ortEnv.wasm.numThreads;
+  const prevProxy = ortEnv.wasm.proxy;
+  const prevSimd = ortEnv.wasm.simd;
+  Object.defineProperty(globalThis, 'document', { value: {}, configurable: true, writable: true });
+  try {
+    for (const search of ['?ortWasmPath', '?ortWasmPath=']) {
+      ortEnv.wasm.wasmPaths = undefined;
+      Object.defineProperty(globalThis, 'location', {
+        value: { href: `https://0x88.app/app/analysis${search}`, search },
+        configurable: true,
+        writable: true,
+      });
+      sessionOptions(['wasm']);
+      assert.notEqual(ortEnv.wasm.wasmPaths, '', `search=${search}`);
+      assert.deepEqual(ortEnv.wasm.wasmPaths, { wasm: `/ort/${ORT_RUNTIME_ARTIFACT_FILES.asyncify.wasm}` }, `search=${search}`);
+    }
+    Object.defineProperty(globalThis, 'location', {
+      value: { href: 'https://0x88.app/app/analysis?ortWasmPath=/custom-ort/', search: '?ortWasmPath=/custom-ort/' },
+      configurable: true,
+      writable: true,
+    });
+    sessionOptions(['wasm']);
+    assert.equal(ortEnv.wasm.wasmPaths, '/custom-ort/');
+  } finally {
+    ortEnv.wasm.wasmPaths = prevWasmPaths;
+    ortEnv.wasm.numThreads = prevNumThreads;
+    ortEnv.wasm.proxy = prevProxy;
+    ortEnv.wasm.simd = prevSimd;
+    if (prevDoc) Object.defineProperty(globalThis, 'document', prevDoc);
+    else delete globalThis.document;
+    if (prevLoc) Object.defineProperty(globalThis, 'location', prevLoc);
+    else delete globalThis.location;
+  }
 });

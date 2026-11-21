@@ -168,22 +168,13 @@ export interface Bt4SearchOptions {
   yieldEveryMs?: number;
 }
 
-function latestBoard(input: Lc0EvaluatorInput): BoardState {
-  if (typeof input === 'object' && input !== null && 'positions' in input) {
-    if (input.positions.length === 0) throw new Error('LC0 search history input requires at least one position');
-    const last = input.positions[input.positions.length - 1];
-    return typeof last === 'string' ? parseFen(last) : last;
-  }
-  return typeof input === 'string' ? parseFen(input) : input;
-}
-
 export function swapColorsInput(input: Lc0EvaluatorInput): Lc0EvaluatorInput {
   if (typeof input === 'object' && input !== null && 'positions' in input) {
     return {
       positions: input.positions.map((position) => rankFlipColorSwapBoard(typeof position === 'string' ? parseFen(position) : position)),
     };
   }
-  return rankFlipColorSwapBoard(latestBoard(input));
+  return rankFlipColorSwapBoard(typeof input === 'string' ? parseFen(input) : input);
 }
 
 export function swapColorsUci(uci: string): string {
@@ -191,9 +182,16 @@ export function swapColorsUci(uci: string): string {
 }
 
 function swapColorsResult<T extends Bt4SearchResult>(result: T, originalInput: Lc0EvaluatorInput): T {
+  let latest: string | BoardState;
+  if (typeof originalInput === 'object' && originalInput !== null && 'positions' in originalInput) {
+    if (originalInput.positions.length === 0) throw new Error('LC0 search history input requires at least one position');
+    latest = originalInput.positions[originalInput.positions.length - 1];
+  } else {
+    latest = originalInput;
+  }
   return {
     ...result,
-    fen: boardToFen(latestBoard(originalInput)),
+    fen: boardToFen(typeof latest === 'string' ? parseFen(latest) : latest),
     move: result.move ? swapColorsUci(result.move) : result.move,
     children: result.children.map((child) => ({ ...child, uci: swapColorsUci(child.uci) })),
     pv: result.pv.map(swapColorsUci),
@@ -215,11 +213,6 @@ const DEPLOYED_BIG_NET_URLS = new Set<string>([
 
 function bigNetProbeKey(config: BigNetConfig): string {
   return config.diagnosticModel ? `lab:${config.modelUrl}` : config.modelUrl;
-}
-
-function shouldSkipKnownUnhostedBigNetProbe(config: BigNetConfig): boolean {
-  const pathname = assetPathname(config.modelUrl);
-  return !isLocalDevelopmentOrigin() && pathname.startsWith('/models/lc0/') && !DEPLOYED_BIG_NET_URLS.has(pathname);
 }
 
 /** WebGPU usable for big-net search? Cached after the first probe. Asset probes are tracked separately per net. */
@@ -272,7 +265,8 @@ export async function checkBigNetAsset(config: BigNetConfig = BT4_NET, onStatus?
     subscribeAssetProbeChange(urls, onStatus);
     return existing;
   }
-  if (!config.diagnosticModel && shouldSkipKnownUnhostedBigNetProbe(config)) {
+  const pathname = assetPathname(config.modelUrl);
+  if (!config.diagnosticModel && !isLocalDevelopmentOrigin() && pathname.startsWith('/models/lc0/') && !DEPLOYED_BIG_NET_URLS.has(pathname)) {
     assetStatuses.set(probeKey, 'missing');
     notifyAssetProbeChange(urls, onStatus);
     return 'missing';
@@ -557,26 +551,26 @@ export class Bt4WorkerSearcher {
 
   async search(input: Lc0EvaluatorInput, options: Bt4SearchOptions): Promise<Bt4SearchResult> {
     const cancelled: Bt4SearchResult = { fen: '', visits: 0, value: 0, children: [], pv: [], cancelled: true };
-    if (options.signal?.aborted) return cancelled;
+    const { onProgress, signal, swapColors, evalCacheEntries } = options;
+    if (signal?.aborted) return cancelled;
     try {
-      await this.init({ evalCacheEntries: options.evalCacheEntries });
+      await this.init({ evalCacheEntries });
     } catch (error) {
       // An owner that stopped may retire a net still loading (Arena Stop): that is a cancellation.
-      if (options.signal?.aborted) return cancelled;
+      if (signal?.aborted) return cancelled;
       throw error;
     }
-    if (options.signal?.aborted) return cancelled;
-    const workerInput = options.swapColors ? swapColorsInput(input) : input;
+    if (signal?.aborted) return cancelled;
     let searchId: number | null = null;
     const onAbort = () => {
       if (searchId !== null) this.cancelSearch(searchId);
     };
-    options.signal?.addEventListener('abort', onAbort, { once: true });
+    signal?.addEventListener('abort', onAbort, { once: true });
     try {
       const response = await this.post<{ result: Bt4SearchResult }>(
         {
           type: 'search',
-          input: workerInput,
+          input: swapColors ? swapColorsInput(input) : input,
           visits: options.visits,
           movetimeMs: options.movetimeMs,
           multiPv: options.multiPv,
@@ -591,19 +585,19 @@ export class Bt4WorkerSearcher {
           cpuct: options.cpuct,
           fpu: options.fpu,
           searchContemptLimit: options.searchContemptLimit,
-          reportProgress: !!options.onProgress,
+          reportProgress: !!onProgress,
           progressEveryMs: options.progressEveryMs,
         },
         (id) => {
           searchId = id;
           this.activeSearchId = id;
-          if (options.signal?.aborted) this.cancelSearch(id);
+          if (signal?.aborted) this.cancelSearch(id);
         },
-        options.onProgress ? (progress) => options.onProgress!(options.swapColors ? swapColorsResult(progress, input) : progress) : undefined,
+        onProgress ? (progress) => onProgress(swapColors ? swapColorsResult(progress, input) : progress) : undefined,
       );
-      return options.swapColors ? swapColorsResult(response.result, input) : response.result;
+      return swapColors ? swapColorsResult(response.result, input) : response.result;
     } finally {
-      options.signal?.removeEventListener('abort', onAbort);
+      signal?.removeEventListener('abort', onAbort);
       if (this.activeSearchId === searchId) this.activeSearchId = null;
     }
   }

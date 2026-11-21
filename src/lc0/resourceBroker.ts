@@ -185,20 +185,23 @@ export class EngineResourceBroker {
     return cpuThreadBudget(this.environment(), this.dial);
   }
 
-  private activeCpuLeases(): number {
-    let count = 0;
-    for (const lease of this.active.values()) if (lease.resourceClass === 'cpu') count += 1;
-    return count;
+  private cpuCapacityReached(): boolean {
+    if (this.policy === 'shared') return false;
+    let activeCpu = 0;
+    for (const lease of this.active.values()) {
+      if (lease.resourceClass === 'cpu') activeCpu += 1;
+    }
+    return activeCpu >= (this.policy === 'exclusive' ? 1 : this.maxConcurrentCpu);
   }
 
-  private sharedGrant(engineId: string, profile: EngineResourceProfile): number {
+  private grantThreads(engineId: string, profile: EngineResourceProfile): number {
+    if (this.policy === 'exclusive') return clampThreads(this.cpuBudget(), profile);
     const participants: SharedParticipant[] = [];
     for (const [id, candidate] of this.profiles) {
       if (candidate.resourceClass !== 'cpu') continue;
       participants.push({ engineId: id, maxThreads: candidate.maxThreads, weight: candidate.weight ?? 1 });
     }
-    const allocation = allocateSharedThreads(this.cpuBudget(), participants);
-    return clampThreads(allocation.get(engineId) ?? 1, profile);
+    return clampThreads(allocateSharedThreads(this.cpuBudget(), participants).get(engineId) ?? 1, profile);
   }
 
   private makeLease(engineId: string, profile: EngineResourceProfile, threads: number): ResourceLease {
@@ -219,9 +222,7 @@ export class EngineResourceBroker {
   }
 
   private drainQueue(): void {
-    while (this.queue.length) {
-      if (this.policy === 'exclusive' && this.activeCpuLeases() > 0) return;
-      if (this.policy === 'bounded' && this.activeCpuLeases() >= this.maxConcurrentCpu) return;
+    while (this.queue.length && !this.cpuCapacityReached()) {
       const next = this.queue.shift()!;
       next.cleanup();
       const profile = this.profiles.get(next.engineId);
@@ -229,8 +230,7 @@ export class EngineResourceBroker {
         next.reject(new Error(`Engine ${next.engineId} is no longer registered with the resource broker`));
         continue;
       }
-      const threads = this.policy === 'exclusive' ? clampThreads(this.cpuBudget(), profile) : this.sharedGrant(next.engineId, profile);
-      next.grant(this.makeLease(next.engineId, profile, threads));
+      next.grant(this.makeLease(next.engineId, profile, this.grantThreads(next.engineId, profile)));
     }
   }
 
@@ -245,22 +245,9 @@ export class EngineResourceBroker {
     const profile = this.profiles.get(request.engineId);
     if (!profile) throw new Error(`Engine ${request.engineId} is not registered with the resource broker`);
     if (request.signal?.aborted) throw abortError();
-
-    if (profile.resourceClass === 'gpu') {
-      return this.makeLease(request.engineId, profile, 1);
-    }
-
-    if (this.policy === 'shared') {
-      return this.makeLease(request.engineId, profile, this.sharedGrant(request.engineId, profile));
-    }
-
-    const currentActive = this.activeCpuLeases();
-    const hasQueue = this.queue.length > 0;
-    const canStart = this.policy === 'exclusive' ? currentActive === 0 && !hasQueue : currentActive < this.maxConcurrentCpu && !hasQueue;
-
-    if (canStart) {
-      const threads = this.policy === 'exclusive' ? clampThreads(this.cpuBudget(), profile) : this.sharedGrant(request.engineId, profile);
-      return this.makeLease(request.engineId, profile, threads);
+    if (profile.resourceClass === 'gpu') return this.makeLease(request.engineId, profile, 1);
+    if (this.policy === 'shared' || (!this.queue.length && !this.cpuCapacityReached())) {
+      return this.makeLease(request.engineId, profile, this.grantThreads(request.engineId, profile));
     }
 
     return new Promise<ResourceLease>((resolve, reject) => {

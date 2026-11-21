@@ -124,11 +124,6 @@ function clampElo(elo: number): number {
   return Math.max(MAIA3_MIN_ELO, Math.min(MAIA3_MAX_ELO, Math.round(elo)));
 }
 
-function clampTopP(topP: number | undefined): number {
-  if (!Number.isFinite(topP)) return 1;
-  return Math.max(0.01, Math.min(1, Number(topP)));
-}
-
 function normalizeTemperature(temperature: number | undefined): number {
   if (!Number.isFinite(temperature) || Number(temperature) <= 0) return 1;
   return Math.max(0.01, Math.min(5, Number(temperature)));
@@ -144,41 +139,15 @@ function boardFromInput(input: Maia3EvaluateInput): BoardState {
   throw new Error('Maia3 evaluation needs a board, FEN, or position history');
 }
 
-function swapColor(piece: Piece): Piece {
-  return `${piece[0] === 'w' ? 'b' : 'w'}${piece[1] as PieceRole}`;
-}
-
 function verticalMirrorSquare(index: number): number {
-  const file = index & 7;
-  const rank = index >> 3;
-  return file + (7 - rank) * 8;
+  return index ^ 56;
 }
 
 function mirrorUciRanks(uci: string): string {
-  const mirrorSquareName = (square: string) => `${square[0]}${9 - Number(square[1])}`;
-  return `${mirrorSquareName(uci.slice(0, 2))}${mirrorSquareName(uci.slice(2, 4))}${uci.slice(4)}`;
+  return `${uci[0]}${9 - Number(uci[1])}${uci[2]}${9 - Number(uci[3])}${uci.slice(4)}`;
 }
 
-function perspectivePieceAt(board: BoardState, tokenSquare: number): Piece | null {
-  if (board.turn === 'w') return board.squares[tokenSquare];
-  const piece = board.squares[verticalMirrorSquare(tokenSquare)];
-  return piece ? swapColor(piece) : null;
-}
-
-const PIECE_CHANNEL: Record<Piece, number> = {
-  wp: 0,
-  wn: 1,
-  wb: 2,
-  wr: 3,
-  wq: 4,
-  wk: 5,
-  bp: 6,
-  bn: 7,
-  bb: 8,
-  br: 9,
-  bq: 10,
-  bk: 11,
-};
+const PIECE_CHANNEL: Record<Piece, number> = { wp: 0, wn: 1, wb: 2, wr: 3, wq: 4, wk: 5, bp: 6, bn: 7, bb: 8, br: 9, bq: 10, bk: 11 };
 
 /**
  * Maia3's browser ONNX takes side-to-move-normalized square tokens shaped
@@ -187,9 +156,11 @@ const PIECE_CHANNEL: Record<Piece, number> = {
  */
 export function boardToMaia3Tokens(board: BoardState): Float32Array {
   const tokens = new Float32Array(64 * 12);
+  const black = board.turn === 'b';
   for (let square = 0; square < 64; square++) {
-    const piece = perspectivePieceAt(board, square);
-    if (!piece) continue;
+    const raw = board.squares[black ? verticalMirrorSquare(square) : square];
+    if (!raw) continue;
+    const piece: Piece = black ? `${raw[0] === 'w' ? 'b' : 'w'}${raw[1] as PieceRole}` : raw;
     tokens[square * 12 + PIECE_CHANNEL[piece]] = 1;
   }
   return tokens;
@@ -201,9 +172,7 @@ export function maia3MoveIndex(modelUci: string): number | undefined {
   const fromRank = Number(modelUci[1]) - 1;
   const toFile = modelUci.charCodeAt(2) - 97;
   const toRank = Number(modelUci[3]) - 1;
-  const from = fromFile + fromRank * 8;
-  const to = toFile + toRank * 8;
-  if (modelUci.length === 4) return from * 64 + to;
+  if (modelUci.length === 4) return (fromFile + fromRank * 8) * 64 + (toFile + toRank * 8);
   if (fromRank !== 6 || toRank !== 7) return undefined;
   const promo = { q: 0, r: 1, b: 2, n: 3 }[modelUci[4] as 'q' | 'r' | 'b' | 'n'];
   return 4096 + (fromFile * 8 + toFile) * 4 + promo;
@@ -228,37 +197,32 @@ function softmax(values: number[]): number[] {
   return sum > 0 ? exp.map((value) => value / sum) : values.map(() => 1 / values.length);
 }
 
-function legalPolicyFromLogits(board: BoardState, logits: Float32Array, temperature: number): Maia3MovePolicyEntry[] {
-  const legal = legalMaia3Moves(board);
+function legalPolicyFromLogits(
+  legal: Array<{ uci: string; modelUci: string; index: number }>,
+  logits: Float32Array,
+  temperature: number,
+): Maia3MovePolicyEntry[] {
   if (!legal.length) return [];
-  const scaledLogits = legal.map((entry) => Number(logits[entry.index] ?? -Infinity) / temperature);
-  const probabilities = softmax(scaledLogits);
+  const probabilities = softmax(legal.map((entry) => Number(logits[entry.index] ?? -Infinity) / temperature));
   return legal
-    .map((entry, i) => ({
-      uci: entry.uci,
-      prior: probabilities[i],
-      logit: Number(logits[entry.index] ?? -Infinity),
-      index: entry.index,
-    }))
+    .map((entry, i) => ({ uci: entry.uci, prior: probabilities[i], logit: Number(logits[entry.index] ?? -Infinity), index: entry.index }))
     .sort((a, b) => b.prior - a.prior);
-}
-
-function topPPool(policy: Maia3MovePolicyEntry[], topP: number): Maia3MovePolicyEntry[] {
-  if (topP >= 1) return policy;
-  const pool: Maia3MovePolicyEntry[] = [];
-  let cumulative = 0;
-  for (const entry of policy) {
-    pool.push(entry);
-    cumulative += entry.prior;
-    if (cumulative >= topP) break;
-  }
-  return pool.length ? pool : policy.slice(0, 1);
 }
 
 export function chooseFromMaia3Policy(policy: Maia3MovePolicyEntry[], options: Maia3ChooseOptions = {}): string | null {
   if (!policy.length) return null;
   if ((options.style ?? 'sample') === 'argmax') return policy[0].uci;
-  const pool = topPPool(policy, clampTopP(options.topP));
+  const topP = Number.isFinite(options.topP) ? Math.max(0.01, Math.min(1, Number(options.topP))) : 1;
+  let pool = policy;
+  if (topP < 1) {
+    pool = [];
+    let cumulative = 0;
+    for (const entry of policy) {
+      pool.push(entry);
+      cumulative += entry.prior;
+      if (cumulative >= topP) break;
+    }
+  }
   const total = pool.reduce((sum, entry) => sum + entry.prior, 0);
   if (!(total > 0)) return pool[0].uci;
   let r = Math.random() * total;
@@ -354,11 +318,18 @@ export class Maia3BrowserEvaluator {
         onProgress: options.onProgress,
         signal: options.signal,
       });
+    const urls = options.modelUrl ? [options.modelUrl] : (options.fallbackUrls ?? maia3ModelFallbackUrls());
     let modelLoad: Lc0ModelLoadResult;
-    if (options.modelUrl) {
-      modelLoad = await load(options.modelUrl);
-    } else {
-      modelLoad = await Maia3BrowserEvaluator.loadWithFallback(load, options.fallbackUrls ?? maia3ModelFallbackUrls(), options.signal);
+    for (let i = 0; ; i++) {
+      const url = urls[i];
+      try {
+        modelLoad = await load(url);
+        break;
+      } catch (error) {
+        const next = urls[i + 1];
+        if (options.signal?.aborted || !next) throw error;
+        console.warn(`Maia3 model ${url} unavailable (${error instanceof Error ? error.message : String(error)}); falling back to ${next}`);
+      }
     }
     const create = async (loaded: Lc0ModelLoadResult) => {
       options.signal?.throwIfAborted();
@@ -410,23 +381,6 @@ export class Maia3BrowserEvaluator {
     }
   }
 
-  private static async loadWithFallback(
-    load: (url: string) => Promise<Lc0ModelLoadResult>,
-    urls: readonly string[],
-    signal?: AbortSignal,
-  ): Promise<Lc0ModelLoadResult> {
-    for (let i = 0; ; i++) {
-      const url = urls[i];
-      try {
-        return await load(url);
-      } catch (error) {
-        const next = urls[i + 1];
-        if (signal?.aborted || !next) throw error;
-        console.warn(`Maia3 model ${url} unavailable (${error instanceof Error ? error.message : String(error)}); falling back to ${next}`);
-      }
-    }
-  }
-
   private static postInit(
     worker: Worker,
     model: string | ArrayBuffer,
@@ -437,7 +391,6 @@ export class Maia3BrowserEvaluator {
     close: () => Promise<void> = () => disposeOrtWorker(worker),
   ): Promise<{ inputNames: string[]; outputNames: string[]; backend: string; ortRuntime?: OrtSessionDiagnostics }> {
     return new Promise((resolve, reject) => {
-      const id = 0;
       const cleanup = () => {
         worker.removeEventListener('message', onMessage);
         worker.removeEventListener('error', onError);
@@ -469,7 +422,7 @@ export class Maia3BrowserEvaluator {
           modelLoad?: Lc0ModelLoadInfo;
           modelParseError?: boolean;
         };
-        if (data.type === 'deviceLost' || data.id !== id) return;
+        if (data.type === 'deviceLost' || data.id !== 0) return;
         if (data.type === 'ready') {
           cleanup();
           resolve({ inputNames: data.inputNames ?? [], outputNames: data.outputNames ?? [], backend: data.backend ?? 'unknown', ortRuntime: data.ortRuntime });
@@ -493,7 +446,7 @@ export class Maia3BrowserEvaluator {
       }
       const message = {
         type: 'init',
-        id,
+        id: 0,
         model,
         ep,
         wasmThreads,
@@ -533,22 +486,18 @@ export class Maia3BrowserEvaluator {
   async evaluate(input: Maia3EvaluateInput, options: { selfElo?: number; oppoElo?: number; temperature?: number } = {}): Promise<Maia3Evaluation> {
     const board = boardFromInput(input);
     const tokens = boardToMaia3Tokens(board);
+    const selfElo = clampElo(options.selfElo ?? this.selfElo);
+    const oppoElo = clampElo(options.oppoElo ?? this.oppoElo);
     const response = await this.post<{ logitsMove: ArrayBuffer; logitsValue: ArrayBuffer }>(
-      {
-        type: 'evaluate',
-        tokens: tokens.buffer,
-        eloSelf: clampElo(options.selfElo ?? this.selfElo),
-        eloOppo: clampElo(options.oppoElo ?? this.oppoElo),
-      },
+      { type: 'evaluate', tokens: tokens.buffer, eloSelf: selfElo, eloOppo: oppoElo },
       [tokens.buffer],
     );
-    const logitsMove = new Float32Array(response.logitsMove);
     const value = decodeMaia3Value(new Float32Array(response.logitsValue));
     return {
       fen: boardToFen(board),
-      selfElo: clampElo(options.selfElo ?? this.selfElo),
-      oppoElo: clampElo(options.oppoElo ?? this.oppoElo),
-      legalPriors: legalPolicyFromLogits(board, logitsMove, normalizeTemperature(options.temperature)),
+      selfElo,
+      oppoElo,
+      legalPriors: legalPolicyFromLogits(legalMaia3Moves(board), new Float32Array(response.logitsMove), normalizeTemperature(options.temperature)),
       valueLogits: value.logits,
       valueProbabilities: value.probabilities,
     };
@@ -573,25 +522,23 @@ export class Maia3BrowserEvaluator {
     const board = boardFromInput(input);
     const fen = boardToFen(board);
     const tokens = boardToMaia3Tokens(board);
+    const eloSelfs = conditions.map((c) => clampElo(c.selfElo));
+    const eloOppos = conditions.map((c) => clampElo(c.oppoElo));
     const response = await this.post<{ logitsMove: ArrayBuffer; logitsValue: ArrayBuffer }>(
-      {
-        type: 'evaluateConditions',
-        tokens: tokens.buffer,
-        eloSelfs: conditions.map((c) => clampElo(c.selfElo)),
-        eloOppos: conditions.map((c) => clampElo(c.oppoElo)),
-      },
+      { type: 'evaluateConditions', tokens: tokens.buffer, eloSelfs, eloOppos },
       [tokens.buffer],
     );
     const logitsMove = new Float32Array(response.logitsMove);
     const logitsValue = new Float32Array(response.logitsValue);
-    return conditions.map((condition, i) => {
-      const moveSlice = logitsMove.subarray(i * MAIA3_POLICY_SIZE, (i + 1) * MAIA3_POLICY_SIZE);
+    const legal = legalMaia3Moves(board);
+    const temperature = normalizeTemperature(options.temperature);
+    return conditions.map((_, i) => {
       const value = decodeMaia3Value(logitsValue.subarray(i * 3, (i + 1) * 3));
       return {
         fen,
-        selfElo: clampElo(condition.selfElo),
-        oppoElo: clampElo(condition.oppoElo),
-        legalPriors: legalPolicyFromLogits(board, moveSlice as Float32Array, normalizeTemperature(options.temperature)),
+        selfElo: eloSelfs[i],
+        oppoElo: eloOppos[i],
+        legalPriors: legalPolicyFromLogits(legal, logitsMove.subarray(i * MAIA3_POLICY_SIZE, (i + 1) * MAIA3_POLICY_SIZE) as Float32Array, temperature),
         valueLogits: value.logits,
         valueProbabilities: value.probabilities,
       };

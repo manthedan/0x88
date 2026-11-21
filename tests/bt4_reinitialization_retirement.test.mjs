@@ -81,3 +81,45 @@ for (const failure of ['release', 'transport']) {
     await closing;
   });
 }
+
+test('Bt4WorkerSearcher.search strips extra non-cloneable options at the worker boundary', async (t) => {
+  const workers = controlledWorkers(t);
+  const searcher = new Bt4WorkerSearcher(T3_NET);
+  await searcher.init();
+  const worker = workers[0];
+  const origPostMessage = worker.postMessage.bind(worker);
+  const posted = [];
+  worker.postMessage = (message) => {
+    const cloned = structuredClone(message);
+    posted.push(cloned);
+    origPostMessage(message);
+    if (cloned.type === 'search') {
+      queueMicrotask(() =>
+        worker.reply({
+          id: cloned.id,
+          type: 'result',
+          result: { fen: cloned.input.fen, visits: 4, value: 0, children: [], pv: [] },
+        }),
+      );
+    }
+  };
+  const result = await searcher.search(
+    { fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' },
+    {
+      visits: 4,
+      searchPolicy: {
+        selectMove() {
+          return 'e2e4';
+        },
+      },
+    },
+  );
+  assert.equal(result.visits, 4);
+  const searchMsg = posted.find((message) => message.type === 'search');
+  assert.ok(searchMsg);
+  assert.equal('searchPolicy' in searchMsg, false);
+  assert.equal(searchMsg.visits, 4);
+  const closing = searcher.dispose();
+  worker.reply({ id: -1, type: 'disposed' });
+  await closing;
+});
