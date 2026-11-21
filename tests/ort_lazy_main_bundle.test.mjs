@@ -160,14 +160,14 @@ test('Arena mount renders basic runtime status without importing ORT', async () 
   assert.match(badge.textContent, /auto->wasm · ORT wasm threads 1 · ORT sessions 0 active/);
 });
 
-test('Arena benchmark diagnostics include a used hybrid ORT head with the Runtime panel closed', async (t) => {
+test('Arena benchmark diagnostics include a used hybrid ORT head or worker big net with the Runtime panel closed', async (t) => {
   const source = readFileSync(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8');
   const diagnosticsSource = source.slice(source.indexOf('async function safeOrtRuntimeDiagnostics('), source.indexOf('function fixedSuiteFensFromParams('));
   const diagnostics = { sessions: { active: 1 } };
   const collect = t.mock.fn(async () => diagnostics);
   const collectFor = new Function('Lc0WebHybridEvaluator', 'collectOrtRuntimeDiagnostics', `
     const ortRuntime = undefined, centipawnUsedOrt = false;
-    return async (lc0Cache) => {
+    return async (lc0Cache, bt4Telemetry = new Map()) => {
       ${stripTypeScriptTypes(diagnosticsSource)}
       return safeOrtRuntimeDiagnostics();
     };
@@ -184,6 +184,9 @@ test('Arena benchmark diagnostics include a used hybrid ORT head with the Runtim
   await ort.evaluate(START_FEN);
   assert.equal(await collectFor({ inner: ort }), diagnostics);
   assert.deepEqual(collect.mock.calls[0].arguments, [{ probeAdapter: false }]);
+
+  assert.equal(await collectFor(null, new Map([['bt4', { searches: 1 }]])), diagnostics, 'a worker-only BT4/T3 run still reports ORT diagnostics');
+  assert.equal(collect.mock.callCount(), 2);
 });
 
 test('zero-ORT config helpers update thread state and probe WebGPU safely without onnxruntime-web', async (t) => {

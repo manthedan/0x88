@@ -4866,7 +4866,8 @@ function mapValues<T>(map: Map<string, T>): Record<string, T> {
 async function safeOrtRuntimeDiagnostics(): Promise<unknown> {
   const evaluator = lc0Cache?.inner;
   const hybridUsedOrt = evaluator instanceof Lc0WebHybridEvaluator && evaluator.headBackend === 'ort' && !!evaluator.executionFootprint();
-  if (!ortRuntime && !hybridUsedOrt && !centipawnUsedOrt) return undefined;
+  const bigNetSearched = bt4Telemetry.size > 0;
+  if (!ortRuntime && !hybridUsedOrt && !centipawnUsedOrt && !bigNetSearched) return undefined;
   try {
     return await collectOrtRuntimeDiagnostics({ probeAdapter: false });
   } catch (error) {
