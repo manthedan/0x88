@@ -3,21 +3,21 @@ import { rankFlipColorSwapBoard, rankFlipMove } from '../chess/boardNormalizatio
 import { moveFromUci, moveToUci } from '../chess/moveCodec.ts';
 import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import {
-  collectOrtRuntimeDiagnostics,
-  type OrtRuntimeDiagnostics,
   type OrtSessionDiagnostics,
   ortDequantFoldEnabled,
+  probeOrtWebGpuShaderF16Support,
   requestedOrtExecutionProvider,
   requestedOrtRuntimeDiagnosticOptions,
-} from '../nn/ortRuntime.ts';
+} from '../nn/ortConfig.ts';
+import type { OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
 import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import { terminateEngineWorker } from './engineRetirement.ts';
 import { type LargeNetPrefetchOptions, type LargeNetPrefetchResult, largeNetWorkerEp, phoneColdPrefetch } from './largeNetDownload.ts';
-import { lc0SplitKUrl } from './lc0SmallModelSelection.ts';
-import type { Lc0Evaluation, Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import { lc0SplitKUrl } from './lc0ModelUrls.ts';
+import type { Lc0Evaluation, Lc0EvaluatorInput } from './lc0EvaluatorBase.ts';
 import { PHONE_LARGE_NET_SUFFIX, phoneBigNetBlocked } from './phoneLargeNetPolicy.ts';
 
 export interface BigNetConfig {
@@ -209,25 +209,12 @@ function bigNetProbeKey(config: BigNetConfig): string {
 /** WebGPU usable for big-net search? Cached after the first probe. Asset probes are tracked separately per net. */
 export async function probeBt4Support(): Promise<boolean> {
   if (supportProbe) return supportProbe;
-  supportProbe = (async () => {
-    try {
-      // An explicit ?ortEp=wasm override counts as "no WebGPU" so the UI and
-      // visit ladders match the engine's actual (forced) backend.
-      if (requestedOrtExecutionProvider() === 'wasm') {
-        supportedCached = false;
-        return supportedCached;
-      }
-      const diag = await collectOrtRuntimeDiagnostics({ probeAdapter: true });
-      // An adapter without shader-f16 cannot run the f16 nets, and the worker
-      // (ep 'auto') resolves to WASM there. Read the adapter itself rather than
-      // this page's resolved providers: a strict ?ep=webgpu page keeps
-      // ['webgpu'] while the worker still picks WASM.
-      supportedCached = diag.webgpuAvailable === true && diag.adapter?.ok !== false && diag.adapter?.shaderF16 !== false;
-    } catch {
-      supportedCached = false;
-    }
-    return supportedCached;
-  })();
+  if (requestedOrtExecutionProvider() === 'wasm') {
+    supportedCached = false;
+    supportProbe = Promise.resolve(false);
+  } else {
+    supportProbe = probeOrtWebGpuShaderF16Support().then((supported) => (supportedCached = supported));
+  }
   return supportProbe;
 }
 

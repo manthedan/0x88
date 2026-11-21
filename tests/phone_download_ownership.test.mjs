@@ -724,7 +724,9 @@ test('a saved Arena run with no games shows its own opening, not the replaced ru
   assert.equal(charts.hidden, true, "the replaced run's charts are not shown beside the new scoreboard");
 });
 
-const restoreGuard = extract(source.play, 'async function ctxCheckRestoredDownloadConsent(', 'function ctxPrepareOrStartEngine(');
+const restoreGuard =
+  extract(source.play, 'function ctxShowEngineRetry(', 'function ctxSetEngineFailure(') +
+  extract(source.play, 'async function ctxCheckRestoredDownloadConsent(', 'function ctxPrepareOrStartEngine(');
 const readinessEntry = extract(source.play, 'async function ctxVerifySelectedEngineReady(', '  const generation =', 'await retirement;\nadmit();\n}');
 const moveEntry = extract(source.play, 'async function ctxEngineTurn(', '  ctxSetEngineThinking(ctx, true);', 'await admit();\n}');
 for (const key of Object.keys(BIG_NETS)) {

@@ -1,8 +1,8 @@
-import { type OrtExecutionProviderPreference, requestedOrtExecutionProvider, resolveFreshWorkerOrtSessionPlacement } from '../nn/ortRuntime.ts';
+import { type OrtExecutionProviderPreference, requestedOrtExecutionProvider, resolveFreshWorkerOrtSessionPlacement } from '../nn/ortConfig.ts';
 import type { BigNetConfig } from './bt4Engine.ts';
 import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryClass.ts';
 import { awaitWorkerReclaim, terminateEngineWorker } from './engineRetirement.ts';
-import { lc0SplitKUrl, selectLc0OrtModelUrl } from './lc0SmallModelSelection.ts';
+import { lc0SplitKUrl, selectLc0OrtModelUrl } from './lc0ModelUrls.ts';
 import { inspectLc0ModelDownload, type Lc0ModelDownloadState, type Lc0ModelLoadResult, lc0ModelCacheEntryExists, untilAborted } from './modelCache.ts';
 import type { ModelPrefetchReply, ModelPrefetchRequest } from './modelPrefetchWorker.ts';
 

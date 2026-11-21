@@ -8,10 +8,61 @@ import { untilAborted } from '../lc0/modelCache.ts';
 import { isOnnxModelParseError, OrtSessionFallbackError, ortErrorMessage } from '../lc0/onnxModelRecovery.ts';
 import { supportsWasmRelaxedSimdIntegerDot } from '../lc0/wasmFeatures.ts';
 import { foldOnnxDequantizeLinear } from './onnxDequantFold.ts';
+import {
+  explicitWasmOnlyOrtEpPin,
+  gpuAdapterShaderF16,
+  gpuAdapterVendor,
+  ORT_FALSY_FLAGS,
+  ORT_TRUTHY_FLAGS,
+  type OrtDequantFoldSummary,
+  type OrtExecutionProviderPreference,
+  type OrtGraphOptimizationLevel,
+  type OrtRuntimeDiagnosticOptions,
+  type OrtSessionDiagnostics,
+  type OrtSessionPlacement,
+  ortBrowserParam,
+  ortDebugParam,
+  ortDequantFoldEnabled,
+  ortEnvValue,
+  probeOrtWebGpuShaderF16Support,
+  requestedOrtExecutionProvider,
+  requestedOrtGraphOptimizationLevel,
+  requestedOrtPreferredOutputLocation,
+  requestedOrtRuntimeDiagnosticOptions,
+  requestedOrtWebGpuApiInstrumentation,
+  requestedOrtWebGpuProfiling,
+  requestOrtWebGpuAdapter,
+  resolveFreshWorkerOrtSessionPlacement,
+  selectOrtExecutionProviders,
+  setOrtDequantFoldForCurrentThread,
+  setOrtRuntimeDiagnosticOptionsForCurrentThread,
+  setRequestedOrtExecutionProviderForCurrentThread,
+  webgpuAvailable,
+  webgpuNavigator,
+} from './ortConfig.ts';
+
+export {
+  gpuAdapterShaderF16,
+  gpuAdapterVendor,
+  type OrtDequantFoldSummary,
+  type OrtExecutionProviderPreference,
+  type OrtGraphOptimizationLevel,
+  type OrtRuntimeDiagnosticOptions,
+  type OrtSessionDiagnostics,
+  type OrtSessionPlacement,
+  ortDequantFoldEnabled,
+  probeOrtWebGpuShaderF16Support,
+  requestedOrtExecutionProvider,
+  requestedOrtGraphOptimizationLevel,
+  requestedOrtRuntimeDiagnosticOptions,
+  resolveFreshWorkerOrtSessionPlacement,
+  setOrtDequantFoldForCurrentThread,
+  setOrtRuntimeDiagnosticOptionsForCurrentThread,
+  setRequestedOrtExecutionProviderForCurrentThread,
+};
 
 (ort.env as unknown as { logLevel?: 'fatal' }).logLevel = 'fatal';
 
-export type OrtExecutionProviderPreference = 'wasm' | 'webgpu' | 'webgpu,wasm' | 'auto';
 export type OrtWasmSimdVariant = 'bundled' | 'fixed' | 'relaxed';
 export type OrtWasmArtifactSelection = {
   variant: OrtWasmSimdVariant;
@@ -62,8 +113,11 @@ export const ORT_RUNTIME_ARTIFACT_FILES: Readonly<Record<OrtRuntimeArtifactKind,
 
 const ORT_JSPI_UNAVAILABLE = 'WebAssembly.Suspending or WebAssembly.promising is unavailable';
 const IS_PROD = (import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD === true;
-const FALSY_FLAGS = new Set(['0', 'false', 'no', 'off']);
-const TRUTHY_FLAGS = new Set(['1', 'true', 'yes', 'on']);
+const FALSY_FLAGS = ORT_FALSY_FLAGS;
+const TRUTHY_FLAGS = ORT_TRUTHY_FLAGS;
+const browserParam = ortBrowserParam;
+const envValue = ortEnvValue;
+const debugParam = ortDebugParam;
 
 /** JSPI glue wraps imports with `Suspending` and exports with `promising`. */
 export function ortJspiApiAvailable(
@@ -171,16 +225,6 @@ export type OrtWebGpuDiagnosticsSnapshot = {
   api: OrtWebGpuApiInstrumentationSummary;
 };
 
-export type OrtGraphOptimizationLevel = NonNullable<ort.InferenceSession.SessionOptions['graphOptimizationLevel']>;
-export type OrtSessionDiagnostics = {
-  /** LC0 worker's effective IO, when available (not merely the requested mode). */
-  ioMode?: 'cpu' | 'gpu' | 'gpu-capture';
-  fixedBatchSize?: number;
-  graphOptimizationLevel: OrtGraphOptimizationLevel;
-  dequantFoldEnabled: boolean;
-  dequantFold?: OrtDequantFoldSummary;
-};
-
 export type OrtRuntimeDiagnostics = OrtSessionDiagnostics & {
   requestedEp: OrtExecutionProviderPreference;
   resolvedExecutionProviders: string[];
@@ -214,35 +258,6 @@ export type OrtRuntimeDiagnostics = OrtSessionDiagnostics & {
   webgpuDiagnostics?: OrtWebGpuDiagnosticsSnapshot;
 };
 
-export type OrtDequantFoldSummary = {
-  enabled: boolean;
-  foldedNodes: number;
-  skippedNodes: number;
-  removedInitializers: number;
-  bytesBefore: number;
-  bytesAfter: number;
-  elapsedMs: number;
-  /** Set when ORT rejected the folded model and the session was created from the original bytes. */
-  discardedAfter?: string;
-};
-
-function browserParam(name: string): string | null {
-  try {
-    if (typeof location === 'undefined') return null;
-    return new URLSearchParams(location.search).get(name);
-  } catch {
-    return null;
-  }
-}
-
-function envValue(name: string): string | undefined {
-  return globalThis.process?.env?.[name];
-}
-
-function debugParam(name: string): string | null {
-  return browserParam(name) ?? envValue(`TINY_LEELA_${name.toUpperCase()}`) ?? null;
-}
-
 export function tinyLeelaDebugEnabled(area = 'latency'): boolean {
   const normalizedArea = area.toLowerCase();
   const direct = debugParam(`debug${normalizedArea[0].toUpperCase()}${normalizedArea.slice(1)}`) ?? debugParam(normalizedArea);
@@ -263,42 +278,11 @@ export function tinyLeelaLogLatency(label: string, payload: Record<string, unkno
   );
 }
 
-function diagFlagEnabled(disableNames: string[], enableNames: string[]): boolean {
-  if (
-    disableNames.some((name) => {
-      const value = debugParam(name);
-      return value !== null && FALSY_FLAGS.has(value.toLowerCase());
-    })
-  ) {
-    return false;
-  }
-  return enableNames.some((name) => {
-    const value = debugParam(name);
-    return value !== null && !FALSY_FLAGS.has(value.toLowerCase());
-  });
-}
-
-let forcedOrtExecutionProvider: OrtExecutionProviderPreference | null = null;
-let forcedOrtDiagnosticsOptions: OrtRuntimeDiagnosticOptions | null = null;
 let forcedOrtWasmArtifact: OrtWasmArtifactSelection = { variant: 'bundled' };
 let forcedOrtWasmThreads: number | null = null;
 let lockedOrtWasmArtifactKey: string | null = null;
 let forcedOrtRuntimeArtifactKind: OrtRuntimeArtifactKind | null = null;
 let lockedOrtRuntimeArtifactKind: OrtRuntimeArtifactKind | null = null;
-
-export type OrtRuntimeDiagnosticOptions = {
-  graphOptimizationLevel?: OrtGraphOptimizationLevel;
-  /** Request JSEP kernel timestamp callbacks (unavailable on the native WebGPU EP in ORT 1.27). */
-  webgpuProfiling?: boolean;
-  /** Wrap browser WebGPU APIs before ORT initializes to count submits/maps/copies. */
-  webgpuApiInstrumentation?: boolean;
-  /** Ask ORT WebGPU to return GPU-backed outputs so tensor.getData() can be timed separately. */
-  preferredOutputLocation?: 'cpu' | 'cpu-pinned' | 'gpu-buffer';
-};
-
-export function setRequestedOrtExecutionProviderForCurrentThread(value: OrtExecutionProviderPreference | null): void {
-  forcedOrtExecutionProvider = value;
-}
 
 export function validateOrtWasmArtifactSelection(selection: OrtWasmArtifactSelection): OrtWasmArtifactSelection {
   const customPathCount = Number(Boolean(selection.mjsUrl)) + Number(Boolean(selection.wasmUrl));
@@ -343,32 +327,7 @@ function lockRequestedOrtWasmArtifact(): void {
   lockedOrtWasmArtifactKey = key;
 }
 
-export function setOrtRuntimeDiagnosticOptionsForCurrentThread(options: OrtRuntimeDiagnosticOptions | null): void {
-  forcedOrtDiagnosticsOptions = options;
-}
-
-let forcedOrtDequantFold: boolean | null = null;
 let lastOrtDequantFold: OrtDequantFoldSummary | null = null;
-
-/** Worker threads cannot see the page URL, so the page forwards its choice explicitly. */
-export function setOrtDequantFoldForCurrentThread(value: boolean | null): void {
-  forcedOrtDequantFold = value;
-}
-
-/**
- * Resolve an explicit model policy (Small/default callers keep folding). A worker pin
- * wins over the page/environment override, which wins over the model's default.
- * `?ortDequantFold=1/0` can force either arm for benchmarking on every model.
- */
-export function ortDequantFoldEnabled(defaultEnabled = true): boolean {
-  if (forcedOrtDequantFold !== null) return forcedOrtDequantFold;
-  const raw = String(browserParam('ortDequantFold') ?? envValue('ORT_DEQUANT_FOLD') ?? '')
-    .trim()
-    .toLowerCase();
-  if (FALSY_FLAGS.has(raw)) return false;
-  if (TRUTHY_FLAGS.has(raw)) return true;
-  return defaultEnabled;
-}
 
 export function lastOrtDequantFoldSummary(): OrtDequantFoldSummary | null {
   return lastOrtDequantFold;
@@ -444,47 +403,9 @@ function describeDequantFold(): string | undefined {
   return `dequant fold: ${fold.foldedNodes} DequantizeLinear folded (${(fold.bytesBefore / 1e6).toFixed(1)} -> ${(fold.bytesAfter / 1e6).toFixed(1)} MB, ${fold.elapsedMs.toFixed(0)} ms)`;
 }
 
-function normalizeEp(value: string | null | undefined): OrtExecutionProviderPreference {
-  const raw = String(value ?? '')
-    .trim()
-    .toLowerCase();
-  if (!raw || raw === 'auto') return 'auto';
-  if (raw === 'webgpu' || raw === 'gpu') return 'webgpu';
-  if (raw === 'webgpu,wasm' || raw === 'webgpu+wasm' || raw === 'gpu,wasm' || raw === 'gpu+wasm') return 'webgpu,wasm';
-  return 'wasm';
-}
-
-function ambientOrtExecutionProviderParam(): string | null | undefined {
-  return (
-    browserParam('ortEp') ?? browserParam('ep') ?? browserParam('executionProviders') ?? envValue('TINY_LEELA_ORT_EP') ?? envValue('ORT_EXECUTION_PROVIDERS')
-  );
-}
-
-export function requestedOrtExecutionProvider(): OrtExecutionProviderPreference {
-  return forcedOrtExecutionProvider ?? normalizeEp(ambientOrtExecutionProviderParam());
-}
-
-function webgpuAvailable(): boolean {
-  return typeof navigator !== 'undefined' && !!navigator.gpu;
-}
-
 let probedWebGpuAdapterUsable: boolean | null = null;
 /** null = not probed or the adapter does not report features; false = adapter lacks shader-f16. */
 let probedWebGpuShaderF16: boolean | null = null;
-
-/**
- * Whether the adapter reports `shader-f16`. null when that is unknowable (no
- * adapter, no `features` set-like, a throwing getter): unknown keeps WebGPU.
- */
-export function gpuAdapterShaderF16(adapter: unknown): boolean | null {
-  if (!adapter || typeof adapter !== 'object') return null;
-  try {
-    const features = (adapter as { features?: { has?: (name: string) => boolean } }).features;
-    return typeof features?.has === 'function' ? features.has('shader-f16') === true : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * The WebGPU EP is used only when the probed adapter can run f16 shaders.
@@ -503,17 +424,6 @@ function webgpuUsableForProviderSelection(): boolean {
 export function resolvedOrtExecutionProviders(requested = requestedOrtExecutionProvider()): string[] {
   if (requested !== 'webgpu' && lockedOrtRuntimeArtifactKind === 'wasm') return ['wasm'];
   return selectOrtExecutionProviders(requested, webgpuUsableForProviderSelection());
-}
-
-function selectOrtExecutionProviders(requested: OrtExecutionProviderPreference, webgpuUsable: boolean): string[] {
-  if (requested === 'webgpu') return ['webgpu'];
-  if (requested !== 'wasm' && webgpuUsable) return ['webgpu', 'wasm'];
-  return ['wasm'];
-}
-
-function explicitWasmOnlyOrtEpPin(): boolean {
-  const raw = ambientOrtExecutionProviderParam();
-  return raw !== null && raw !== undefined && String(raw).trim() !== '' && normalizeEp(raw) === 'wasm';
 }
 
 /**
@@ -657,45 +567,12 @@ function requestedOrtWasmThreads(isBrowserMainThread: boolean, isNode: boolean):
   });
 }
 
-/** Worker init pins this option explicitly because its location does not contain the page query. */
-export function requestedOrtGraphOptimizationLevel(): OrtGraphOptimizationLevel {
-  const value = forcedOrtDiagnosticsOptions?.graphOptimizationLevel ?? browserParam('ortGraphOpt');
-  return value === 'disabled' || value === 'basic' || value === 'extended' || value === 'layout' || value === 'all' ? value : 'all';
-}
-
-/** Effective page/thread diagnostics forwarded to dedicated ORT workers. */
-export function requestedOrtRuntimeDiagnosticOptions(): OrtRuntimeDiagnosticOptions {
-  return {
-    graphOptimizationLevel: requestedOrtGraphOptimizationLevel(),
-    preferredOutputLocation: requestedOrtPreferredOutputLocation(),
-    webgpuProfiling: requestedOrtWebGpuProfiling(),
-    webgpuApiInstrumentation: requestedOrtWebGpuApiInstrumentation(),
-  };
-}
-
 export function collectOrtSessionDiagnostics(): OrtSessionDiagnostics {
   return {
     graphOptimizationLevel: requestedOrtGraphOptimizationLevel(),
     dequantFoldEnabled: ortDequantFoldEnabled(),
     ...(lastOrtDequantFold ? { dequantFold: { ...lastOrtDequantFold } } : {}),
   };
-}
-
-function requestedOrtPreferredOutputLocation(): OrtRuntimeDiagnosticOptions['preferredOutputLocation'] | undefined {
-  if (forcedOrtDiagnosticsOptions?.preferredOutputLocation) return forcedOrtDiagnosticsOptions.preferredOutputLocation;
-  const raw = browserParam('ortPreferredOutputLocation') ?? browserParam('preferredOutputLocation');
-  if (raw === 'gpu-buffer' || raw === 'cpu-pinned' || raw === 'cpu') return raw;
-  return diagFlagEnabled(['ortGpuOutputs'], ['ortGpuOutputs', 'ortReadbackProfile']) ? 'gpu-buffer' : undefined;
-}
-
-function requestedOrtWebGpuProfiling(): boolean {
-  if (forcedOrtDiagnosticsOptions?.webgpuProfiling !== undefined) return forcedOrtDiagnosticsOptions.webgpuProfiling;
-  return diagFlagEnabled(['ortWebGpuProfile', 'ortKernelProfile'], ['ortWebGpuProfile', 'ortKernelProfile', 'ortReadbackProfile']);
-}
-
-function requestedOrtWebGpuApiInstrumentation(): boolean {
-  if (forcedOrtDiagnosticsOptions?.webgpuApiInstrumentation !== undefined) return forcedOrtDiagnosticsOptions.webgpuApiInstrumentation;
-  return diagFlagEnabled(['ortMonkeyPatchWebGpu', 'ortWebGpuApiTrace'], ['ortMonkeyPatchWebGpu', 'ortWebGpuApiTrace', 'ortReadbackProfile']);
 }
 
 const ORT_LOG_LEVELS = ['verbose', 'info', 'warning', 'error', 'fatal'] as const;
@@ -1043,15 +920,6 @@ function logOrtSessionReady(providers: string[], ms: number, note?: string) {
   });
 }
 
-function webgpuNavigator(): { requestAdapter?: (opts?: unknown) => Promise<unknown> } | undefined {
-  if (typeof navigator === 'undefined') return undefined;
-  return (navigator as Navigator & { gpu?: { requestAdapter?: (opts?: unknown) => Promise<unknown> } }).gpu;
-}
-
-async function requestOrtWebGpuAdapter(): Promise<unknown> {
-  return webgpuNavigator()?.requestAdapter?.({ powerPreference: 'high-performance' });
-}
-
 const GPU_LIMIT_KEYS = [
   'maxBindGroups',
   'maxBindingsPerBindGroup',
@@ -1194,30 +1062,6 @@ async function ensureWebGpuAdapterProbed(requested = requestedOrtExecutionProvid
   }
 }
 
-/**
- * `GPUAdapterInfo.vendor`, lower-cased; `adapter.info` first, then the older
- * `requestAdapterInfo()`. Never throws: a getter or API that throws just leaves
- * the vendor unknown (so the caller keeps WebGPU and the default model).
- */
-export async function gpuAdapterVendor(adapter: unknown): Promise<string | undefined> {
-  if (!adapter || typeof adapter !== 'object') return undefined;
-  const rec = adapter as { info?: { vendor?: unknown }; requestAdapterInfo?: () => Promise<{ vendor?: unknown }> };
-  let vendor: unknown;
-  try {
-    vendor = rec.info?.vendor;
-  } catch {
-    vendor = undefined;
-  }
-  if (typeof vendor !== 'string') {
-    try {
-      if (typeof rec.requestAdapterInfo === 'function') vendor = (await rec.requestAdapterInfo())?.vendor;
-    } catch {
-      /* optional API */
-    }
-  }
-  return typeof vendor === 'string' && vendor.trim() ? vendor.trim().toLowerCase() : undefined;
-}
-
 /** Test hook: forget this thread's adapter probe so the next session probes again. */
 export function resetWebGpuAdapterProbeForTests(): void {
   probedWebGpuAdapterUsable = null;
@@ -1243,13 +1087,6 @@ async function webGpuAdapterVendor(): Promise<string | undefined> {
   return probedWebGpuAdapterVendor || undefined;
 }
 
-export type OrtSessionPlacement = {
-  /** Primary provider followed by any fallback provider for the next createOrtSession call. */
-  providers: string[];
-  /** Lower-cased GPUAdapterInfo.vendor ('apple', 'nvidia', ...); only probed when providers include webgpu. */
-  adapterVendor?: string;
-};
-
 /**
  * Where the next session on this thread will run, decided the same way
  * createOrtSession decides it. Lets a caller pick device-specific model bytes
@@ -1260,13 +1097,6 @@ export async function resolveOrtSessionPlacement(requested = requestedOrtExecuti
   const providers = resolvedOrtExecutionProviders(requested);
   if (!providers.includes('webgpu') || !webgpuAvailable()) return { providers };
   const adapterVendor = await webGpuAdapterVendor();
-  return adapterVendor ? { providers, adapterVendor } : { providers };
-}
-
-export async function resolveFreshWorkerOrtSessionPlacement(requested: OrtExecutionProviderPreference): Promise<OrtSessionPlacement> {
-  const adapter = requested === 'wasm' ? undefined : await requestOrtWebGpuAdapter().catch(() => undefined);
-  const providers = selectOrtExecutionProviders(requested, !!adapter && gpuAdapterShaderF16(adapter) !== false);
-  const adapterVendor = providers.includes('webgpu') ? await gpuAdapterVendor(adapter) : undefined;
   return adapterVendor ? { providers, adapterVendor } : { providers };
 }
 

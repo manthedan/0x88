@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { ORT_RUNTIME_ASSET_FILES } from '../scripts/ort_runtime_assets.mjs';
+import { selectOrtExecutionProviders } from '../src/nn/ortConfig.ts';
 import {
   coerceOrtRuntimeArtifactKind,
   gpuOrtRuntimeArtifactForThread,
@@ -226,12 +227,13 @@ test('once a document has loaded the CPU-only ORT runtime, a later auto request 
   const slice = (start, end) =>
     stripTypeScriptTypes(source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)))).replace('export function', 'function');
   const session = new Function(
+    'selectOrtExecutionProviders',
     `let lockedOrtRuntimeArtifactKind = null;
     let ep;
     const requestedOrtExecutionProvider = () => ep;
     const webgpuUsableForProviderSelection = () => true;
     const ortRuntimeArtifactKindForCurrentThread = () => lockedOrtRuntimeArtifactKind ?? (ep === 'wasm' ? 'wasm' : 'asyncify');
-    ${slice('export function resolvedOrtExecutionProviders(', 'function explicitWasmOnlyOrtEpPin(')}
+    ${slice('export function resolvedOrtExecutionProviders(', 'export function setOrtRuntimeArtifactKindForCurrentThread(')}
     ${slice('function lockOrtRuntimeArtifactKind(', 'let lastOrtExecutionProviders')}
     return (next) => {
       ep = next;
@@ -239,7 +241,7 @@ test('once a document has loaded the CPU-only ORT runtime, a later auto request 
       lockOrtRuntimeArtifactKind(providers);
       return providers;
     };`,
-  )();
+  )(selectOrtExecutionProviders);
   assert.deepEqual(session('wasm'), ['wasm']);
   assert.deepEqual(session('auto'), ['wasm']);
   assert.deepEqual(session('webgpu,wasm'), ['wasm']);

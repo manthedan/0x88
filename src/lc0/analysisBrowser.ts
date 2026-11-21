@@ -7,9 +7,9 @@ import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { describePgnWarning, gameTreeToPgn, parseFirstPgnGame } from '../chess/pgn.ts';
 import { moveToSan } from '../chess/san.ts';
-import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import type { Evaluator } from '../nn/evaluator.ts';
-import { collectOrtRuntimeDiagnostics, type OrtRuntimeDiagnostics, ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortRuntime.ts';
+import { ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortConfig.ts';
+import type { collectOrtRuntimeDiagnostics as CollectOrtRuntimeDiagnostics, OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import {
   BROWSER_RUNTIME_AUDIT_EVENT,
   type BrowserRuntimeAuditDetail,
@@ -231,9 +231,10 @@ import {
   transitionHiddenTab,
 } from './hiddenTabPause.ts';
 import { requestLargeNetDownloadConsent, requestLargeNetRedownloadConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
-import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
+import { createBrowserSquareformerRuntimeEvaluator, createLc0OnnxEvaluatorFromUrl } from './lazyOrtEvaluators.ts';
+import { CachedLc0Evaluator, type Lc0EvaluationProvider } from './lc0EvaluatorBase.ts';
+import { lc0SmallModelRequest } from './lc0ModelUrls.ts';
 import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
-import { CachedLc0Evaluator, type Lc0EvaluationProvider } from './onnxEvaluator.ts';
 import { type OpeningNameIndex, openingNameAt } from './openingNames.ts';
 import {
   PHONE_LARGE_NET_CHANGE_EVENT,
@@ -295,6 +296,9 @@ import {
   viridithasVariantFromParams,
 } from './viridithasVariants.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
+
+const collectOrtRuntimeDiagnostics: typeof CollectOrtRuntimeDiagnostics = async (...args) =>
+  (await import('../nn/ortRuntime.ts')).collectOrtRuntimeDiagnostics(...args);
 
 type Ground = ReturnType<typeof Chessground>;
 

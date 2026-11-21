@@ -1,6 +1,6 @@
 import type { Lc0HistoryFill } from './encoder112.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
-import { LC0_DEFAULT_POLICY_TEMPERATURE, type Lc0Evaluation, type Lc0EvaluatorInput } from './onnxEvaluator.ts';
+import { LC0_DEFAULT_POLICY_TEMPERATURE, type Lc0Evaluation, type Lc0EvaluatorInput } from './lc0EvaluatorBase.ts';
 import type {
   Lc0WebEncoderKernelVariant,
   Lc0WebExecutionFootprint,

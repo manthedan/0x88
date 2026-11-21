@@ -10,9 +10,8 @@ import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
 import { uciLineToSan, uciToSan } from '../chess/san.ts';
 import { routeDom } from '../features/dom.ts';
-import { createBrowserSquareformerRuntimeEvaluator } from '../nn/browserRuntimeEvaluator.ts';
 import type { Evaluator } from '../nn/evaluator.ts';
-import { collectOrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
+import type { collectOrtRuntimeDiagnostics as CollectOrtRuntimeDiagnostics, OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import {
   BROWSER_RUNTIME_AUDIT_EVENT,
   type BrowserRuntimeAuditDetail,
@@ -165,11 +164,13 @@ import { GameTree } from './gameTree.ts';
 import { type Lc0WebEncoderKernelVariant, type Lc0WebExecutionFootprint, Lc0WebHybridEvaluator } from './hybridEvaluator.ts';
 import { requestLargeNetDownloadConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { inspectLargeNetDownload } from './largeNetDownload.ts';
-import { createLc0OnnxEvaluatorFromUrl, lc0SmallModelRequest } from './lc0SmallModelSelection.ts';
+import { createBrowserSquareformerRuntimeEvaluator, createLc0OnnxEvaluatorFromUrl } from './lazyOrtEvaluators.ts';
+import { CachedLc0Evaluator, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics } from './lc0EvaluatorBase.ts';
+import { lc0SmallModelRequest } from './lc0ModelUrls.ts';
 import { hideLoadingProgress, renderLoadingProgress } from './loadingProgress.ts';
 import { LC0_MODEL_DOWNLOAD_NOT_APPROVED, untilAborted } from './modelCache.ts';
 import { rememberMoveFocus } from './moveListFocus.ts';
-import { CachedLc0Evaluator, type Lc0EvaluationCacheFootprint, type Lc0EvaluationCacheMetrics, type Lc0OnnxEvaluator } from './onnxEvaluator.ts';
+import type { Lc0OnnxEvaluator } from './onnxEvaluator.ts';
 import { PHONE_LARGE_NET_CHANGE_EVENT, PHONE_LARGE_NET_REASON, phoneLargeNetsBlocked, phoneSafeEngineVariant } from './phoneLargeNetPolicy.ts';
 import { PlentyChessEngine } from './plentychessEngine.ts';
 import {
@@ -228,6 +229,12 @@ import {
   viridithasVariantFromParams,
 } from './viridithasVariants.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
+
+let ortRuntime: typeof import('../nn/ortRuntime.ts') | undefined;
+const collectOrtRuntimeDiagnostics: typeof CollectOrtRuntimeDiagnostics = async (...args) => {
+  ortRuntime ??= await import('../nn/ortRuntime.ts');
+  return ortRuntime.collectOrtRuntimeDiagnostics(...args);
+};
 
 type Ground = ReturnType<typeof Chessground>;
 interface ArenaWarmupStatus {
@@ -498,7 +505,12 @@ const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, (varia
 const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant: StormphraxVariant) =>
   createStormphraxEngine(variant, ARENA_CPU_ENGINE_OPTIONS),
 );
-const centipawnCache = createCentipawnEvaluatorCache(createBrowserSquareformerRuntimeEvaluator);
+let centipawnUsedOrt = false;
+const centipawnCache = createCentipawnEvaluatorCache(async (spec, options) => {
+  const loaded = await createBrowserSquareformerRuntimeEvaluator(spec, options);
+  centipawnUsedOrt ||= loaded.resolvedRuntime.endsWith('ort');
+  return loaded;
+});
 let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
 const arenaDownloadApprovals = new Set<BigNetKey>();
@@ -562,7 +574,7 @@ async function bigNetFor(key: 'bt4' | 't3', signal: AbortSignal): Promise<{ conf
   }
   return { config: BIG_NETS[key], searcher };
 }
-let runtimeIsolation = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
+let runtimeIsolation = globalThis.crossOriginIsolated === true;
 let runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
 
 function initialPerformanceDial(): PerformanceDial {
@@ -2889,7 +2901,7 @@ async function refreshBigNetAvailability(mountSignal = mountAbort.signal): Promi
   refreshSeatControls();
 }
 
-async function renderRuntimeBadge(): Promise<void> {
+async function renderRuntimeBadge(ortDiagnostics?: OrtRuntimeDiagnostics): Promise<void> {
   const badge = maybeEl('runtimeBadge');
   if (!badge) return;
   if (isV0DeployProfile()) {
@@ -2899,20 +2911,20 @@ async function renderRuntimeBadge(): Promise<void> {
     return;
   }
   try {
-    const diag = await collectOrtRuntimeDiagnostics({ probeAdapter: true });
+    const diag = badge.closest('details')?.open ? await collectOrtRuntimeDiagnostics({ probeAdapter: true }) : ortDiagnostics;
     if (!badge.isConnected) return;
-    runtimeIsolation = diag.crossOriginIsolated === true;
-    runtimeSharedArrayBuffer = diag.wasm.sharedArrayBuffer === true;
+    runtimeIsolation = globalThis.crossOriginIsolated === true;
+    runtimeSharedArrayBuffer = typeof SharedArrayBuffer !== 'undefined';
     refreshStockfishControls();
-    const webgpu = diag.webgpuAvailable ? (diag.adapter?.ok === false ? 'WebGPU unavailable/blocked' : 'WebGPU available') : 'WebGPU unavailable';
+    const hasWebGpu = diag?.webgpuAvailable ?? !!navigator.gpu;
+    const webgpu = hasWebGpu ? (diag?.adapter?.ok === false ? 'WebGPU unavailable/blocked' : 'WebGPU API available') : 'WebGPU unavailable';
     const isolated = runtimeIsolation ? 'isolated' : 'not isolated';
     const sab = runtimeSharedArrayBuffer ? 'SAB yes' : 'SAB no';
     const sfThreads = threadedStockfishAvailable() ? 'SF threaded yes' : 'SF threaded no';
-    const ortThreads = `ORT wasm threads ${diag.wasm.numThreads ?? '?'}`;
-    const ortSessions = `ORT sessions ${diag.sessions.active} active`;
-    badge.textContent = `Runtime: ${isolated} · ${sab} · ${webgpu} · ${diag.describe} · ${ortThreads} · ${ortSessions} · ${sfThreads} · ${centipawnHybridManifestStatusText()}`;
-    badge.classList.toggle('ready', runtimeIsolation && (diag.webgpuAvailable || runtimeSharedArrayBuffer));
-    badge.classList.toggle('warn', !runtimeIsolation || !diag.webgpuAvailable);
+    const ort = diag ? ` · ${diag.describe} · ORT wasm threads ${diag.wasm.numThreads ?? '?'} · ORT sessions ${diag.sessions.active} active` : '';
+    badge.textContent = `Runtime: ${isolated} · ${sab} · ${webgpu}${ort} · ${sfThreads} · ${centipawnHybridManifestStatusText()}`;
+    badge.classList.toggle('ready', runtimeIsolation && (hasWebGpu || runtimeSharedArrayBuffer));
+    badge.classList.toggle('warn', !runtimeIsolation || !hasWebGpu);
   } catch (error) {
     if (!badge.isConnected) return;
     badge.textContent = `Runtime detection failed: ${(error as Error).message}`;
@@ -4800,7 +4812,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
     signal.throwIfAborted();
     lc0Cache = new CachedLc0Evaluator(evaluator, { maxEntries: arenaCacheEntries() });
     uninstalled = undefined; // The cache owns retirement now.
-    void renderRuntimeBadge();
+    void renderRuntimeBadge(ortDiagnostics);
     lc0Searchers.clear();
     renderCacheInfo();
     hideDownloadProgress();
@@ -4852,6 +4864,10 @@ function mapValues<T>(map: Map<string, T>): Record<string, T> {
 }
 
 async function safeOrtRuntimeDiagnostics(): Promise<unknown> {
+  const evaluator = lc0Cache?.inner;
+  const hybridUsedOrt = evaluator instanceof Lc0WebHybridEvaluator && evaluator.headBackend === 'ort' && !!evaluator.executionFootprint();
+  const bigNetSearched = bt4Telemetry.size > 0;
+  if (!ortRuntime && !hybridUsedOrt && !centipawnUsedOrt && !bigNetSearched) return undefined;
   try {
     return await collectOrtRuntimeDiagnostics({ probeAdapter: false });
   } catch (error) {
@@ -5118,6 +5134,14 @@ function revokeArenaPhoneLargeNets(): void {
 
 function wireEvents() {
   window.addEventListener(PHONE_LARGE_NET_CHANGE_EVENT, revokeArenaPhoneLargeNets, { signal: mountAbort.signal });
+  const runtimeStatus = el('runtimeBadge').closest('details')!;
+  runtimeStatus.addEventListener(
+    'toggle',
+    () => {
+      if (runtimeStatus.open) void renderRuntimeBadge();
+    },
+    { signal: mountAbort.signal },
+  );
   el('start').addEventListener('click', () => {
     void startMatch();
   });

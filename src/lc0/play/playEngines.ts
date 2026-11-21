@@ -11,9 +11,10 @@ import { inactiveCpuEnginesToEvict, PendingCpuNewGames } from '../cpuEngineResid
 import type { EngineFamily } from '../engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from '../engineProvision.ts';
 import { awaitEngineRetirements, trackEngineRetirement } from '../engineRetirement.ts';
-import { createLc0OnnxEvaluatorFromUrl } from '../lc0SmallModelSelection.ts';
+import { createLc0OnnxEvaluatorFromUrl as loadDefaultLc0Small } from '../lazyOrtEvaluators.ts';
+import { CachedLc0Evaluator } from '../lc0EvaluatorBase.ts';
+import type { createLc0OnnxEvaluatorFromUrl } from '../lc0SmallModelSelection.ts';
 import { Maia3BrowserEvaluator, maia3ModelFallbackUrls } from '../maia3.ts';
-import { CachedLc0Evaluator } from '../onnxEvaluator.ts';
 import { Lc0PuctSearcher } from '../search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from '../stockfishEngine.ts';
 
@@ -91,7 +92,7 @@ function bigNetKeep(option?: PlayEngineSpec): BigNetKey[] {
 }
 
 export function createPlayEngines(deps: PlayEngineDeps) {
-  const loadLc0Small = deps.loadLc0Small ?? createLc0OnnxEvaluatorFromUrl;
+  const loadLc0Small = deps.loadLc0Small ?? loadDefaultLc0Small;
   const createMaia3 = deps.createMaia3 ?? ((options) => Maia3BrowserEvaluator.create(options));
   const createCpuEngine = deps.createCpuEngine ?? createPlayCpuEngine;
   // Neural sessions retire on switch/unmount; verified model bytes remain

@@ -298,6 +298,20 @@
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
       "reads": ["src/lc0/onnxEvaluator.ts", "src/lc0/searchWorkerCore.ts"]
     },
+    "tests/ort_lazy_main_bundle.test.mjs": {
+      "reason": "Checks that the transitive static imports of the browser controllers exclude ONNX Runtime.",
+      "reads": [
+        "src/lc0/analysisBrowser.ts",
+        "src/lc0/arenaBrowser.ts",
+        "src/lc0/playBrowser.ts",
+        "src/lib/browserCapabilities.ts",
+        "src/lib/buildScope.ts",
+        "src/lib/docsNavigation.ts",
+        "src/lib/memprobe.ts",
+        "src/lib/nav.ts",
+        "src/lib/routeController.ts"
+      ]
+    },
     "tests/ort_session_failure.test.mjs": {
       "reason": "slices evaluator functions out of the source to run them in isolation; importing the evaluator module mounts DOM state at load (first-error retention across ORT retries)",
       "reads": ["src/lc0/onnxEvaluator.ts", "src/nn/ortRuntime.ts"]

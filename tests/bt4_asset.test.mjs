@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { setRequestedOrtExecutionProviderForCurrentThread } from '../src/nn/ortConfig.ts';
 import {
   BT4_NET,
   bigNetAssetStatusSync,
@@ -33,6 +34,21 @@ test('big-net asset probe uses a lightweight HEAD request and records present as
     assert.equal(calls, 1);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test('an explicit WASM pin warns for a hosted big net on the first render', async (t) => {
+  const engine = await import('../src/lc0/bt4Engine.ts?wasm-pin');
+  const config = testConfig('/unit/big-net-wasm-pin.onnx');
+  t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 200 }));
+  await engine.checkBigNetAsset(config);
+  setRequestedOrtExecutionProviderForCurrentThread('wasm');
+  try {
+    const probe = engine.probeBt4Support();
+    assert.match(engine.bigNetCpuWarning(config), /CPU fallback/);
+    assert.equal(await probe, false);
+  } finally {
+    setRequestedOrtExecutionProviderForCurrentThread(null);
   }
 });
 
