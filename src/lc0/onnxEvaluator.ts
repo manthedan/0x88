@@ -603,7 +603,6 @@ async function createLc0GpuIoSession(
     const creating = ort.createOrtSession(modelPath, {
       signal: options.signal,
       webgpuOnly: true,
-      reloadModel: options.reloadModel,
       rejectModelParseErrors: options.rejectModelParseErrors,
       webgpuSessionOptions: {
         preferredOutputLocation: 'gpu-buffer',
@@ -695,17 +694,12 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       const placement = await untilAborted(ort.resolveOrtSessionPlacement(), options.signal);
       options.signal?.throwIfAborted();
       if (placement.providers[0] === 'webgpu') {
-        const creating = createLc0GpuIoSession(() => modelPath, options.ioMode, options, declared);
-        // Raw callers need these bytes for CPU-IO fallback; verified URL loaders
-        // can reacquire them only if the actual GPU attempt fails.
-        if (options.reloadModel) modelPath = undefined as never;
-        const gpu = await creating;
+        const gpu = await createLc0GpuIoSession(() => modelPath, options.ioMode, options, declared);
         if ('session' in gpu) return new Lc0OnnxEvaluator(gpu.session, options, { binding: gpu.binding, mode: options.ioMode });
         gpuIoFailure = gpu;
       }
     }
     try {
-      if (gpuIoFailure && options.reloadModel) modelPath = await untilAborted(options.reloadModel(), options.signal);
       const creating = ort.createOrtSession(modelPath, {
         signal: options.signal,
         wasmFallbackModel: options.wasmFallbackModel,
