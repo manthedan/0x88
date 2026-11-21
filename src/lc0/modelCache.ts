@@ -468,6 +468,33 @@ function configuredChannelUrl(): string | undefined {
   return cleanChannelUrl(globals.LC0_BROWSER_ARTIFACT_CHANNEL_URL) ?? cleanChannelUrl(env.VITE_LC0_ARTIFACT_CHANNEL_URL);
 }
 
+function memoizedManifest<T>(cache: RequestCache, ttlMs: number, limit: number, parse: (value: unknown) => T) {
+  const flights = new Map<string, Promise<ManifestLookup<T>>>();
+  const recent = new Map<string, { value: T; expiresAt: number }>();
+  return (url: string): Promise<ManifestLookup<T>> => {
+    if (globalThis.navigator?.onLine === false) return Promise.resolve(unreachable);
+    const hit = recent.get(url);
+    if (hit && epochMs() < hit.expiresAt) return Promise.resolve(hit.value);
+    if (hit) recent.delete(url);
+    const existing = flights.get(url);
+    if (existing) return existing;
+    const flight = fetchManifest(url, cache, parse)
+      .then((value) => {
+        if (value !== undefined && value !== unreachable) {
+          recent.set(url, { value, expiresAt: epochMs() + ttlMs });
+          if (recent.size > limit) recent.delete(recent.keys().next().value!);
+        }
+        return value;
+      })
+      .finally(() => flights.delete(url));
+    flights.set(url, flight);
+    return flight;
+  };
+}
+
+const fetchChannelManifest = memoizedManifest('no-cache', 30_000, 4, (value) => v.parse(Lc0ArtifactChannelManifestSchema, value));
+const fetchReleaseManifest = memoizedManifest('force-cache', 60_000, 2, (value) => v.parse(Lc0ArtifactReleaseManifestSchema, value));
+
 async function resolveChannelArtifactUrl(modelUrl: string, channelUrl: string | undefined): Promise<ManifestLookup<ResolvedModelArtifact>> {
   if (!channelUrl) return undefined;
   let logicalPath: string;
@@ -477,12 +504,12 @@ async function resolveChannelArtifactUrl(modelUrl: string, channelUrl: string | 
     return undefined;
   }
   try {
-    const channel = await fetchManifest(channelUrl, 'no-cache', (value) => v.parse(Lc0ArtifactChannelManifestSchema, value));
+    const channel = await fetchChannelManifest(channelUrl);
     if (!channel || channel === unreachable) return channel;
     const releasePath = channel.releaseManifestUrl ?? channel.releaseUrl;
     if (!releasePath) return undefined;
     const releaseUrl = new URL(releasePath, channelUrl).href;
-    const release = await fetchManifest(releaseUrl, 'force-cache', (value) => v.parse(Lc0ArtifactReleaseManifestSchema, value));
+    const release = await fetchReleaseManifest(releaseUrl);
     if (!release || release === unreachable) return release;
     const artifacts = release.artifacts ?? [];
     const exactArtifact = artifacts.find((entry) => entry.logicalUrl === logicalPath);

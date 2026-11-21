@@ -105,8 +105,9 @@ class MemoryMetadataStore {
 const MODEL_URL = 'http://localhost/models/lc0/test.onnx';
 const MODEL_ARTIFACT_URL = 'http://localhost/artifacts/sha256/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad/test.onnx';
 const MANIFEST_URL = 'http://localhost/models/lc0/manifest.json';
-const CHANNEL_URL = 'http://localhost/channels/stable.json';
-const RELEASE_URL = 'http://localhost/releases/test-release.json';
+let fixtureNumber = 0;
+let CHANNEL_URL;
+let RELEASE_URL;
 const MODEL_V2_BR_URL = `http://localhost/artifacts/sha256/${ABC_SHA256}/br/${'b'.repeat(64)}`;
 
 async function withMockedEnv(
@@ -114,6 +115,8 @@ async function withMockedEnv(
   { serveBytes, manifestSha256, manifestBytes, manifestArtifactUrl, channelArtifacts, channelManifest, releaseManifest, artifactUrls = [] },
 ) {
   const prev = { caches: globalThis.caches, fetch: globalThis.fetch, location: globalThis.location };
+  CHANNEL_URL = `http://localhost/channels/stable.json?fixture=${++fixtureNumber}`;
+  RELEASE_URL = `http://localhost/releases/test-release-${fixtureNumber}.json`;
   globalThis.caches = new FakeCacheStorage();
   globalThis.location = { href: 'http://localhost/' };
   const fetchLog = { manifest: 0, model: 0, modelRequestCaches: [], modelCacheModes: [], urls: [] };
@@ -127,7 +130,7 @@ async function withMockedEnv(
     }
     if (url === CHANNEL_URL) {
       return new Response(
-        JSON.stringify(channelManifest ?? { schema: 'lc0_browser.artifact_channel_manifest.v1', releaseManifestUrl: '/releases/test-release.json' }),
+        JSON.stringify(channelManifest ? { ...channelManifest, releaseUrl: new URL(RELEASE_URL).pathname } : { schema: 'lc0_browser.artifact_channel_manifest.v1', releaseManifestUrl: new URL(RELEASE_URL).pathname }),
         { headers: { 'content-type': 'application/json' } },
       );
     }
@@ -275,7 +278,7 @@ test('loadLc0ModelForOrt keeps default model manifest lookups on the app shell o
   await withMockedEnv(
     async (fetchLog) => {
       const assetModelUrl = 'https://assets.0x88.app/models/lc0/test.onnx';
-      const direct = await loadLc0ModelForOrt(assetModelUrl, { cache: false, channelUrl: '/channels/stable.json' });
+      const direct = await loadLc0ModelForOrt(assetModelUrl, { cache: false, channelUrl: CHANNEL_URL.replace('http://localhost', '') });
       assert.equal(direct.url, MODEL_ARTIFACT_URL);
       assert.equal(direct.sha256Valid, true);
       assert(fetchLog.urls.includes('/models/lc0/manifest.json'));
@@ -300,7 +303,7 @@ test('loadLc0ModelForOrt keeps default model manifest lookups on the app shell o
 test('loadLc0ModelForOrt resolves stable model URLs through channel release manifests when configured', async () => {
   await withMockedEnv(
     async (fetchLog) => {
-      const direct = await loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: MANIFEST_URL, channelUrl: '/channels/stable.json' });
+      const direct = await loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL.replace('http://localhost', '') });
       assert.equal(direct.url, MODEL_ARTIFACT_URL);
       assert.equal(direct.sha256Valid, true);
       assert.equal(direct.logicalUrl, MODEL_URL);
@@ -324,6 +327,28 @@ test('loadLc0ModelForOrt resolves stable model URLs through channel release mani
       ],
     },
   );
+});
+
+test('concurrent and subsequent lookups share channel and release fetches; channels expire independently', async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  await withMockedEnv(async (fetchLog) => {
+    const options = { manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL };
+    const inspect = () => inspectLc0ModelDownload(MODEL_URL, options);
+    await Promise.all([inspect(), inspect(), inspect()]);
+    await inspect();
+    const count = (url) => fetchLog.urls.filter((requested) => requested === url).length;
+    assert.equal(count(CHANNEL_URL), 1);
+    assert.equal(count(RELEASE_URL), 1);
+    now += 31_000;
+    await inspect();
+    assert.equal(count(CHANNEL_URL), 2);
+    assert.equal(count(RELEASE_URL), 1);
+    now += 31_000;
+    await inspect();
+    assert.equal(count(CHANNEL_URL), 3);
+    assert.equal(count(RELEASE_URL), 2);
+  }, { manifestSha256: ABC_SHA256, manifestBytes: 3 });
 });
 
 test('loadLc0ModelForOrt resolves v2 channels to immutable Brotli bodies with decoded integrity', async () => {
