@@ -10,6 +10,7 @@ import { isMemoryConstrainedDevice, phoneReclaimSettings } from '../src/lc0/devi
 import { disposeOrtWorker } from '../src/lc0/disposeOrtWorker.ts';
 import { isLc0BigNetVariant } from '../src/lc0/engineCatalog.ts';
 import * as retirement from '../src/lc0/engineRetirement.ts';
+import { LQO_BLACK_MISSING_QUEEN_FEN } from '../src/lc0/lqoStartingPositions.ts';
 import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
 import { untilAborted } from '../src/lc0/modelCache.ts';
 import { phoneBigNetBlocked, phoneLargeNetPreference } from '../src/lc0/phoneLargeNetPolicy.ts';
@@ -205,8 +206,10 @@ function playOwner(native) {
       ctxSetEngineNote: nop,
       ctxRender: nop,
       ctxHideDownloadProgress: nop,
+      ctxShowDownloadProgress: nop,
       ctxDisarmNewGame: nop,
       ctxSetEngineFailure: (_ctx, error) => assert.fail(error),
+      LQO_BLACK_MISSING_QUEEN_FEN,
       lqoSearchOptions: () => ({}),
       PLAY_DRAW_SCORE: 0,
       PLAY_SEARCH_CONTEMPT_LIMIT: 0,

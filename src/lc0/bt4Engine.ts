@@ -54,6 +54,7 @@ export const BT4_NET: BigNetConfig = {
   recommendedBatchSize: 8,
   recommendedPipelineDepth: 1,
   exportNote: 'experimental policytune-332 batch-8 f16 QDQ int8-weight export',
+  streamDownloadProgress: true,
   wasmLevels: [2, 3, 4, 6, 8],
 };
 
@@ -68,6 +69,7 @@ export const T3_NET: BigNetConfig = {
   recommendedBatchSize: 8,
   recommendedPipelineDepth: 1,
   exportNote: 'distill-swa-2767500 batch-8 f16 export',
+  streamDownloadProgress: true,
   wasmLevels: [2, 4, 6, 8, 12],
 };
 

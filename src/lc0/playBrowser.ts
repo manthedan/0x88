@@ -45,7 +45,6 @@ import { enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engine
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
 import { createBrowserSquareformerRuntimeEvaluator, EvaluatorImportError } from './lazyOrtEvaluators.ts';
 import { LC0_SMALL_BATCH1_QDQ8_PATH, lc0SmallModelRequest } from './lc0ModelUrls.ts';
-import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
 import { LQO_BLACK_MISSING_QUEEN_FEN, LQO_WHITE_MISSING_QUEEN_FEN } from './lqoStartingPositions.ts';
 import { MAIA3_DEFAULT_ELO, MAIA3_MAX_ELO, MAIA3_MIN_ELO, type Maia3MoveStyle, maia3ModelFallbackUrls } from './maia3.ts';
 import type { MountScope } from './mountScope.ts';
@@ -492,6 +491,8 @@ function ctxRefreshSearchProgressLabel(ctx: PlayContext): void {
   text.textContent = ctxSearchProgressText(searchProgressLabel(ctx.searchProgress.label, ctx.viewPly), ctx.searchProgress.progress);
 }
 
+const loadLqoOpeningBook = () => import('./lqoOpeningBook.ts');
+
 async function ctxPreloadLqoAfterBookMove(ctx: PlayContext, signal: AbortSignal): Promise<boolean> {
   const searcher = await engines.acquireBigNet('lqo', signal, ctx.engineUi);
   if (searcher.loaded) return false;
@@ -537,6 +538,8 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
   const preferences = ctx.opponent.active;
   const level = preferences.level;
   if (option.family === 'lc0' && option.variant === 'lqo') {
+    const { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } = await loadLqoOpeningBook();
+    if (signal.aborted) return null;
     const historyUcis = ctx.moves.map(moveToUci);
     if (ctx.humanColor === 'w') {
       const bookMove = lqoBlackBookMove(ctx.board, ctx.moves.length, historyUcis);
@@ -744,8 +747,18 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
       );
       if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration || option.id !== ctxSelectedEngine(ctx).id) return;
       searcher.resetTree();
+    } else if (option.family === 'lc0' && option.variant === 'lqo' && !resumingGame && ctx.humanColor === 'w' && ctx.startFen === LQO_BLACK_MISSING_QUEEN_FEN) {
+      await loadLqoOpeningBook();
     } else if (option.family === 'lc0') {
       const searcher = await engines.acquireBigNet(option.variant as BigNetKey, signal, ctx.engineUi);
+      if (signal.aborted) return;
+      if (!searcher.loaded) {
+        const label = `Lc0 ${searcher.config.name}`;
+        ctxShowDownloadProgress(ctx, label, undefined, undefined, 'Preparing');
+        searcher.onDownloadProgress = (loaded, total) => {
+          if (!signal.aborted && !ctx.disposed && generation === ctx.enginePreparationGeneration) ctxShowDownloadProgress(ctx, label, loaded, total);
+        };
+      }
       const lqoOptions = option.variant === 'lqo' ? lqoSearchOptions(ctx.humanColor) : null;
       await searcher.search(
         { positions: ctx.positions },
