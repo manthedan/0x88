@@ -17,7 +17,7 @@ import type { createLc0OnnxEvaluatorFromUrl } from '../lc0SmallModelSelection.ts
 import { Maia3BrowserEvaluator, maia3ModelFallbackUrls } from '../maia3.ts';
 import { Lc0PuctSearcher } from '../search.ts';
 import { StockfishEngine, stockfishFlavorUrl } from '../stockfishEngine.ts';
-import { WorkerDeviceRecovery, retryWorkerDeviceLoss } from '../workerDeviceRecovery.ts';
+import { retryWorkerDeviceLoss, WorkerDeviceRecovery } from '../workerDeviceRecovery.ts';
 
 export type PlayFamily = 'maia3' | EngineFamily;
 

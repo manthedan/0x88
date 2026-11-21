@@ -63,7 +63,10 @@ function controller() {
   );
   return {
     ...new Function('Worker', 'disposeOrtWorker', 'terminateEngineWorker', 'WorkerDeviceRecovery', code)(
-      Worker, disposeOrtWorker, terminateEngineWorker, WorkerDeviceRecovery,
+      Worker,
+      disposeOrtWorker,
+      terminateEngineWorker,
+      WorkerDeviceRecovery,
     ),
     workers,
   };

@@ -522,23 +522,28 @@ function assertPublishedUnder(page, row, servedUrl) {
 }
 
 test('Analysis retries a lost big-net search under the replacement model key', () =>
-  withWorkers({ [T3_ORIGINAL]: [
-    { servedModelUrl: T3_SPLITK, loseDeviceOnSearch: true },
-    { servedModelUrl: T3_SPLITK, loseDeviceOnSearch: true },
-    { servedModelUrl: T3_ORIGINAL },
-  ] }, async () => {
-    const t3 = new Bt4WorkerSearcher(T3_NET);
-    try {
-      const page = analysisPage({ rows: [t3Row], searchers: new Map([['t3', t3]]) });
-      await page.analyzeCurrent();
-      await until(() => page.completeAnalysisKeys.size === 1);
-      assert.deepEqual(searches(), [1, 1, 1]);
-      assert.equal(FakeWorker.instances[2].init.ep, 'wasm');
-      assertPublishedUnder(page, t3Row, T3_ORIGINAL);
-    } finally {
-      await t3.dispose();
-    }
-  }));
+  withWorkers(
+    {
+      [T3_ORIGINAL]: [
+        { servedModelUrl: T3_SPLITK, loseDeviceOnSearch: true },
+        { servedModelUrl: T3_SPLITK, loseDeviceOnSearch: true },
+        { servedModelUrl: T3_ORIGINAL },
+      ],
+    },
+    async () => {
+      const t3 = new Bt4WorkerSearcher(T3_NET);
+      try {
+        const page = analysisPage({ rows: [t3Row], searchers: new Map([['t3', t3]]) });
+        await page.analyzeCurrent();
+        await until(() => page.completeAnalysisKeys.size === 1);
+        assert.deepEqual(searches(), [1, 1, 1]);
+        assert.equal(FakeWorker.instances[2].init.ep, 'wasm');
+        assertPublishedUnder(page, t3Row, T3_ORIGINAL);
+      } finally {
+        await t3.dispose();
+      }
+    },
+  ));
 
 for (const [device, servedUrl] of [
   ['Apple WebGPU (split-K)', T3_SPLITK],

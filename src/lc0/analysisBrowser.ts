@@ -110,6 +110,7 @@ import {
 type PgnDatabaseSearchResult = Awaited<ReturnType<typeof searchPgnCollectionsByPosition>>[number];
 
 import { routeDom } from '../features/dom.ts';
+import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import {
   analysisAgreementHeadline,
@@ -296,8 +297,7 @@ import {
   viridithasVariantFromParams,
 } from './viridithasVariants.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
-import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
-import { WorkerDeviceLostError, WorkerDeviceRecovery, retryWorkerDeviceLoss, showWorkerDeviceWarning } from './workerDeviceRecovery.ts';
+import { retryWorkerDeviceLoss, showWorkerDeviceWarning, WorkerDeviceLostError, WorkerDeviceRecovery } from './workerDeviceRecovery.ts';
 
 const collectOrtRuntimeDiagnostics: typeof CollectOrtRuntimeDiagnostics = async (...args) =>
   (await import('../nn/ortRuntime.ts')).collectOrtRuntimeDiagnostics(...args);

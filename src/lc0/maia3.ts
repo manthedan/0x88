@@ -1,15 +1,15 @@
 import { type BoardState, boardToFen, type Piece, type PieceRole, parseFen } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
-import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { type OrtSessionDiagnostics, ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortConfig.ts';
+import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
-import { WorkerDeviceLostError, WorkerDeviceRecovery, retryWorkerDeviceLoss } from './workerDeviceRecovery.ts';
 import { terminateEngineWorker } from './engineRetirement.ts';
 import { MAIA3_ORT_DEFAULTS } from './maia3RuntimeConfig.ts';
 import { clearLc0ModelCacheEntry, type Lc0ModelLoadInfo, type Lc0ModelLoadResult, loadLc0ModelForOrt } from './modelCache.ts';
 import { isMetadataTrustedModel, isOnnxModelParseError } from './onnxModelRecovery.ts';
+import { retryWorkerDeviceLoss, WorkerDeviceLostError, WorkerDeviceRecovery } from './workerDeviceRecovery.ts';
 
 const MAIA3_MODEL_CACHE_NAME = 'maia3-browser-models-v1';
 

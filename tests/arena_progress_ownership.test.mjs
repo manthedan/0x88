@@ -224,9 +224,13 @@ for (const approved of [false, true]) {
     if (approved) assert.equal(await move, 'e2e4');
     else await assert.rejects(move, /no longer cached and its download was not approved/);
     assert.deepEqual(prompts, [{ cached: false }]);
-    assert.deepEqual(inits.map(({ ep, noModelDownload }) => [ep, noModelDownload]), [
-      ['auto', true], ['auto', true], ['wasm', true], ...(approved ? [['wasm', undefined]] : []),
-    ]);
-    assert.deepEqual(searches, Array.from({ length: approved ? 3 : 2 }, () => ({ positions })));
+    assert.deepEqual(
+      inits.map(({ ep, noModelDownload }) => [ep, noModelDownload]),
+      [['auto', true], ['auto', true], ['wasm', true], ...(approved ? [['wasm', undefined]] : [])],
+    );
+    assert.deepEqual(
+      searches,
+      Array.from({ length: approved ? 3 : 2 }, () => ({ positions })),
+    );
   });
 }

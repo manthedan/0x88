@@ -15,7 +15,7 @@ import { MAIA3_DEFAULT_MODEL_URL, Maia3BrowserEvaluator } from './maia3.ts';
 import { untilAborted } from './modelCache.ts';
 import type { EngineResourceBroker } from './resourceBroker.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
-import { WorkerDeviceLostError, WorkerDeviceRecovery, retryWorkerDeviceLoss } from './workerDeviceRecovery.ts';
+import { retryWorkerDeviceLoss, WorkerDeviceLostError, WorkerDeviceRecovery } from './workerDeviceRecovery.ts';
 
 export const CRITICAL_LC0_MODEL = resolvePublicAssetUrl(LC0_SMALL_BATCH1_QDQ8_PATH);
 

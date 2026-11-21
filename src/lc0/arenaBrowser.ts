@@ -201,7 +201,6 @@ import {
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { Lc0PuctSearcher, type Lc0SearchProgress, type Lc0SearchResult } from './search.ts';
 import { StockfishEngine, type StockfishFlavor, type StockfishInfoLine, stockfishFlavorLabel, stockfishFlavorUrl } from './stockfishEngine.ts';
-import { showWorkerDeviceWarning } from './workerDeviceRecovery.ts';
 import { StormphraxEngine } from './stormphraxEngine.ts';
 import {
   checkStormphraxVariantAsset,
@@ -230,6 +229,7 @@ import {
   viridithasVariantFromParams,
 } from './viridithasVariants.ts';
 import { Lc0WholeOnnxWebgpuEvaluator } from './wholeOnnxWebgpuEvaluator.ts';
+import { showWorkerDeviceWarning } from './workerDeviceRecovery.ts';
 
 let ortRuntime: typeof import('../nn/ortRuntime.ts') | undefined;
 const collectOrtRuntimeDiagnostics: typeof CollectOrtRuntimeDiagnostics = async (...args) => {
