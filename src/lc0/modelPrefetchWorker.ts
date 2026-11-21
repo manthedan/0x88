@@ -1,7 +1,5 @@
-// Throwaway worker for phone cold loads (largeNetDownload.ts prefetchLargeNetToCache).
-// It imports the model cache, plus ORT's placement probe for nets with a split-K file;
-// it never creates a session, and its owner terminates it after one reply.
-import type { OrtExecutionProviderPreference } from '../nn/ortRuntime.ts';
+import { type OrtExecutionProviderPreference, resolveFreshWorkerOrtSessionPlacement } from '../nn/ortConfig.ts';
+import { selectLc0OrtModelUrl } from './lc0ModelUrls.ts';
 import { type Lc0ModelLoadResult, lc0ModelCacheEntryExists, prefetchLc0ModelToCache } from './modelCache.ts';
 
 export type ModelPrefetchRequest = {
@@ -26,8 +24,7 @@ const post = (reply: ModelPrefetchReply, transfer: Transferable[] = []) => self.
 
 async function selectPrefetchModelUrl(modelUrl: string, selectFor: OrtExecutionProviderPreference | undefined): Promise<string> {
   if (!selectFor) return modelUrl;
-  const [{ resolveOrtSessionPlacement }, { selectLc0OrtModelUrl }] = await Promise.all([import('../nn/ortRuntime.ts'), import('./lc0SmallModelSelection.ts')]);
-  return selectLc0OrtModelUrl(modelUrl, await resolveOrtSessionPlacement(selectFor));
+  return selectLc0OrtModelUrl(modelUrl, await resolveFreshWorkerOrtSessionPlacement(selectFor));
 }
 
 async function prefetch(request: ModelPrefetchRequest): Promise<void> {
