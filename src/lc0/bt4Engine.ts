@@ -253,7 +253,7 @@ export async function checkBigNetAsset(config: BigNetConfig = BT4_NET, onStatus?
   }
   if (!assetProbeRetryAllowed(urls, onStatus)) return 'unknown';
   const probe = probeAssetUrls(urls, {
-    probeOffline: async (url, signal) => {
+    probeCached: async (url, signal) => {
       if ((await inspectLc0ModelDownload(url, { signal })).cached) return true;
       if (!lc0SplitKUrl(url)) return false;
       const selected = selectLc0OrtModelUrl(url, await resolveFreshWorkerOrtSessionPlacement(largeNetWorkerEp()));

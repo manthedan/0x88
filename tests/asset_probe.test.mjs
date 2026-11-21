@@ -34,6 +34,27 @@ test('an offline CPU picker and verified loader use cached GETs, not network HEA
   assert.equal(new TextDecoder().decode(await loader.bytes(variant.wasmUrl)), 'abc');
 });
 
+test('transient HEAD failures probe the cache even when the browser reports online', async (t) => {
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+  t.after(() => delete navigator.onLine);
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (options.method === 'HEAD') {
+      if (url === '/offline-wifi') throw new TypeError('network unreachable');
+      return new Response(null, { status: Number(url.slice(1)) });
+    }
+    if (options.cache === 'default') throw new TypeError('network unreachable');
+    assert.equal(options.cache, 'force-cache');
+    return new Response('abc');
+  });
+  for (const [url, expected] of [['/offline-wifi', 'present'], ['/503', 'present'], ['/404', 'missing'], ['/410', 'missing']]) {
+    assert.equal(await probeAssetUrls([url]), expected);
+  }
+  const loader = createEngineArtifactLoader({
+    '/offline-wifi': { bytes: 3, sha256: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad' },
+  });
+  assert.equal(new TextDecoder().decode(await loader.bytes('/offline-wifi')), 'abc');
+});
+
 for (const code of [404, 410]) {
   test(`confirmed ${code} resolves missing even when another required HEAD hangs`, async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -66,7 +87,7 @@ test('shared probe classifies HTTP status, network errors and bounded aborts', a
     [500, 'unknown'],
     [503, 'unknown'],
   ]) {
-    t.mock.method(globalThis, 'fetch', async () => new Response(null, { status }));
+    t.mock.method(globalThis, 'fetch', async (_url, options) => new Response(null, { status: options.method === 'HEAD' ? status : 503 }));
     assert.equal(await probeAssetUrls([`/engine-${status}`]), expected, String(status));
   }
   t.mock.method(globalThis, 'fetch', async () => {
@@ -98,8 +119,8 @@ for (const [name, check, ok] of [
     };
     let calls = 0;
     let status = 503;
-    t.mock.method(globalThis, 'fetch', async () => {
-      calls++;
+    t.mock.method(globalThis, 'fetch', async (_url, options) => {
+      if (options.method === 'HEAD') calls++;
       return new Response(null, { status });
     });
     assert.equal(await check(variant), 'unknown');
@@ -143,8 +164,8 @@ for (const [name, check] of [
         dataUrl: `/${name}/persistent-${immediate}.data`,
         modelUrl: `/${name}/persistent-${immediate}.onnx`,
       };
-      t.mock.method(globalThis, 'fetch', async () => {
-        calls++;
+      t.mock.method(globalThis, 'fetch', async (_url, options) => {
+        if (options.method === 'HEAD') calls++;
         if (immediate) throw new TypeError('malformed custom URL');
         return new Response(null, { status: 503 });
       });
@@ -203,8 +224,8 @@ for (const [name, check, read, ok] of [
       let calls = 0;
       let notifications = 0;
       let status = 503;
-      t.mock.method(globalThis, 'fetch', async () => {
-        calls++;
+      t.mock.method(globalThis, 'fetch', async (_url, options) => {
+        if (options.method === 'HEAD') calls++;
         return new Response(null, { status });
       });
       // The pickers render synchronously on each notification and immediately
@@ -313,8 +334,7 @@ for (const [name, check, read, ok, headsPerVariant] of [
         let renders = 1;
         let status = 503;
         t.mock.method(globalThis, 'fetch', async (_url, options) => {
-          assert.equal(options.method, 'HEAD');
-          requests++;
+          if (options.method === 'HEAD') requests++;
           return new Response(null, { status });
         });
         const render = () => {

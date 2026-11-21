@@ -119,10 +119,10 @@ async function probeHttpCache(url: string, signal: AbortSignal): Promise<boolean
  * the session so existing pickers stop displaying checking indefinitely. */
 export async function probeAssetUrls(
   urls: readonly string[],
-  { timeoutMs = 8_000, signal, probeOffline = probeHttpCache }: {
+  { timeoutMs = 8_000, signal, probeCached = probeHttpCache }: {
     timeoutMs?: number;
     signal?: AbortSignal;
-    probeOffline?: (url: string, signal: AbortSignal) => Promise<boolean>;
+    probeCached?: (url: string, signal: AbortSignal) => Promise<boolean>;
   } = {},
 ): Promise<AssetProbeStatus> {
   const key = JSON.stringify(urls);
@@ -148,19 +148,18 @@ export async function probeAssetUrls(
     const offline = globalThis.navigator?.onLine === false;
     const statuses = Promise.all(
       urls.map(async (url): Promise<AssetProbeStatus> => {
-        try {
-          if (offline) return (await probeOffline(url, controller.signal)) ? 'present' : 'unknown';
-          const response = await fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal });
-          if (response.ok) return 'present';
-          if (response.status === 404 || response.status === 410) {
+        if (!offline) {
+          const response = await fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal }).catch(() => undefined);
+          if (response?.ok) return 'present';
+          if (response?.status === 404 || response?.status === 410) {
             finish('missing');
             controller.abort();
             return 'missing';
           }
-          return 'unknown';
-        } catch {
-          return 'unknown';
+          if (response && response.status < 500 && response.status !== 408 && response.status !== 429) return 'unknown';
         }
+        if (controller.signal.aborted) return 'unknown';
+        return (await probeCached(url, controller.signal).catch(() => false)) ? 'present' : 'unknown';
       }),
     ).then((results): AssetProbeStatus => (results.includes('missing') ? 'missing' : results.every((status) => status === 'present') ? 'present' : 'unknown'));
     const status = await Promise.race([statuses, cancelled]);
