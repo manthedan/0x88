@@ -280,7 +280,7 @@ textarea{width:100%; resize:vertical; line-height:1.5}
 }
 .engine-row select{
   flex:1 1 0; min-width:0; font:inherit; font-size:13px;
-  padding:6px 8px; border:1px solid var(--border-input); border-radius:6px; background:var(--card);
+  padding:6px 30px 6px 8px; border:1px solid var(--border-input); border-radius:6px; background-color:var(--card);
 }
 .engine-row .row-strength{
   flex:0 0 72px; width:72px; font:inherit; font-size:13px; font-family:var(--mono);
