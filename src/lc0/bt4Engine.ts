@@ -19,6 +19,7 @@ import { terminateEngineWorker } from './engineRetirement.ts';
 import { type LargeNetPrefetchOptions, type LargeNetPrefetchResult, largeNetWorkerEp, phoneColdPrefetch } from './largeNetDownload.ts';
 import { lc0SplitKUrl } from './lc0ModelUrls.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './lc0EvaluatorBase.ts';
+import { LC0_MODEL_DOWNLOAD_NOT_APPROVED } from './modelCache.ts';
 import { PHONE_LARGE_NET_SUFFIX, phoneBigNetBlocked } from './phoneLargeNetPolicy.ts';
 
 export interface BigNetConfig {
@@ -135,6 +136,7 @@ export interface Bt4SearchProgress extends Bt4SearchResult {
 export interface Bt4SearchOptions {
   visits?: number | ((backend: string) => number);
   retryOnDeviceLoss?: boolean;
+  approveRecoveryDownload?: () => Promise<void>;
   movetimeMs?: number;
   multiPv?: number;
   reuseTree?: boolean;
@@ -584,8 +586,18 @@ export class Bt4WorkerSearcher {
     const { onProgress, signal, swapColors, evalCacheEntries, visits } = options;
     if (signal?.aborted) return cancelled;
     let backend: string;
+    const noDownload = !!this.deviceFailure && this.cacheOnly;
     try {
-      backend = await this.init({ evalCacheEntries, noDownload: !!this.deviceFailure && this.cacheOnly, signal });
+      try {
+        backend = await this.init({ evalCacheEntries, noDownload, signal });
+      } catch (error) {
+        if (!noDownload || !options.approveRecoveryDownload || !(error instanceof Error && error.message.includes(LC0_MODEL_DOWNLOAD_NOT_APPROVED))) {
+          throw error;
+        }
+        signal?.throwIfAborted();
+        await options.approveRecoveryDownload();
+        backend = await this.init({ evalCacheEntries, signal });
+      }
     } catch (error) {
       if (signal?.aborted) return cancelled;
       throw error;
