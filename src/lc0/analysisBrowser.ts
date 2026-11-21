@@ -151,6 +151,7 @@ import {
 import { positionShareUrl } from './analysisShare.ts';
 import { analysisStatus } from './analysisStatus.ts';
 import { loadRetirableResource } from './arenaResourceLoad.ts';
+import { subscribeAssetProbeRetry } from './assetProbe.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import {
   BERSERK_VARIANTS,
@@ -190,6 +191,7 @@ import {
   phoneBlockedBigNetModelUrl,
   probeBt4Support,
   renderBigNetCpuWarning,
+  waitForBigNetAsset,
 } from './bt4Engine.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import {
@@ -211,7 +213,7 @@ import {
   stockfishEngineLabel,
   stockfishVariantOptions,
 } from './engineCatalog.ts';
-import { engineLogoFamilyForEngineFamily, engineLogoHtml, probeEngineLogos } from './engineLogos.ts';
+import { engineLogoFamilyForEngineFamily, engineLogoHtml } from './engineLogos.ts';
 import {
   BUILT_IN_PROFILE_VALUE_PREFIX,
   ENGINE_PROFILE_BACKUP_KIND,
@@ -235,6 +237,7 @@ import { createBrowserSquareformerRuntimeEvaluator, createLc0OnnxEvaluatorFromUr
 import { CachedLc0Evaluator, type Lc0EvaluationProvider } from './lc0EvaluatorBase.ts';
 import { lc0SmallModelRequest } from './lc0ModelUrls.ts';
 import { hideLoadingProgress, type LoadingProgressItem, renderLoadingProgress } from './loadingProgress.ts';
+import { untilAborted } from './modelCache.ts';
 import { type OpeningNameIndex, openingNameAt } from './openingNames.ts';
 import {
   PHONE_LARGE_NET_CHANGE_EVENT,
@@ -397,9 +400,11 @@ const LC0_WHOLE_MODEL_MANIFEST_URL = sameOriginPathParam(
 
 let openingNameIndex: OpeningNameIndex | null = null;
 let openingNamesUnavailable = false;
+let openingNamesRequestSignal: AbortSignal | undefined;
 
 async function loadOpeningNames(signal: AbortSignal): Promise<void> {
-  if (openingNameIndex) return;
+  if (openingNameIndex || openingNamesRequestSignal === signal) return;
+  openingNamesRequestSignal = signal;
   try {
     const response = await fetch(resolvePublicAssetUrl('/openings/eco.json'), { signal });
     if (!response.ok) throw new Error(`Opening names: HTTP ${response.status}`);
@@ -427,6 +432,7 @@ async function loadOpeningNames(signal: AbortSignal): Promise<void> {
 
 function renderOpeningName(): void {
   if (retry) return;
+  if (tree.current !== tree.root || tree.root.fen !== START_FEN) void loadOpeningNames(mountAbort.signal);
   const label = el('openingName');
   const opening = openingNameIndex ? openingNameAt(openingNameIndex, tree.current) : null;
   label.hidden = !opening && tree.current === tree.root;
@@ -939,9 +945,15 @@ async function initWorker(operationSignal?: AbortSignal): Promise<string> {
     if (searchWorker === worker) resetSearchWorker(new Error('LC0 worker message could not be decoded'));
   });
   const runtime = selectedLc0Runtime();
-  const ready = await postWorker<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback']; servedModelUrl?: string }>(lc0InitMessage(runtime));
-  if (searchWorker !== worker) throw new Error('LC0 worker invalidated during initialization');
+  const cancelInit = () => {
+    if (searchWorker === worker) resetSearchWorker('LC0 backend load cancelled');
+  };
+  operationSignal?.addEventListener('abort', cancelInit, { once: true });
+  const ready = await postWorker<{ backend: string; ortFallback?: OrtRuntimeDiagnostics['fallback']; servedModelUrl?: string }>(
+    lc0InitMessage(runtime),
+  ).finally(() => operationSignal?.removeEventListener('abort', cancelInit));
   if (operationSignal?.aborted) throw new DOMException('LC0 backend load cancelled', 'AbortError');
+  if (searchWorker !== worker) throw new Error('LC0 worker invalidated during initialization');
   workerReady = true;
   workerBackend = ready.backend;
   workerRuntime = runtime;
@@ -1284,6 +1296,10 @@ async function profileRowsForUse(rows: EngineRow[], allowBt4Prompt: boolean, sig
     const next = normalizeDeployEngineRow({ ...row, strength: clampStrengthForRow(row) }, 'analysis', index);
     if (next.family === 'lc0' && isLc0BigNetVariant(next.variant)) {
       const config = BIG_NETS[next.variant];
+      if (allowBt4Prompt && !phoneBigNetBlocked(config.key) && !bigNetSelectable(config)) {
+        await waitForBigNetAsset(config, signal ?? mountAbort.signal);
+      }
+      if (signal?.aborted) return [];
       const allowed =
         !phoneBigNetBlocked(config.key) &&
         bigNetSelectable(config) &&
@@ -1353,6 +1369,10 @@ let pickerConsentAbort: AbortController | null = null;
 function abortEngineSelectionConsent(): void {
   profileLoadAbort?.abort();
   pickerConsentAbort?.abort();
+}
+function beginEnginePickerRequest(): AbortSignal {
+  pickerConsentAbort = new AbortController();
+  return AbortSignal.any([mountAbort.signal, pickerConsentAbort.signal]);
 }
 async function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?: string; persistLast?: boolean; note?: string } = {}): Promise<void> {
   abortEngineSelectionConsent();
@@ -1563,7 +1583,6 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     return lc0VariantOptions(true).map((option) => {
       if (!isLc0BigNetVariant(option.value)) return option;
       const config = BIG_NETS[option.value];
-      if (bigNetAssetStatusSync(config) === 'unknown') void checkBigNetAsset(config, whileAnalysisMounted(renderEngineList));
       const state = bigNetOptionState(config, peekBigNetSearcher(config.key)?.backend);
       return { ...option, label: `${option.label}${state.suffix}`, disabled: option.disabled || state.disabled };
     });
@@ -1771,18 +1790,27 @@ async function requestAnalysisBigNetConsent(config: BigNetConfig, signal: AbortS
 }
 
 async function refreshBigNetAvailability(mountSignal = mountAbort.signal): Promise<void> {
-  await Promise.all([
-    probeBt4Support(),
-    checkBigNetAsset(BIG_NETS.bt4, whileAnalysisMounted(renderRecklessRuntimeInfo)),
-    checkBigNetAsset(BIG_NETS.t3, whileAnalysisMounted(renderRecklessRuntimeInfo)),
-  ]);
+  const configs = [BIG_NETS.bt4, BIG_NETS.t3];
+  const [statuses] = await Promise.all([Promise.all(configs.map((config) => checkBigNetAsset(config))), probeBt4Support()]);
   if (isStaleMount(mountSignal)) return;
+  const manager = el('engineManager') as HTMLDialogElement;
+  if (!manager.open) return;
+  const retry = () => {
+    if (manager.open) void refreshBigNetAvailability(mountSignal);
+  };
+  for (const [index, status] of statuses.entries()) {
+    if (status === 'unknown') subscribeAssetProbeRetry([configs[index].modelUrl], retry, mountSignal);
+  }
   const previousRows = JSON.stringify(engineRows);
   for (const row of engineRows) {
-    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectable(BIG_NETS[row.variant])) row.variant = 'small';
+    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && bigNetAssetStatusSync(BIG_NETS[row.variant]) === 'missing') row.variant = 'small';
   }
   if (JSON.stringify(engineRows) !== previousRows) invalidateAnalysisSettings();
+  const host = el('engineList');
+  const focused = document.activeElement;
+  const label = focused && host.contains(focused) ? focused.getAttribute('aria-label') : null;
   renderEngineList();
+  if (label) host.querySelector<HTMLElement>(`[aria-label="${CSS.escape(label)}"]`)?.focus({ preventScroll: true });
   renderRecklessRuntimeInfo();
 }
 
@@ -1796,6 +1824,8 @@ function renderBigNetWarning(): void {
 }
 
 function renderRecklessRuntimeInfo(): void {
+  const target = el('recklessRuntimeInfo');
+  if (!target.closest('details[open]')) return;
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
   const bigNetTexts = isV0DeployProfile()
     ? []
@@ -3617,6 +3647,7 @@ function applyAnalysisEvent(event: AnalysisEventInput) {
 }
 
 function dispatchAnalysis(event: AnalysisEventInput): Promise<void> {
+  if (event.type === 'DISPOSE' || event.type === 'MODE_ENTER') cancelSmallLc0Load();
   return executeAnalysisEffects(applyAnalysisEvent(event));
 }
 
@@ -3748,7 +3779,8 @@ function deferAnalysisSettingsRefresh(options: { reloadLc0?: boolean; disposeUnu
   );
 }
 
-function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolean } = {}): void {
+function cancelActiveAnalysisRun(options: { preserveDeferredMaintenance?: boolean; preserveSmallLoad?: boolean } = {}): void {
+  if (!options.preserveSmallLoad) cancelSmallLc0Load();
   void dispatchAnalysis({ type: 'STOP', preserveMaintenance: options.preserveDeferredMaintenance === true });
   const message = maybeEl('message');
   if (message?.textContent === ANALYSIS_REFRESH_PENDING_MESSAGE) message.textContent = 'Analysis stopped.';
@@ -3973,6 +4005,9 @@ async function performAnalysisMaintenance(operationId: number, maintenance: Main
   analysisOperations.set(operationId, controller);
   let loaded = false;
   try {
+    if (maintenance.reloadLc0 || (maintenance.disposeUnused && !activeEngineRows().some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant)))) {
+      cancelSmallLc0Load();
+    }
     if (maintenance.disposeUnused) disposeUnusedEngines();
     if (maintenance.reloadLc0) {
       analysisReloadAbort = controller;
@@ -3990,6 +4025,28 @@ async function performAnalysisMaintenance(operationId: number, maintenance: Main
     }
     void dispatchAnalysis({ type: 'SETTLED', operationId, failed: !loaded });
   }
+}
+
+let smallLc0Load: { controller: AbortController; ready: Promise<boolean> } | undefined;
+
+function cancelSmallLc0Load(): void {
+  if (!smallLc0Load) return;
+  const { controller } = smallLc0Load;
+  smallLc0Load = undefined;
+  controller.abort();
+  hideModelProgress();
+}
+
+function ensureSmallLc0ForAnalysis(): Promise<boolean> {
+  if (!smallLc0Load) {
+    const controller = new AbortController();
+    const signal = AbortSignal.any([mountAbort.signal, controller.signal]);
+    const ready = loadLc0BackendOwned(() => signal.aborted, signal, true).finally(() => {
+      if (smallLc0Load?.controller === controller) smallLc0Load = undefined;
+    });
+    smallLc0Load = { controller, ready };
+  }
+  return smallLc0Load.ready;
 }
 
 let analysisHasExplicitInput = false;
@@ -4022,7 +4079,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     return;
   }
   const needsSmallLc0Backend = rows.some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant));
-  if (needsSmallLc0Backend && !workerReady && !searcher) {
+  const smallLc0Pending = needsSmallLc0Backend && !workerReady && !searcher;
+  if (smallLc0Pending && rows.length === 1 && !smallLc0Load) {
     void dispatchAnalysis({ type: 'NEEDS_BACKEND', owner });
     return;
   }
@@ -4108,7 +4166,9 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     });
     const admission = applyAnalysisEvent({ type: 'PREPARED', owner, revision: owner.preparationRevision, snapshot });
     if (!admission.some((effect) => effect.type === 'search')) return;
-    const { fen, multiPv: analysisMultiPv, selectionKey: selectionCacheKey } = snapshot;
+    const { fen, multiPv: analysisMultiPv } = snapshot;
+    const rowKeys = [...snapshot.rowKeys];
+    let selectionCacheKey = snapshot.selectionKey;
     const analysisPositions = snapshot.positions.map((board) => ({ ...board, squares: [...board.squares] }));
     const cpuPosition = { fen: snapshot.cpuPosition.fen, moves: [...snapshot.cpuPosition.moves] };
     const runRows = [...snapshot.rows];
@@ -4133,7 +4193,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     else renderEngineComparison([]);
     const tasks: Promise<void>[] = [];
     let hadTaskFailure = false;
-    const pushTask = (index: number, cacheKey: string, label: string, taskFactory: (beginSearch: () => void) => Promise<AnalysisLine[]>) => {
+    const pushTask = (index: number, label: string, taskFactory: (beginSearch: () => void) => Promise<AnalysisLine[]>) => {
       tasks.push(
         (async () => {
           if (controller.signal.aborted || mountAbort.signal.aborted) return;
@@ -4147,8 +4207,8 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
               mountAbort.signal.aborted
             )
               return;
-            if (lines.length) cacheEngineLines(cacheKey, lines);
-            else engineLineCache.delete(cacheKey);
+            if (lines.length) cacheEngineLines(rowKeys[index], lines);
+            else engineLineCache.delete(rowKeys[index]);
             lineGroups[index] = lines;
             publishLines();
           } catch (error) {
@@ -4157,7 +4217,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
             const errMsg = (error as Error)?.message ?? String(error);
             console.warn(`${label} analysis failed`, error);
             if (runId === activeAnalysisRunId && analysisAbort === controller && analysisIsAnalyzing(analysisRunState)) {
-              engineLineCache.delete(cacheKey);
+              engineLineCache.delete(rowKeys[index]);
               lineGroups[index] = [{ engine: label, pvUci: [], multipv: 1, scoreText: '—', detail: 'failed', pvSan: '', error: errMsg }];
               publishLines();
             }
@@ -4168,12 +4228,12 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     for (let index = 0; index < runRows.length; index++) {
       const row = runRows[index];
       const cacheKey = snapshot.rowKeys[index];
-      if (!options.force && engineLineCache.has(cacheKey)) continue;
+      if (!options.force && engineLineCache.has(cacheKey) && !(smallLc0Pending && row.family === 'lc0' && !isLc0BigNetVariant(row.variant))) continue;
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
         const key = row.variant;
         const initError = bigNetInitErrors.get(key);
         const servedModelUrl = snapshot.servedModels[key] ?? '';
-        pushTask(index, cacheKey, `Lc0 ${BIG_NETS[key].name}`, () =>
+        pushTask(index, `Lc0 ${BIG_NETS[key].name}`, () =>
           initError
             ? Promise.reject(initError)
             : engines.bigNetLines(key, fen, row.strength, analysisPositions, analysisMultiPv, servedModelUrl, controller.signal, (label, progress) =>
@@ -4182,30 +4242,34 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         );
       } else if (row.family === 'lc0') {
         const label = 'Lc0';
-        if (workerReady) pushTask(index, cacheKey, label, () => workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label));
-        else if (searcher) {
-          const lc0Searcher = searcher;
-          pushTask(index, cacheKey, label, () =>
-            lc0Searcher
-              .search(
-                { positions: analysisPositions },
-                {
-                  visits: row.strength,
-                  reuseTree: row.strength <= 16_000,
-                  multiPv: analysisMultiPv,
-                  signal: controller.signal,
-                  yieldEveryMs: 16,
-                  onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
-                },
-              )
-              .then((result) => lc0AnalysisLines(result, fen, 'Lc0')),
-          );
-        }
+        pushTask(index, label, async () => {
+          if (smallLc0Pending) {
+            const loaded = await untilAborted(ensureSmallLc0ForAnalysis(), controller.signal);
+            controller.signal.throwIfAborted();
+            if (!loaded) throw new Error('Lc0 Small failed to load');
+            rowKeys[index] = analysisRunRowKey({ ...snapshot, servedModels: { ...snapshot.servedModels, small: lc0ServedModelUrl } }, row);
+            activeAnalysisSelectionKey = selectionCacheKey = rowKeys.join('\u0001');
+          }
+          if (workerReady) return workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label);
+          return searcher!
+            .search(
+              { positions: analysisPositions },
+              {
+                visits: row.strength,
+                reuseTree: row.strength <= 16_000,
+                multiPv: analysisMultiPv,
+                signal: controller.signal,
+                yieldEveryMs: 16,
+                onProgress: (progress) => showAnalysisProgress(runId, fen, label, progress),
+              },
+            )
+            .then((result) => lc0AnalysisLines(result, fen, 'Lc0'));
+        });
       } else if (row.family === 'centipawn') {
         const positions = analysisPositions;
         const current = positions[positions.length - 1];
         const label = centipawnEngineLabel(row.variant);
-        pushTask(index, cacheKey, label, async (beginSearch) => {
+        pushTask(index, label, async (beginSearch) => {
           const loadingId = `startup:${label}`;
           const evaluatorKey = engines.centipawnEvaluatorCacheKey(row.variant);
           const evaluatorPrepared = engines.hasCentipawnEvaluator(evaluatorKey);
@@ -4237,7 +4301,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         const stockfishUrl = stockfishFlavorUrl(
           threadedStockfishAvailable() ? (kind === 'lite' ? 'lite-threaded' : 'threaded') : kind === 'lite' ? 'lite-single' : 'single',
         );
-        pushTask(index, cacheKey, label, (beginSearch) =>
+        pushTask(index, label, (beginSearch) =>
           engines.withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
             const engine = engines.getStockfish(kind);
             engines.cpuSessions.setThreads(engine, Math.min(lease.threads, engine.maxThreads()));
@@ -4262,7 +4326,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         const variant = viridithasVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = engines.getViridithasFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) =>
+        pushTask(index, label, (beginSearch) =>
           engines.withCpuLease(`viridithas:${row.variant}`, controller.signal, async () => {
             await engines.prepareCpuEngine(
               row,
@@ -4290,7 +4354,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         const variant = berserkVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = engines.getBerserkFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) =>
+        pushTask(index, label, (beginSearch) =>
           engines.withCpuLease(`berserk:${row.variant}`, controller.signal, async (lease) => {
             engines.cpuSessions.setThreads(engine, lease.threads);
             await engines.prepareCpuEngine(
@@ -4315,7 +4379,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         const variant = plentyChessVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = engines.getPlentyChessFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) =>
+        pushTask(index, label, (beginSearch) =>
           engines.withCpuLease(`plentychess:${row.variant}`, controller.signal, async (lease) => {
             engines.cpuSessions.setThreads(engine, lease.threads);
             await engines.prepareCpuEngine(
@@ -4340,7 +4404,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         const variant = stormphraxVariantForKey(row.variant);
         const label = variant.label;
         const engine = engines.getStormphraxFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) =>
+        pushTask(index, label, (beginSearch) =>
           engines.withCpuLease(`stormphrax:${row.variant}`, controller.signal, async (lease) => {
             engines.cpuSessions.setThreads(engine, lease.threads);
             await engines.prepareCpuEngine(
@@ -4365,7 +4429,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
         const variant = recklessVariantForKey(row.variant);
         const label = `${variant.label}`;
         const engine = engines.getRecklessFor(row.variant);
-        pushTask(index, cacheKey, label, (beginSearch) =>
+        pushTask(index, label, (beginSearch) =>
           engines.withCpuLease(`reckless:${row.variant}`, controller.signal, async () => {
             await engines.prepareCpuEngine(
               row,
@@ -4436,7 +4500,7 @@ function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
     analysisGameTree = tree;
     stopGameReview('Review cancelled for the new game.');
     clearReviewState('Load a PGN or play moves, then review the mainline.');
-    if (analysisIsAnalyzing(analysisRunState)) cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+    if (analysisIsAnalyzing(analysisRunState)) cancelActiveAnalysisRun({ preserveDeferredMaintenance: true, preserveSmallLoad: true });
     else void dispatchAnalysis({ type: 'DROP_REQUEST' });
     searcher?.resetTree();
     (mainEvaluator as CachedLc0Evaluator | null)?.clearCache?.();
@@ -4448,7 +4512,8 @@ function afterNavigation(options: { reportLines?: AnalysisLine[] } = {}) {
   const fen = tree.current.fen;
   const rows = activeEngineRows();
   const selectionKey = analysisSelectionCacheKey(fen, rows);
-  if (analysisIsAnalyzing(analysisRunState) && activeAnalysisSelectionKey !== selectionKey) cancelActiveAnalysisRun({ preserveDeferredMaintenance: true });
+  if (analysisIsAnalyzing(analysisRunState) && activeAnalysisSelectionKey !== selectionKey)
+    cancelActiveAnalysisRun({ preserveDeferredMaintenance: true, preserveSmallLoad: true });
   // A transposition can have the same FEN but a different neural/repetition
   // history. A completed-key marker is not provenance for the FEN-only view.
   const positionLines = completeAnalysisKeys.has(selectionKey)
@@ -4983,11 +5048,13 @@ function wireEvents() {
   const manager = el('engineManager') as HTMLDialogElement;
   const openEngineManager = (index?: number) => {
     manager.showModal();
+    void refreshBigNetAvailability();
     if (index !== undefined) manager.querySelector<HTMLElement>(`.row-var[data-i="${index}"]`)?.focus();
   };
   el('manageEngines').addEventListener('click', () => openEngineManager());
   el('closeEngineManager').addEventListener('click', () => manager.close());
   manager.addEventListener('close', () => el('manageEngines').focus({ preventScroll: true }));
+  el('recklessRuntimeInfo').closest('details')?.addEventListener('toggle', renderRecklessRuntimeInfo);
   const tabs = [...el('analysisContent').querySelectorAll<HTMLButtonElement>('[role="tab"]')];
   const setView = (tab: HTMLButtonElement) => {
     if (retry && tab.dataset.view !== 'review') return;
@@ -5335,6 +5402,10 @@ function wireEvents() {
     const previousRow = engineRows[i];
     if (target.classList.contains('row-fam')) {
       const family = target.value as EngineFamily;
+      const signal = beginEnginePickerRequest();
+      target.value = previousRow.family;
+      await resolveAnalysisCpuDefault(family);
+      if (signal.aborted || engineRows[i] !== previousRow) return;
       engineRows[i].family = family;
       engineRows[i].variant = defaultVariant(family);
       engineRows[i].strength = defaultStrength(family);
@@ -5344,11 +5415,9 @@ function wireEvents() {
         const selectedVariant = target.value;
         const config = BIG_NETS[selectedVariant];
         target.value = engineRows[i].variant;
-        const request = new AbortController();
-        pickerConsentAbort = request;
-        const signal = AbortSignal.any([mountAbort.signal, request.signal]);
+        const signal = beginEnginePickerRequest();
         if (!(await requestAnalysisBigNetConsent(config, signal))) return;
-        if (signal.aborted || pickerConsentAbort !== request || engineRows[i] !== previousRow) return;
+        if (signal.aborted || engineRows[i] !== previousRow) return;
         if (!bigNetSelectable(config)) {
           el('message').textContent = bigNetUnavailableText(config);
           renderEngineList();
@@ -5421,9 +5490,12 @@ function wireEvents() {
     lineCache.delete(tree.current.fen);
     deferAnalysisSettingsRefresh({ disposeUnusedEngines: true });
   });
-  const addEngineRow = () => {
+  const addEngineRow = async () => {
     abortEngineSelectionConsent();
+    const signal = beginEnginePickerRequest();
     const family = nextEngineFamily();
+    await resolveAnalysisCpuDefault(family);
+    if (signal.aborted) return;
     const row = normalizeDeployEngineRow({ family, variant: defaultVariant(family), strength: defaultStrength(family) }, 'analysis', engineRows.length);
     engineRows.push(row);
     persistManualEngineRows();
@@ -5845,23 +5917,25 @@ async function loadLc0Backend(
   }
 }
 
-async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal?: AbortSignal): Promise<boolean> {
+async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal?: AbortSignal, duringAnalysis = false): Promise<boolean> {
   await awaitEngineRetirements();
   if (loadCancelled()) return false;
   const runtime = selectedLc0Runtime();
   el('analyze').toggleAttribute('disabled', true);
   selectEl('lc0RuntimeSelect').disabled = true;
   el('backend').textContent = `loading ${lc0RuntimeLabel(runtime)}…`;
-  el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)} in a worker…`;
+  if (!duringAnalysis) el('message').textContent = `Loading LC0 ${lc0RuntimeLabel(runtime)} in a worker…`;
   showModelProgress(`LC0 ${lc0RuntimeLabel(runtime)}`, undefined, undefined, 'Preparing');
   try {
     const backend = await initWorker(operationSignal);
     if (loadCancelled()) return false;
     el('backend').textContent = backend;
     hideModelProgress();
-    el('analyze').toggleAttribute('disabled', false);
     selectEl('lc0RuntimeSelect').disabled = false;
-    el('message').textContent = 'Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.';
+    if (!duringAnalysis) {
+      el('analyze').toggleAttribute('disabled', false);
+      el('message').textContent = 'Ready. Drag a move, load a PGN/FEN, or Analyze. Navigation stays responsive.';
+    }
     return true;
   } catch (workerError) {
     if (loadCancelled() || (workerError as Error).name === 'AbortError') return false;
@@ -5937,9 +6011,11 @@ async function loadLc0BackendOwned(loadCancelled: () => boolean, operationSignal
         searchBudget: `multipv=${multiPv()}`,
         notes: [diagnostics?.describe ?? 'whole-model runtime is research-only and opt-in'],
       });
-      el('analyze').toggleAttribute('disabled', false);
       selectEl('lc0RuntimeSelect').disabled = false;
-      el('message').textContent = 'Ready (main-thread fallback — deep analysis may pause the UI).';
+      if (!duringAnalysis) {
+        el('analyze').toggleAttribute('disabled', false);
+        el('message').textContent = 'Ready (main-thread fallback — deep analysis may pause the UI).';
+      }
       hideModelProgress();
       return true;
     } catch (error) {
@@ -5974,40 +6050,32 @@ async function reloadLc0Backend(
   return loaded;
 }
 
+async function resolveAnalysisCpuDefault(family: EngineFamily): Promise<void> {
+  const onChange = whileAnalysisMounted(renderRecklessRuntimeInfo);
+  if (family === 'reckless') {
+    REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, onChange);
+  } else if (family === 'viridithas') {
+    REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, onChange);
+  } else if (family === 'berserk') {
+    REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, onChange);
+  } else if (family === 'plentychess') {
+    REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(
+      REQUESTED_PLENTYCHESS_VARIANT,
+      REQUESTED_PLENTYCHESS_EXPLICIT,
+      onChange,
+    );
+  } else if (family === 'stormphrax') {
+    REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(REQUESTED_STORMPHRAX_VARIANT, REQUESTED_STORMPHRAX_EXPLICIT, onChange);
+  }
+}
+
 async function init(mountSignal: AbortSignal) {
   restoreAnalysisWorkspace();
-  if (!isV0DeployProfile()) {
-    REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(
-      REQUESTED_RECKLESS_VARIANT,
-      REQUESTED_RECKLESS_EXPLICIT,
-      whileAnalysisMounted(renderRecklessRuntimeInfo),
-    );
-  }
-  REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(
-    REQUESTED_VIRIDITHAS_VARIANT,
-    REQUESTED_VIRIDITHAS_EXPLICIT,
-    whileAnalysisMounted(renderRecklessRuntimeInfo),
-  );
-  REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(
-    REQUESTED_BERSERK_VARIANT,
-    REQUESTED_BERSERK_EXPLICIT,
-    whileAnalysisMounted(renderRecklessRuntimeInfo),
-  );
-  REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(
-    REQUESTED_PLENTYCHESS_VARIANT,
-    REQUESTED_PLENTYCHESS_EXPLICIT,
-    whileAnalysisMounted(renderRecklessRuntimeInfo),
-  );
-  REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(
-    REQUESTED_STORMPHRAX_VARIANT,
-    REQUESTED_STORMPHRAX_EXPLICIT,
-    whileAnalysisMounted(renderRecklessRuntimeInfo),
-  );
-  if (isStaleMount(mountSignal)) return;
   if (analysisPagehideHandler) window.removeEventListener('pagehide', analysisPagehideHandler);
   analysisPagehideHandler = (event: PageTransitionEvent) => {
     workspaceAutosave?.flush();
     if (!event.persisted) {
+      cancelSmallLc0Load();
       for (const key of ANALYSIS_BIG_NET_KEYS) disposeBigNetSearcherNow(key);
       disposeRuntimeResources();
     }
@@ -6030,21 +6098,14 @@ async function init(mountSignal: AbortSignal) {
   } else {
     engineRows = loadManualEngineRows() ?? engineRows;
   }
+  await Promise.all([...new Set(engineRows.map((row) => row.family))].map(resolveAnalysisCpuDefault));
+  if (isStaleMount(mountSignal)) return;
   renderEngineProfiles(lastProfile?.name ?? '');
   installRuntimeAuditPanel();
   renderAll();
   renderEngineList();
-  renderRecklessRuntimeInfo();
-  void probeEngineLogos(
-    whileAnalysisMounted(() => {
-      renderEngineList();
-      renderAll();
-    }),
-  );
   wireEvents();
-  void loadOpeningNames(mountSignal);
   void refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
-  void refreshBigNetAvailability();
   if (!isV0DeployProfile()) void refreshCentipawnHybridManifestStatus();
   const smallLc0 = activeEngineRows().some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant));
   if (!automaticAnalysisAllowed() || (!smallLc0 && !inputEl('autoAnalyze').checked)) {
@@ -6053,8 +6114,8 @@ async function init(mountSignal: AbortSignal) {
     el('message').textContent = 'Play a move, load a game/FEN, or tap Analyze to start.';
     return;
   }
-  if (smallLc0) await loadLc0Backend(true, mountSignal);
-  else await analyzeCurrent();
+  if (inputEl('autoAnalyze').checked) await analyzeCurrent();
+  else if (smallLc0) await loadLc0Backend(true, mountSignal);
 }
 
 let lastAnalysisMountHref: string | null = null;

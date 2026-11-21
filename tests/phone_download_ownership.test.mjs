@@ -101,6 +101,7 @@ for (const replacement of [
       cancelAnalysisAssetPrefetch() {},
       tree: { current: { fen: 'position' } },
       nextEngineFamily: () => 'sf',
+      resolveAnalysisCpuDefault: async () => {},
       defaultVariant: () => 'full',
       defaultStrength: () => 12,
     };
@@ -122,7 +123,7 @@ for (const replacement of [
     await until(() => prompts.length === 1);
     if (action === 'cpu-profile') await api.apply({ name: 'new', rows: [{ family: 'sf', variant: 'full', strength: 12 }], multiPv: 2 });
     else if (action === 'manual') api.manual();
-    else if (action === 'add') listeners.get('addEngine:click')();
+    else if (action === 'add') await listeners.get('addEngine:click')();
     else if (action === 'remove') listeners.get('engineList:click')({ target: { closest: () => ({ dataset: { i: '0' } }) } });
     else if (action === 'lines') {
       el('multiPvInput').value = '7';
@@ -190,6 +191,7 @@ for (const phase of [
       abortArenaPickerConsent() {},
       setArenaStartDisabled() {},
       syncArenaPhase() {},
+      seatAvailabilityDirty: false,
       checkpointWrites: phase === 'checkpoint-writes' ? gate.promise : Promise.resolve(),
       isStaleMount: () => false,
       checkpointUnreadable: false,

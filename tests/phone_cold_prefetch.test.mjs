@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { registerHooks } from 'node:module';
 import { test } from 'node:test';
 import { BT4_NET, Bt4WorkerSearcher, T3_NET } from '../src/lc0/bt4Engine.ts';
 import { prefetchLargeNetToCache } from '../src/lc0/largeNetDownload.ts';
@@ -143,7 +144,14 @@ function adapter(t, { vendor = 'apple', shaderF16 = true } = {}) {
   t.after(resetWebGpuAdapterProbeForTests);
 }
 
-test('t3 prefetch: the worker picks the file with the session worker rule and its own probe', async (t) => {
+test('t3 prefetch: the worker picks the file with its own probe without importing ONNX Runtime', async (t) => {
+  const hook = registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (context.parentURL?.endsWith('/modelPrefetchWorker.ts')) assert.doesNotMatch(specifier, /ortRuntime|lc0SmallModelSelection|onnxruntime-web/);
+      return nextResolve(specifier, context);
+    },
+  });
+  t.after(() => hook.deregister());
   const env = environment(t, { files: [t3Url, t3SplitKUrl] });
   adapter(t);
   const searcher = new Bt4WorkerSearcher(t3Config);

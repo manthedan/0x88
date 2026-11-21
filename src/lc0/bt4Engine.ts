@@ -11,7 +11,7 @@ import {
 } from '../nn/ortConfig.ts';
 import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import type { OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
-import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
+import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange, subscribeAssetProbeRetry } from './assetProbe.ts';
 import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
@@ -56,6 +56,7 @@ export const BT4_NET: BigNetConfig = {
   recommendedBatchSize: 8,
   recommendedPipelineDepth: 1,
   exportNote: 'experimental policytune-332 batch-8 f16 QDQ int8-weight export',
+  streamDownloadProgress: true,
   wasmLevels: [2, 3, 4, 6, 8],
 };
 
@@ -70,6 +71,7 @@ export const T3_NET: BigNetConfig = {
   recommendedBatchSize: 8,
   recommendedPipelineDepth: 1,
   exportNote: 'distill-swa-2767500 batch-8 f16 export',
+  streamDownloadProgress: true,
   wasmLevels: [2, 4, 6, 8, 12],
 };
 
@@ -266,6 +268,22 @@ export async function checkBigNetAsset(config: BigNetConfig = BT4_NET, onStatus?
   });
   assetProbes.set(probeKey, probe);
   return probe;
+}
+
+export async function waitForBigNetAsset(config: BigNetConfig, signal: AbortSignal): Promise<Bt4AssetStatus> {
+  while (!signal.aborted) {
+    const status = await checkBigNetAsset(config);
+    if (status !== 'unknown' || signal.aborted) return status;
+    await new Promise<void>((resolve) => {
+      const wake = () => {
+        signal.removeEventListener('abort', wake);
+        resolve();
+      };
+      signal.addEventListener('abort', wake, { once: true });
+      subscribeAssetProbeRetry([config.modelUrl], wake, signal);
+    });
+  }
+  return 'unknown';
 }
 
 export async function checkBt4Asset(onStatus?: () => void): Promise<Bt4AssetStatus> {

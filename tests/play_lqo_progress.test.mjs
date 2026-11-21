@@ -20,6 +20,68 @@ const requestSource = source.slice(source.indexOf('async function ctxRequestEngi
 const strengthSource = source.slice(source.indexOf('function ctxStrengthFor('), source.indexOf('function ctxRenderLevelOptions('));
 const preloadSource = source.slice(source.indexOf('async function ctxPreloadLqoAfterBookMove('), source.indexOf('async function ctxRequestEngineMove('));
 
+const readinessSource = source.slice(source.indexOf('async function ctxVerifySelectedEngineReady('), source.indexOf('const THINKING_SHOW_DELAY_MS'));
+
+for (const variant of ['lqo', 'bt4', 't3']) {
+  test(`Play readiness: ${variant === 'lqo' ? 'unlock White after the book, not the net' : `report the ${variant} download`}`, async (t) => {
+    const download = Promise.withResolvers();
+    const pending = Promise.withResolvers();
+    const searcher = {
+      loaded: false,
+      config: BIG_NETS[variant],
+      search: () => {
+        pending.resolve();
+        return download.promise;
+      },
+      resetTree() {},
+    };
+    const option = { family: 'lc0', variant, id: variant };
+    const deps = {
+      engines: { retireUnusedEngines: async () => {}, acquireBigNet: t.mock.fn(async () => searcher) },
+      ctxSelectedEngine: () => option,
+      loadLqoOpeningBook: t.mock.fn(async () => ({})),
+      LQO_BLACK_MISSING_QUEEN_FEN: 'odds-fen',
+      ctxSetEngineNote() {},
+      ctxShowDownloadProgress: t.mock.fn(),
+      ctxHideDownloadProgress: t.mock.fn(),
+      ctxRender() {},
+      ctxSetEngineFailure: (_ctx, error) => assert.fail(error),
+      lqoSearchOptions: () => ({}),
+      PLAY_DRAW_SCORE: 0,
+      PLAY_SEARCH_CONTEMPT_LIMIT: 0,
+    };
+    const verify = new Function(...Object.keys(deps), `${stripTypeScriptTypes(readinessSource)}; return ctxVerifySelectedEngineReady;`)(...Object.values(deps));
+    const ctx = {
+      board: { turn: 'w' },
+      humanColor: 'w',
+      startFen: 'odds-fen',
+      moves: [],
+      positions: [],
+      opponent: { active: {} },
+      abort: new AbortController(),
+      enginePreparationGeneration: 0,
+      dom: { buttonEl: () => ({}) },
+    };
+    const preparing = verify(ctx);
+    if (variant === 'lqo') {
+      await new Promise(setImmediate);
+      assert.equal(deps.loadLqoOpeningBook.mock.callCount(), 1);
+      assert.equal(deps.engines.acquireBigNet.mock.callCount(), 0);
+    } else {
+      await pending.promise;
+      assert.equal(searcher.config.streamDownloadProgress, true);
+      searcher.onDownloadProgress(10, 100);
+      assert.deepEqual(deps.ctxShowDownloadProgress.mock.calls.at(-1).arguments, [ctx, `Lc0 ${searcher.config.name}`, 10, 100]);
+      assert.equal(ctx.engineReady, false);
+      assert.equal(deps.loadLqoOpeningBook.mock.callCount(), 0);
+      download.resolve();
+    }
+    await preparing;
+    assert.equal(ctx.engineReady, true);
+    assert.equal(deps.ctxHideDownloadProgress.mock.callCount(), 1);
+  });
+}
+
 test('a phone plays the known LQO book reply before its background reclaim wait resolves', async () => {
   const reclaim = Promise.withResolvers();
   let starts = 0;
@@ -42,7 +104,7 @@ test('a phone plays the known LQO book reply before its background reclaim wait 
     ctxHideDownloadProgress: () => {},
     ctxIsDisposed: () => false,
     moveToUci: (move) => move,
-    lqoBlackBookMove: () => 'e7e5',
+    loadLqoOpeningBook: async () => ({ lqoBlackBookMove: () => 'e7e5' }),
   };
   const request = new Function(...Object.keys(deps), `${stripTypeScriptTypes(preloadSource + requestSource)}; return ctxRequestEngineMove;`)(
     ...Object.values(deps),
@@ -151,7 +213,7 @@ for (const lifecycle of ['current', 'cancelled', 'disposed']) {
         ctxHideDownloadProgress: () => writes.push(['hide']),
         ctxIsDisposed: (ctx) => ctx.disposed,
         moveToUci: (move) => move,
-        lqoWhiteFirstPolicyBookMove: () => 'e2e4',
+        loadLqoOpeningBook: async () => ({ lqoWhiteFirstPolicyBookMove: () => 'e2e4' }),
       };
       const request = new Function(...Object.keys(deps), `${stripTypeScriptTypes(requestSource)}; return ctxRequestEngineMove;`)(...Object.values(deps));
       const abort = new AbortController();

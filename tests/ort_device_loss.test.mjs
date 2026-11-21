@@ -114,7 +114,7 @@ test('Bt4 init keeps telemetry separate from ready and stores the loss', async (
 
 test('Maia init and inference handlers never resolve a request from device telemetry', async () => {
   const worker = new FakeWorker();
-  const init = Maia3BrowserEvaluator.postInit(worker, 'test');
+  const init = Maia3BrowserEvaluator.postInit(worker, async () => ({ model: 'test' }), {});
   let initialized = false;
   void init.then(() => {
     initialized = true;
@@ -124,7 +124,7 @@ test('Maia init and inference handlers never resolve a request from device telem
   await tick();
   assert.equal(initialized, false);
   worker.emit({ type: 'ready', id: 0, backend: 'expected', inputNames: [], outputNames: [] });
-  assert.equal((await init).backend, 'expected');
+  assert.equal((await init).names.backend, 'expected');
   let result;
   const owner = {
     deviceLost: null,

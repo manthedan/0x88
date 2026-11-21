@@ -546,12 +546,12 @@ async function resolveChannelArtifactUrl(modelUrl: string, channelUrl: string | 
 async function resolveArtifactUrl(
   modelUrl: string,
   manifest: { entry?: Lc0ModelManifestEntry; manifestUrl: string },
-  channelUrl: string | undefined,
+  channel: Promise<ManifestLookup<ResolvedModelArtifact>>,
 ): Promise<ResolvedModelArtifact> {
   const artifactUrl = manifestArtifactUrl(manifest.entry, manifest.manifestUrl);
   if (artifactUrl)
     return { url: artifactUrl, downloadBytes: manifest.entry?.bytes, expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
-  const channelArtifact = await resolveChannelArtifactUrl(modelUrl, channelUrl);
+  const channelArtifact = await channel;
   if (!channelArtifact || channelArtifact === unreachable)
     return {
       url: modelUrl,
@@ -743,10 +743,12 @@ async function resolveLoaderArtifact(modelUrl: string, options: Lc0ModelLoadOpti
   options.signal?.throwIfAborted();
   const started = nowMs();
   const manifestUrl = options.manifestUrl ?? (options.manifestEntry ? modelUrl : defaultManifestUrlForModel(modelUrl));
-  const lookup = options.manifestEntry ?? (await untilAborted(fetchManifestEntry(modelUrl, manifestUrl), options.signal));
+  const manifestFlight = options.manifestEntry ?? fetchManifestEntry(modelUrl, manifestUrl);
+  const channelUrl = options.channelUrl === null ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
+  const parallelChannel = options.requireManifestEntry || options.manifestEntry?.artifactUrl ? undefined : resolveChannelArtifactUrl(modelUrl, channelUrl);
+  const lookup = await untilAborted(Promise.resolve(manifestFlight), options.signal);
   const entry = lookup === unreachable ? undefined : lookup;
   const manifestMs = nowMs() - started;
-  const channelUrl = options.channelUrl === null ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
   const provenance: ModelPinProvenance = {
     logicalUrl: absoluteUrl(modelUrl),
     manifestUrl: absoluteUrl(manifestUrl),
@@ -754,7 +756,12 @@ async function resolveLoaderArtifact(modelUrl: string, options: Lc0ModelLoadOpti
     appManifestPin: /^[a-f0-9]{64}$/i.test(entry?.sha256 ?? ''),
   };
   const appPinMissing = options.requireManifestEntry && !provenance.appManifestPin;
-  const resolved = appPinMissing ? undefined : await untilAborted(resolveArtifactUrl(modelUrl, { entry, manifestUrl }, channelUrl), options.signal);
+  const resolved = appPinMissing
+    ? undefined
+    : await untilAborted(
+        resolveArtifactUrl(modelUrl, { entry, manifestUrl }, parallelChannel ?? resolveChannelArtifactUrl(modelUrl, entry?.artifactUrl ? undefined : channelUrl)),
+        options.signal,
+      );
   if (resolved?.metadataUnreachable || (lookup === unreachable && (!resolved || resolved.url === modelUrl))) {
     const legacyPin = lookup === unreachable ? shippedModelPin(provenance) : provenance.appManifestPin ? resolved : undefined;
     const offline = await untilAborted(resolveOfflineArtifact(provenance, options, resolved, legacyPin), options.signal);

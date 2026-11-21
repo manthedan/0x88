@@ -33,7 +33,16 @@ const click = (evaluate, selector) =>
     `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el || el.disabled) throw Error('Missing/disabled: '+${JSON.stringify(selector)}); el.click(); return true; })()`,
   );
 
-async function analysisSetup(evaluate, four = false) {
+async function addAnalysisEngine(evaluate, index, family) {
+  const selector = `#engineList .row-fam[data-i="${index}"]`;
+  const control = `document.querySelector(${JSON.stringify(selector)})`;
+  await click(evaluate, '#addEngine');
+  await waitFor(evaluate, `!!${control}`);
+  await setControl(evaluate, selector, family);
+  await waitFor(evaluate, `${control}?.value === ${JSON.stringify(family)}`);
+}
+
+export async function analysisSetup(evaluate, four = false) {
   await waitFor(evaluate, `!!window.__analysisSchedulingState && document.querySelectorAll('#engineList .engine-row').length === 2`);
   const defaults = await evaluate(
     `[...document.querySelectorAll('#engineList .engine-row')].map(r => [r.querySelector('.row-fam')?.value,r.querySelector('.row-var')?.value])`,
@@ -48,11 +57,8 @@ async function analysisSetup(evaluate, four = false) {
     throw Error(`Unexpected default rows: ${JSON.stringify(defaults)}`);
   if (four) {
     // Add through the real UI, then explicitly select CPU rows, not whichever family is suggested next.
-    for (const family of ['berserk', 'plentychess']) {
-      await click(evaluate, '#addEngine');
-      const index = await evaluate(`document.querySelectorAll('#engineList .engine-row').length - 1`);
-      await setControl(evaluate, `.row-fam[data-i="${index}"]`, family);
-    }
+    await addAnalysisEngine(evaluate, 2, 'berserk');
+    await addAnalysisEngine(evaluate, 3, 'plentychess');
   }
   await setControl(evaluate, '#autoAnalyze', true);
   await setControl(evaluate, '#fenInput', MIDGAME);

@@ -182,8 +182,8 @@
       ]
     },
     "tests/engine_logos.test.mjs": {
-      "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
-      "reads": ["src/lc0/analysisBrowser.ts", "src/lc0/arenaBrowser.ts"]
+      "reason": "The Analysis comparison renderer is private to its DOM controller; this checks it uses the readable engine labels.",
+      "reads": ["src/lc0/analysisBrowser.ts"]
     },
     "tests/engine_new_game_resets.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",

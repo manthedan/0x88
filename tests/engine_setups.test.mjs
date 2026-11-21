@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { ENGINE_PROFILE_BACKUP_KIND, engineSetupRuntime, normalizeEngineProfiles } from '../src/lc0/engineSetups.ts';
 
@@ -66,6 +67,160 @@ test('large-net setup confirmation reads metadata without allocating an engine s
   assert.match(guard, /if \(!allowed\) next.variant = 'small'/);
   assert.doesNotMatch(guard, /bigNetFor\(|acquireBigNetSearcher\(/);
 });
+
+test('a large-net setup waits for its nets to become available before asking for consent', async () => {
+  const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+  const loader = source.slice(source.indexOf('async function profileRowsForUse('), source.indexOf('function loadEngineProfiles('));
+  const pending = Promise.withResolvers();
+  const checks = [];
+  const prompts = [];
+  const present = new Set();
+  const deps = {
+    BIG_NETS: { bt4: { key: 'bt4' }, t3: { key: 't3' } },
+    normalizeDeployEngineRow: (row) => row,
+    clampStrengthForRow: (row) => row.strength,
+    isLc0BigNetVariant: (key) => key === 'bt4' || key === 't3',
+    phoneBigNetBlocked: () => false,
+    bigNetSelectable: ({ key }) => present.has(key),
+    waitForBigNetAsset: async ({ key }) => {
+      checks.push(key);
+      await pending.promise;
+      present.add(key);
+      return 'present';
+    },
+    requestAnalysisBigNetConsent: async ({ key }) => {
+      prompts.push(key);
+      return true;
+    },
+  };
+  const load = new Function(...Object.keys(deps), `${stripTypeScriptTypes(loader)}; return profileRowsForUse;`)(...Object.values(deps));
+  const rows = ['bt4', 't3'].map((variant) => ({ family: 'lc0', variant, strength: 100 }));
+  const loading = load(rows, true, new AbortController().signal);
+  assert.deepEqual(checks, ['bt4']);
+  assert.deepEqual(prompts, []);
+  pending.resolve();
+  assert.deepEqual(await loading, rows);
+  assert.deepEqual(checks, ['bt4', 't3']);
+  assert.deepEqual(prompts, ['bt4', 't3']);
+});
+
+test('refreshing Analysis availability preserves the focused version control', async () => {
+  const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('async function refreshBigNetAvailability('), source.indexOf('function renderBigNetWarning('));
+  const label = 'Engine 1 model or variant';
+  const original = { getAttribute: () => label };
+  const document = { activeElement: original };
+  const replacement = {
+    focus: () => {
+      document.activeElement = replacement;
+    },
+  };
+  const deps = {
+    document,
+    CSS: { escape: (value) => value },
+    el: (id) =>
+      id === 'engineManager'
+        ? { open: true }
+        : { contains: (node) => node === original, querySelector: (selector) => (selector === `[aria-label="${label}"]` ? replacement : null) },
+    BIG_NETS: { bt4: {}, t3: {} },
+    engineRows: [],
+    probeBt4Support: async () => true,
+    checkBigNetAsset: async () => 'present',
+    isStaleMount: () => false,
+    whileAnalysisMounted: (callback) => callback,
+    renderRecklessRuntimeInfo() {},
+    renderEngineList: () => {
+      document.activeElement = null;
+    },
+  };
+  const refresh = new Function(...Object.keys(deps), `${stripTypeScriptTypes(body)}; return refreshBigNetAvailability;`)(...Object.values(deps));
+  await refresh(new AbortController().signal);
+  assert.equal(document.activeElement, replacement);
+});
+
+test('an open Analysis picker updates after a bounded BT4 retry with diagnostics closed', async () => {
+  const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('async function refreshBigNetAvailability('), source.indexOf('function renderBigNetWarning('));
+  const retries = [];
+  const optionDisabled = [];
+  let bt4Status = 'unknown';
+  const deps = {
+    BIG_NETS: { bt4: { modelUrl: '/bt4.onnx' }, t3: { modelUrl: '/t3.onnx' } },
+    engineRows: [],
+    document: { activeElement: null },
+    el: () => ({ open: true }),
+    probeBt4Support: async () => true,
+    checkBigNetAsset: async ({ modelUrl }) => (modelUrl === '/bt4.onnx' ? bt4Status : 'present'),
+    subscribeAssetProbeRetry: (urls, retry) => retries.push({ urls, retry }),
+    isStaleMount: () => false,
+    whileAnalysisMounted: (callback) => callback,
+    renderRecklessRuntimeInfo() {},
+    renderEngineList: () => optionDisabled.push(bt4Status !== 'present'),
+  };
+  const refresh = new Function(...Object.keys(deps), `${stripTypeScriptTypes(body)}; return refreshBigNetAvailability;`)(...Object.values(deps));
+  await refresh(new AbortController().signal);
+  assert.deepEqual(optionDisabled, [true]);
+  assert.deepEqual(
+    retries.map(({ urls }) => urls),
+    [['/bt4.onnx']],
+  );
+  bt4Status = 'present';
+  retries[0].retry();
+  await new Promise(setImmediate);
+  assert.deepEqual(optionDisabled, [true, false]);
+  assert.equal(retries.length, 1);
+});
+
+for (const action of ['add', 'change']) {
+  test(`Analysis ${action} waits for the hosted CPU default before committing the row`, async () => {
+    const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+    const extract = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+    const handlers = new Map();
+    const rows = [{ family: 'sf', variant: 'lite', strength: 8 }];
+    const probe = Promise.withResolvers();
+    const deps = {
+      mountAbort: new AbortController(),
+      el: (id) => ({ addEventListener: (event, handler) => handlers.set(`${id}:${event}`, handler) }),
+      nextEngineFamily: () => 'reckless',
+      resolveDefaultRecklessVariantAssetFallback: async () => probe.promise,
+      whileAnalysisMounted: (callback) => callback,
+      renderRecklessRuntimeInfo() {},
+      defaultStrength: () => 12,
+      normalizeDeployEngineRow: (row) => row,
+      renderEngineList() {},
+      renderEngineSetupSummary() {},
+      persistManualEngineRows() {},
+      deferAnalysisSettingsRefresh() {},
+      prefetchAnalysisAssetsForAddedRow() {},
+      cancelAnalysisAssetPrefetch() {},
+      reconcileActiveRuntimeFallbackWarning() {},
+      lineCache: new Map(),
+      tree: { current: { fen: 'start' } },
+    };
+    const controller = `
+      let REQUESTED_RECKLESS_VARIANT = { key: 'relaxed-simd' };
+      const REQUESTED_RECKLESS_EXPLICIT = false;
+      ${extract('let profileLoadAbort:', 'async function applyEngineProfile(')}
+      ${extract('function defaultVariant(', 'function rowLabel(')}
+      ${extract('async function resolveAnalysisCpuDefault(', 'async function init(mountSignal:')}
+      ${extract("  el('engineList').addEventListener('change'", "  el('engineProfileSelect').addEventListener(")}
+      ${extract('  const addEngineRow =', "  el('lc0RuntimeSelect').addEventListener(")}
+    `;
+    new Function('engineRows', ...Object.keys(deps), stripTypeScriptTypes(controller))(rows, ...Object.values(deps));
+    const updating =
+      action === 'add'
+        ? handlers.get('addEngine:click')()
+        : handlers.get('engineList:change')({ target: { value: 'reckless', dataset: { i: '0' }, classList: { contains: (name) => name === 'row-fam' } } });
+    assert.deepEqual(
+      rows.map(({ variant }) => variant),
+      ['lite'],
+      'do not start the unavailable relaxed build',
+    );
+    probe.resolve({ key: 'simd' });
+    await updating;
+    assert.deepEqual(rows.at(-1), { family: 'reckless', variant: 'simd', strength: 12 });
+  });
+}
 
 test('normal saved setups cannot activate developer-only runtimes, including on restore/import', () => {
   for (const runtime of ['onnx', 'hybrid-wgsl-heads', 'hybrid-ort-heads', 'whole-onnx-webgpu']) {

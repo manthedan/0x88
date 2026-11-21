@@ -67,6 +67,47 @@ function setup(t, error = 'INVALID_PROTOBUF', freshFailure = false) {
   return { deps, workers, loads, evictions };
 }
 
+test('Maia boots its worker while verified model bytes are still pending', async (t) => {
+  const { deps, workers } = setup(t);
+  const download = Promise.withResolvers();
+  deps.load = () => download.promise;
+  const init = t.mock.method(Worker.prototype, 'postMessage', function (message) {
+    if (message.type === 'init') this.dispatchEvent(new MessageEvent('message', { data: { type: 'ready', id: message.id } }));
+    if (message.type === 'dispose') this.dispatchEvent(new MessageEvent('message', { data: { type: 'disposed', id: message.id } }));
+  });
+  const creating = Maia3BrowserEvaluator.create({ modelUrl: URL }, deps);
+  try {
+    assert.equal(workers.length, 1);
+    assert.equal(init.mock.callCount(), 0, 'the worker must not init a session with unverified bytes');
+  } finally {
+    download.resolve(modelLoad());
+    const evaluator = await creating;
+    await evaluator.dispose();
+  }
+});
+
+test('a Maia worker boot failure cancels its pending model load', async (t) => {
+  const { deps, workers } = setup(t);
+  let loadSignal;
+  deps.load = (_url, { signal }) => {
+    loadSignal = signal;
+    return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  };
+  const posted = t.mock.method(Worker.prototype, 'postMessage', function (message) {
+    if (message.type === 'dispose') this.dispatchEvent(new MessageEvent('message', { data: { type: 'disposed', id: message.id } }));
+  });
+  const creating = Maia3BrowserEvaluator.create({ modelUrl: URL }, deps);
+  assert.equal(workers.length, 1);
+  workers[0].dispatchEvent(Object.assign(new Event('error'), { message: 'worker bootstrap failed' }));
+  await assert.rejects(creating, /worker bootstrap failed/);
+  assert.equal(loadSignal.aborted, true);
+  assert.deepEqual(
+    posted.mock.calls.map(({ arguments: [message] }) => message.type),
+    ['cancel', 'dispose'],
+  );
+  assert.equal(workers[0].terminated, true);
+});
+
 test('Maia abort rejects init promptly but publishes its bounded retirement promise to the owner', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const fake = setup(t);

@@ -67,6 +67,7 @@ import { loadRetirableResource } from './arenaResourceLoad.ts';
 import { arenaOpeningPairs, arenaPreviousMoveLabel, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { arenaSideTimeMs } from './arenaTiming.ts';
+import { subscribeAssetProbeRetry } from './assetProbe.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { BerserkEngine } from './berserkEngine.ts';
 import {
@@ -143,7 +144,6 @@ import {
   stockfishEngineLabel,
   stockfishVariantOptions,
 } from './engineCatalog.ts';
-import { probeEngineLogos } from './engineLogos.ts';
 import {
   berserkCacheKey,
   cpuEngineHashMbForSurface,
@@ -648,6 +648,8 @@ const seatRows: EngineRow[] = [
   { family: 'sf', variant: 'lite', strength: 8 },
 ];
 let bt4AvailabilityResolved = false;
+let probingSeatOptions = false;
+let seatAvailabilityDirty = false;
 
 function persistedVariantOrDefault(family: EngineFamily, value: unknown): string {
   const variant = String(value ?? '');
@@ -1737,14 +1739,6 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     return lc0VariantOptions(true).map((option) => {
       if (!isLc0BigNetVariant(option.value)) return option;
       const config = BIG_NETS[option.value];
-      if (bigNetAssetStatusSync(config) === 'unknown')
-        void checkBigNetAsset(
-          config,
-          whileArenaMounted(() => {
-            renderSeatSelectors();
-            refreshSeatControls();
-          }),
-        );
       const state = bigNetOptionState(config, peekBigNetSearcher(config.key)?.backend);
       return { ...option, label: `${option.label}${state.suffix}`, disabled: option.disabled || state.disabled };
     });
@@ -2057,6 +2051,7 @@ function syncArenaPhase(): void {
 }
 
 function refreshSeatControls(): void {
+  applyBigNetAvailability();
   selectEl('seatA').disabled = running;
   selectEl('seatB').disabled = running;
   selectEl('lc0PresetSelect').disabled = running || loadingLc0;
@@ -2885,19 +2880,36 @@ function refreshStockfishControls(): void {
 }
 
 async function refreshBigNetAvailability(mountSignal = mountAbort.signal): Promise<void> {
-  await Promise.all([
-    probeBt4Support(),
-    checkBigNetAsset(BIG_NETS.bt4, whileArenaMounted(renderSeatSelectors)),
-    checkBigNetAsset(BIG_NETS.t3, whileArenaMounted(renderSeatSelectors)),
-  ]);
-  bt4AvailabilityResolved = true;
-  if (isStaleMount(mountSignal)) return;
-  for (const row of activeSeatRows()) {
-    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectable(BIG_NETS[row.variant])) row.variant = 'small';
+  if (bt4AvailabilityResolved || probingSeatOptions) return;
+  probingSeatOptions = true;
+  try {
+    const configs = [BIG_NETS.bt4, BIG_NETS.t3];
+    const [statuses] = await Promise.all([Promise.all(configs.map((config) => checkBigNetAsset(config))), probeBt4Support()]);
+    if (isStaleMount(mountSignal)) return;
+    bt4AvailabilityResolved = statuses.every((status) => status !== 'unknown');
+    const retry = () => void refreshBigNetAvailability(mountSignal);
+    for (const [index, status] of statuses.entries()) {
+      if (status === 'unknown') subscribeAssetProbeRetry([configs[index].modelUrl], retry, mountSignal);
+    }
+    seatAvailabilityDirty = true;
+    if (!running && !startPending) refreshSeatControls();
+  } finally {
+    if (!isStaleMount(mountSignal)) probingSeatOptions = false;
   }
+}
+
+function applyBigNetAvailability(): void {
+  if (!seatAvailabilityDirty || running || startPending) return;
+  seatAvailabilityDirty = false;
+  for (const row of activeSeatRows()) {
+    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && bigNetAssetStatusSync(BIG_NETS[row.variant]) === 'missing') row.variant = 'small';
+  }
+  const host = el('arenaSeatList');
+  const focused = document.activeElement;
+  const label = focused && host.contains(focused) ? focused.getAttribute('aria-label') : null;
   buildEngines();
   renderSeatSelectors();
-  refreshSeatControls();
+  if (label) host.querySelector<HTMLElement>(`[aria-label="${CSS.escape(label)}"]`)?.focus({ preventScroll: true });
 }
 
 async function renderRuntimeBadge(ortDiagnostics?: OrtRuntimeDiagnostics): Promise<void> {
@@ -3883,7 +3895,8 @@ async function ensureSelectedRecklessAssetsAvailable(mountSignal = mountAbort.si
 function clearStartPending(): void {
   startPending = false;
   if (!running) setArenaStartDisabled(false);
-  syncArenaPhase();
+  if (seatAvailabilityDirty) refreshSeatControls();
+  else syncArenaPhase();
 }
 
 function createIsolatedCpuEngine(row: EngineRow): BrowserUciEngine {
@@ -5124,6 +5137,11 @@ function revokeArenaPhoneLargeNets(): void {
 }
 
 function wireEvents() {
+  const probeSeatOptions = () => {
+    if (!running && !startPending) void refreshBigNetAvailability();
+  };
+  el('arenaSeatList').addEventListener('focusin', probeSeatOptions);
+  el('arenaSeatList').addEventListener('pointerenter', probeSeatOptions);
   window.addEventListener(PHONE_LARGE_NET_CHANGE_EVENT, revokeArenaPhoneLargeNets, { signal: mountAbort.signal });
   const runtimeStatus = el('runtimeBadge').closest('details')!;
   runtimeStatus.addEventListener(
@@ -5487,14 +5505,7 @@ async function init(mountSignal: AbortSignal) {
   if (isStaleMount(mountSignal)) return;
   buildEngines();
   populateSeats();
-  void refreshBigNetAvailability();
-  void probeEngineLogos(
-    whileArenaMounted(() => {
-      renderSeatSelectors();
-      refreshSeatControls();
-      renderSideLabels();
-    }),
-  );
+  if (activeSeatRows().some((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant))) void refreshBigNetAvailability();
   wireEvents();
   refreshBudgetControls();
   refreshOpeningPreview();
@@ -5548,6 +5559,9 @@ function resetArenaPageState(): void {
   running = false;
   startPending = false;
   startDisabled = true;
+  bt4AvailabilityResolved = false;
+  probingSeatOptions = false;
+  seatAvailabilityDirty = false;
   gameChartSamples = [];
   games.length = 0;
   gameResultChips.length = 0;

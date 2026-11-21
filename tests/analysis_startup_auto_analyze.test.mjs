@@ -48,6 +48,41 @@ test('a saved setup without Lc0 Small honours Auto-analyze turned off during sta
   assert.deepEqual(on.calls, ['analyze']);
 });
 
-test('a saved setup with Lc0 Small still loads its backend; the loader applies the checkbox', async () => {
-  for (const autoAnalyze of [false, true]) assert.deepEqual((await startup({ autoAnalyze, smallLc0: true })).calls, ['backend:true']);
+test('a saved setup with Lc0 Small dispatches analysis before backend readiness when Auto-analyze is on', async () => {
+  assert.deepEqual((await startup({ autoAnalyze: false, smallLc0: true })).calls, ['backend:true']);
+  assert.deepEqual((await startup({ autoAnalyze: true, smallLc0: true })).calls, ['analyze']);
+});
+
+test('Analysis fetches the opening index once when the position leaves the starting board', async () => {
+  const start = text.indexOf('let openingNameIndex:');
+  const controller = text.slice(start, text.indexOf('let tree =', start));
+  const tree = { root: { fen: 'start' } };
+  tree.current = tree.root;
+  const label = {};
+  let requests = 0;
+  const deps = {
+    tree,
+    START_FEN: 'start',
+    retry: false,
+    mountAbort: new AbortController(),
+    el: () => label,
+    fetch: async () => {
+      requests++;
+      return Response.json({ named: ['B00', 'King’s Pawn Game'] });
+    },
+    resolvePublicAssetUrl: (url) => url,
+    isStaleMount: () => false,
+    openingNameAt: (index) => index.named,
+    fitMoveList() {},
+    keepCurrentMoveInView() {},
+  };
+  const render = new Function(...Object.keys(deps), `${stripTypeScriptTypes(controller)}; return renderOpeningName;`)(...Object.values(deps));
+  render();
+  assert.equal(requests, 0);
+  tree.current = { fen: 'after e4' };
+  render();
+  render();
+  await new Promise(setImmediate);
+  assert.equal(requests, 1);
+  assert.equal(label.textContent, 'B00 · King’s Pawn Game');
 });

@@ -152,7 +152,7 @@ for (const [query, forced] of [
       searcher.dispose();
     }
     const worker = new WorkerStub();
-    const ready = await Maia3BrowserEvaluator.postInit(worker, 'unused-model');
+    const { names: ready } = await Maia3BrowserEvaluator.postInit(worker, async () => ({ model: 'unused-model' }), {});
     assert.equal(worker.posted[0].dequantFold, forced ?? true, 'Maia is folded again on every device');
     assert.equal(ready.ortRuntime.dequantFoldEnabled, forced ?? true);
     assert.equal(ort.ortDequantFoldEnabled(), forced ?? true, 'Small remains enabled by default');
@@ -162,7 +162,7 @@ for (const [query, forced] of [
 test('Maia init forwards page diagnostics and preserves the effective worker settings in its ready payload', async (t) => {
   globals(t, { location: { search: '?ortGraphOpt=layout&ortDequantFold=0' } });
   const worker = new WorkerStub();
-  const ready = await Maia3BrowserEvaluator.postInit(worker, 'unused-model');
+  const { names: ready } = await Maia3BrowserEvaluator.postInit(worker, async () => ({ model: 'unused-model' }), {});
   assert.equal(worker.posted[0].ortDiagnostics.graphOptimizationLevel, 'layout');
   assert.equal(worker.posted[0].dequantFold, false);
   assert.equal(ready.ortRuntime.graphOptimizationLevel, 'layout');

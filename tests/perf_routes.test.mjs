@@ -41,7 +41,7 @@ import {
   verdict,
 } from '../scripts/perf_routes/gate.mjs';
 import { chooseHumanMove, playHumanTurn } from '../scripts/perf_routes/human.mjs';
-import { arenaGameFailed, DOCS_READY, observeMovePvs, requireAnalysisForMove } from '../scripts/perf_routes/journeys.mjs';
+import { analysisSetup, arenaGameFailed, DOCS_READY, MIDGAME, observeMovePvs, requireAnalysisForMove } from '../scripts/perf_routes/journeys.mjs';
 import {
   acquireLock,
   checkSessionCancellation,
@@ -94,6 +94,65 @@ test('route gate strict parsing, mandatory arms, mutex, URLs, repeats, subsets',
   }
   assert.deepEqual(args('--journey', 'navigation', '--journey', 'navigation').journeys, ['navigation']);
   assert.throws(() => args('--out', 'a', '--out', 'b'), /Duplicate/);
+});
+
+test('the four-engine journey waits for delayed Add and family commits', async () => {
+  let pending;
+  const row = (family, variant) => ({
+    family: {
+      value: family,
+      dispatchEvent() {
+        assert.equal(pending, undefined, 'family change must not interrupt a pending Add');
+        const requested = this.value;
+        this.value = family;
+        pending = () => {
+          this.value = requested;
+        };
+      },
+    },
+    querySelector(selector) {
+      return selector === '.row-fam' ? this.family : { value: variant };
+    },
+  });
+  const rows = [row('lc0', 'small'), row('sf', 'lite')];
+  const control = { dispatchEvent() {} };
+  const controls = {
+    '#addEngine': {
+      click() {
+        assert.equal(pending, undefined, 'the next Add must not interrupt a family change');
+        pending = () => rows.push(row('reckless', 'simd'));
+      },
+    },
+    '#autoAnalyze': { ...control, type: 'checkbox' },
+    '#fenInput': { ...control },
+    '#loadFen': {
+      click() {
+        assert.equal(pending, undefined);
+      },
+    },
+  };
+  const document = {
+    querySelectorAll: () => rows,
+    querySelector(selector) {
+      const index = /data-i="(\d+)"/.exec(selector)?.[1];
+      return index === undefined ? controls[selector] : rows[index]?.family;
+    },
+  };
+  const window = { __analysisSchedulingState: () => ({ fen: MIDGAME, workerProgressMessages: 1 }) };
+  const evaluate = async (expression) => {
+    const before = pending;
+    const result = runInNewContext(expression, { document, window, Event });
+    if (before && !result) {
+      pending = undefined;
+      before();
+    }
+    return result;
+  };
+  await analysisSetup(evaluate, true);
+  assert.deepEqual(
+    rows.map(({ family }) => family.value),
+    ['lc0', 'sf', 'berserk', 'plentychess'],
+  );
 });
 
 test('a one-repeat same-build smoke measures sessions without passing the gate', () => {
