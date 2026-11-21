@@ -1143,7 +1143,10 @@ function ctxLiveStatusText(ctx: PlayContext): string {
   if (ctx.thinkingShown) return `${ctxOpponentName(ctxSelectedEngine(ctx))} is thinking…`;
   if (ctx.engineThinking) return `${ctxOpponentName(ctxSelectedEngine(ctx))} to move`;
   if (ctx.practicePosition && !ctx.started) return 'Choose your side and opponent, then press Play.';
-  if (!ctx.engineReady) return `${ctxSelectedEngine(ctx).label} is not ready. Retry the engine or choose another opponent.`;
+  if (!ctx.engineReady) {
+    if (ctxPhase(ctx) === 'setup' && ctx.dom.buttonEl('retryEngine').hidden) return 'Press Play to load your opponent.';
+    return `${ctxSelectedEngine(ctx).label} is not ready. Retry the engine or choose another opponent.`;
+  }
   if (ctxPhase(ctx) === 'setup') return 'Press Play or make a move.';
   if (boardCheck(ctx.board)) return ctx.board.turn === ctx.humanColor ? 'You are in check' : `${ctxOpponentName(ctxSelectedEngine(ctx))} is in check`;
   return ctx.board.turn === ctx.humanColor ? 'Your move' : `${ctxOpponentName(ctxSelectedEngine(ctx))} to move`;
@@ -1432,7 +1435,9 @@ function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shownPly: nu
   else if (!isHuman && ctx.practicePosition && !ctx.started && !ctx.engineReady) [text, kind] = ['Loads on Play', 'ready'];
   else if (!isHuman && !ctx.engineReady && !ctx.gameOver) {
     const retry = ctx.dom.buttonEl('retryEngine');
-    [text, kind] = retry.hidden ? ['Loading…', 'thinking'] : [`Error · ${retry.dataset.action === 'reload' ? 'reload' : 'retry'}`, 'error'];
+    if (!retry.hidden) [text, kind] = [`Error · ${retry.dataset.action === 'reload' ? 'reload' : 'retry'}`, 'error'];
+    else if (phase === 'setup') [text, kind] = ['Loads on Play', 'ready'];
+    else [text, kind] = ['Loading…', 'thinking'];
   } else if (!isHuman && phase === 'setup') [text, kind] = ['Ready', 'ready'];
   else if (isHuman && phase === 'playing' && ctx.viewPly === null && ctx.board.turn === color && ctx.engineReady && !ctx.pendingPromotion)
     [text, kind] = ['Your move', 'turn'];

@@ -489,28 +489,35 @@ test('an incidental Play visit and a fresh side choice do not boot Maia before t
   const slice = (start, end) => play.slice(play.indexOf(start), play.indexOf(end, play.indexOf(start)));
   const mount = slice('  ctxRender(ctx);\n  if (ctx.pendingPreferredEngineId)', '\nfunction hasPlayBrowserDom');
   const side = slice("  ctx.scope.listen(ctx.dom.selectEl('colorSelect'), 'change',", '  ctx.scope.listen(window, PHONE_LARGE_NET_CHANGE_EVENT');
+  const status = slice('function ctxLiveStatusText(', 'function ctxRenderMoveList(');
   const calls = [];
+  const retry = { hidden: true };
   const ctx = {
     restoredGame: false,
     started: false,
     engineReady: false,
     preparingEngine: false,
     engineThinking: false,
-    dom: { selectEl() {} },
+    dom: { selectEl() {}, buttonEl: () => retry },
     scope: { listen: (_el, _event, fn) => fn() },
   };
   const run = new Function(
     'calls',
     'ctx',
     `const ctxRender = () => {}, ctxPrepareOrStartEngine = () => calls.push('load');
+    const ctxPhase = () => 'setup', ctxSelectedEngine = () => ({ label: 'Maia3' });
+    ${stripTypeScriptTypes(status)}
     const ctxMaybeQueueRestart = (_ctx, prepare = true) => { if (prepare) ctxPrepareOrStartEngine(); };
     function mount(startupOpponent) { ${mount}
     function side() { ${side} }
-    return { mount, side };`,
+    return { mount, side, status: () => ctxLiveStatusText(ctx) };`,
   )(calls, ctx);
   run.mount({ family: 'maia3' });
   run.side();
   assert.deepEqual(calls, []);
+  assert.equal(run.status(), 'Press Play to load your opponent.');
+  retry.hidden = false;
+  assert.match(run.status(), /Retry the engine/);
   ctx.restoredGame = true;
   run.mount({ family: 'maia3' });
   run.side();
