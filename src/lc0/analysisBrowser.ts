@@ -4108,8 +4108,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     return;
   }
   const needsSmallLc0Backend = rows.some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant));
-  const smallLc0Pending = needsSmallLc0Backend && !workerReady && !searcher;
-  if (smallLc0Pending && rows.length === 1 && !smallLc0Load) {
+  if (needsSmallLc0Backend && !workerReady && !searcher && rows.length === 1 && !smallLc0Load) {
     void dispatchAnalysis({ type: 'NEEDS_BACKEND', owner });
     return;
   }
@@ -4180,10 +4179,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       if (controller.signal.aborted || mountAbort.signal.aborted) return;
     }
     if (!analysisCanPrepare(analysisRunState, owner)) return;
-    if (needsSmallLc0Backend && !workerReady && !searcher) {
-      void dispatchAnalysis({ type: 'NEEDS_BACKEND', owner });
-      return;
-    }
+    const smallLc0Pending = needsSmallLc0Backend && !workerReady && !searcher;
     renderBigNetWarning();
     engines.snapshotBigNetServedModels(rows);
     const snapshot = captureAnalysisRun({
