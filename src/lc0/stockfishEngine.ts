@@ -7,6 +7,7 @@ import {
   type BrowserUciSearchOptions,
   uciPositionCommand,
 } from './browserUciEngine.ts';
+import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { engineArtifactWorkerScript, resolveEngineArtifactUrl } from './engineArtifacts.ts';
 import { terminateEngineWorker } from './engineRetirement.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
@@ -66,6 +67,10 @@ export function normalizeStockfishFlavor(raw: string | null | undefined): Stockf
   if (value === 'lite-threaded' || value === 'lite-threads' || value === 'lite-multi') return 'lite-threaded';
   if (value === 'threaded' || value === 'full-threaded' || value === 'threads' || value === 'multi') return 'threaded';
   return 'lite-single';
+}
+
+export function threadedStockfishAvailable(): boolean {
+  return globalThis.crossOriginIsolated === true && typeof SharedArrayBuffer !== 'undefined' && !isMemoryConstrainedDevice();
 }
 
 export function stockfishFlavorRequiresIsolation(flavor: StockfishFlavor): boolean {

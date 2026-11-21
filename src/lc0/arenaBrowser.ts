@@ -200,7 +200,7 @@ import {
 } from './recklessVariants.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { Lc0PuctSearcher, type Lc0SearchProgress, type Lc0SearchResult } from './search.ts';
-import { StockfishEngine, type StockfishFlavor, type StockfishInfoLine, stockfishFlavorLabel, stockfishFlavorUrl } from './stockfishEngine.ts';
+import { StockfishEngine, type StockfishFlavor, type StockfishInfoLine, stockfishFlavorLabel, stockfishFlavorUrl, threadedStockfishAvailable } from './stockfishEngine.ts';
 import { StormphraxEngine } from './stormphraxEngine.ts';
 import {
   checkStormphraxVariantAsset,
@@ -2603,10 +2603,6 @@ function recordPendingLc0ReplyProbes(replyEngine: ArenaEngine, replyBoard: Board
     pendingLc0ReplyProbes.delete(engineId);
   }
   renderSearchTelemetryInfo();
-}
-
-function threadedStockfishAvailable(): boolean {
-  return runtimeIsolation && runtimeSharedArrayBuffer;
 }
 
 function stockfishFlavorFor(kind: 'lite' | 'full'): StockfishFlavor {

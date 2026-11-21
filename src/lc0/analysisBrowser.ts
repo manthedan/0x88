@@ -28,7 +28,6 @@ import {
   cpuAnalysisTimeoutMs,
   cpuColdStartTimeoutMs,
   createAnalysisEngines,
-  threadedStockfishAvailable,
 } from './analysis/analysisEngines.ts';
 import { cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
 import { analysisGamePosition } from './analysisContinuity.ts';
@@ -270,7 +269,7 @@ import {
 } from './recklessVariants.ts';
 import { loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { Lc0PuctSearcher } from './search.ts';
-import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
+import { StockfishEngine, stockfishFlavorUrl, threadedStockfishAvailable } from './stockfishEngine.ts';
 import {
   checkStormphraxVariantAsset,
   hasExplicitStormphraxVariant,

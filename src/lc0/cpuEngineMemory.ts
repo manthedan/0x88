@@ -1,3 +1,5 @@
+import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
+
 export type CpuEngineSurface = 'play' | 'arena' | 'analysis';
 
 /**
@@ -17,5 +19,6 @@ export const CPU_ENGINE_HASH_MB_BY_SURFACE: Readonly<Record<CpuEngineSurface, nu
 export const DEFAULT_CPU_ENGINE_HASH_MB = CPU_ENGINE_HASH_MB_BY_SURFACE.play;
 
 export function cpuEngineHashMbForSurface(surface: CpuEngineSurface): number {
-  return CPU_ENGINE_HASH_MB_BY_SURFACE[surface];
+  const budget = CPU_ENGINE_HASH_MB_BY_SURFACE[surface];
+  return isMemoryConstrainedDevice() ? budget / 4 : budget;
 }

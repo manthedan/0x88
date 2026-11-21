@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { createAnalysisEngines } from '../src/lc0/analysis/analysisEngines.ts';
+import { cpuEngineHashMbForSurface } from '../src/lc0/cpuEngineMemory.ts';
+import { stockfishFlavorUrl } from '../src/lc0/stockfishEngine.ts';
+import { testAnalysisEngines } from './lib/analysis_engines.mjs';
 
 function extracted(path, start, end) {
   const source = readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -11,6 +14,34 @@ function extracted(path, start, end) {
   assert.ok(from >= 0 && to > from, `${start} not found in ${path}`);
   return stripTypeScriptTypes(source.slice(from, to));
 }
+
+test('isolated Analysis uses single-threaded Stockfish and smaller hash budgets on phones only', (t) => {
+  globalThis.crossOriginIsolated = true;
+  t.after(() => {
+    delete globalThis.crossOriginIsolated;
+    delete globalThis.location;
+  });
+  for (const memoryClass of ['phone', 'desktop']) {
+    globalThis.location = { search: `?memoryClass=${memoryClass}` };
+    const builds = [];
+    const engines = testAnalysisEngines({
+      createStockfish: ({ hashMb }, url) => {
+        builds.push({ hashMb, url });
+        return {};
+      },
+    });
+    engines.getStockfish('lite');
+    engines.getStockfish('full');
+    const phone = memoryClass === 'phone';
+    const hashMb = phone ? 32 : 128;
+    assert.deepEqual(builds, [
+      { hashMb, url: stockfishFlavorUrl(phone ? 'lite-single' : 'lite-threaded') },
+      { hashMb, url: stockfishFlavorUrl(phone ? 'single' : 'threaded') },
+    ]);
+    assert.equal(cpuEngineHashMbForSurface('play'), phone ? 16 : 64);
+    assert.equal(cpuEngineHashMbForSurface('arena'), phone ? 16 : 64);
+  }
+});
 
 const PREPARATION_KEYS = ['sf:lite', 'sf:full', 'berserk:x'];
 
