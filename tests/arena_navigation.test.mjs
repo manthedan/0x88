@@ -115,6 +115,7 @@ test('hidden tournaments bypass pacing, and hiding cancels a pending visible del
 function arenaAvailability(prefix, extra = {}) {
   const source = readFileSync(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8');
   const body = source.slice(source.indexOf('async function refreshBigNetAvailability('), source.indexOf('async function renderRuntimeBadge('));
+  const refreshStart = source.slice(source.indexOf('function refreshSeatControls('), source.indexOf("  selectEl('seatA').disabled"));
   const BIG_NETS = {
     bt4: { ...BT4_NET, modelUrl: `https://example.test/${prefix}-bt4.onnx` },
     t3: { ...T3_NET, modelUrl: `https://example.test/${prefix}-t3.onnx` },
@@ -133,15 +134,16 @@ function arenaAvailability(prefix, extra = {}) {
     document: { activeElement: null },
     buildEngines() {},
     renderSeatSelectors() {},
-    refreshSeatControls() {},
     ...extra,
   };
   const load = new Function(
     ...Object.keys(deps),
     `
-    let bt4AvailabilityResolved = false, probingSeatOptions = false, running = false, startPending = false;
+    let bt4AvailabilityResolved = false, probingSeatOptions = false, running = false, startPending = false, seatAvailabilityDirty = false;
     ${stripTypeScriptTypes(body)}
-    return { refresh: refreshBigNetAvailability, resolved: () => bt4AvailabilityResolved };
+    ${stripTypeScriptTypes(refreshStart + '}')}
+    return { refresh: refreshBigNetAvailability, resolved: () => bt4AvailabilityResolved,
+      start: () => { running = true; }, finish: () => { running = false; refreshSeatControls(); } };
   `,
   )(...Object.values(deps));
   return { ...load, BIG_NETS };
@@ -163,6 +165,21 @@ test('Arena retries a transient large-net probe without another picker interacti
   assert.deepEqual(urls, [api.BIG_NETS.bt4.modelUrl, api.BIG_NETS.t3.modelUrl, api.BIG_NETS.bt4.modelUrl]);
   assert.equal(api.resolved(), true);
   assert.equal(bigNetAssetStatusSync(api.BIG_NETS.bt4), 'present');
+});
+
+test('Arena applies availability that finished during a match when the match ends', async (t) => {
+  const response = Promise.withResolvers();
+  const head = t.mock.method(globalThis, 'fetch', () => response.promise.then(() => new Response(null, { status: 200 })));
+  const renderSeatSelectors = t.mock.fn();
+  const api = arenaAvailability('match', { renderSeatSelectors });
+  const probing = api.refresh();
+  api.start();
+  response.resolve();
+  await probing;
+  assert.equal(renderSeatSelectors.mock.callCount(), 0);
+  api.finish();
+  assert.equal(renderSeatSelectors.mock.callCount(), 1);
+  assert.equal(head.mock.callCount(), 2, 'apply results without reprobing');
 });
 
 test('Arena restores focus to the same seat control after availability changes', async (t) => {

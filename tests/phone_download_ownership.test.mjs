@@ -191,6 +191,7 @@ for (const phase of [
       abortArenaPickerConsent() {},
       setArenaStartDisabled() {},
       syncArenaPhase() {},
+      seatAvailabilityDirty: false,
       checkpointWrites: phase === 'checkpoint-writes' ? gate.promise : Promise.resolve(),
       isStaleMount: () => false,
       checkpointUnreadable: false,

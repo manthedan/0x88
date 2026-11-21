@@ -649,6 +649,7 @@ const seatRows: EngineRow[] = [
 ];
 let bt4AvailabilityResolved = false;
 let probingSeatOptions = false;
+let seatAvailabilityDirty = false;
 
 function persistedVariantOrDefault(family: EngineFamily, value: unknown): string {
   const variant = String(value ?? '');
@@ -2051,6 +2052,7 @@ function syncArenaPhase(): void {
 }
 
 function refreshSeatControls(): void {
+  applyBigNetAvailability();
   selectEl('seatA').disabled = running;
   selectEl('seatB').disabled = running;
   selectEl('lc0PresetSelect').disabled = running || loadingLc0;
@@ -2890,20 +2892,25 @@ async function refreshBigNetAvailability(mountSignal = mountAbort.signal): Promi
     for (const [index, status] of statuses.entries()) {
       if (status === 'unknown') subscribeAssetProbeRetry([configs[index].modelUrl], retry, mountSignal);
     }
-    if (running || startPending) return;
-    for (const row of activeSeatRows()) {
-      if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && bigNetAssetStatusSync(BIG_NETS[row.variant]) === 'missing') row.variant = 'small';
-    }
-    const host = el('arenaSeatList');
-    const focused = document.activeElement;
-    const label = focused && host.contains(focused) ? focused.getAttribute('aria-label') : null;
-    buildEngines();
-    renderSeatSelectors();
-    refreshSeatControls();
-    if (label) host.querySelector<HTMLElement>(`[aria-label="${CSS.escape(label)}"]`)?.focus({ preventScroll: true });
+    seatAvailabilityDirty = true;
+    if (!running && !startPending) refreshSeatControls();
   } finally {
     if (!isStaleMount(mountSignal)) probingSeatOptions = false;
   }
+}
+
+function applyBigNetAvailability(): void {
+  if (!seatAvailabilityDirty || running || startPending) return;
+  seatAvailabilityDirty = false;
+  for (const row of activeSeatRows()) {
+    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && bigNetAssetStatusSync(BIG_NETS[row.variant]) === 'missing') row.variant = 'small';
+  }
+  const host = el('arenaSeatList');
+  const focused = document.activeElement;
+  const label = focused && host.contains(focused) ? focused.getAttribute('aria-label') : null;
+  buildEngines();
+  renderSeatSelectors();
+  if (label) host.querySelector<HTMLElement>(`[aria-label="${CSS.escape(label)}"]`)?.focus({ preventScroll: true });
 }
 
 async function renderRuntimeBadge(ortDiagnostics?: OrtRuntimeDiagnostics): Promise<void> {
@@ -3897,7 +3904,8 @@ async function ensureSelectedRecklessAssetsAvailable(mountSignal = mountAbort.si
 function clearStartPending(): void {
   startPending = false;
   if (!running) setArenaStartDisabled(false);
-  syncArenaPhase();
+  if (seatAvailabilityDirty) refreshSeatControls();
+  else syncArenaPhase();
 }
 
 function createIsolatedCpuEngine(row: EngineRow): BrowserUciEngine {
@@ -5560,6 +5568,7 @@ function resetArenaPageState(): void {
   startDisabled = true;
   bt4AvailabilityResolved = false;
   probingSeatOptions = false;
+  seatAvailabilityDirty = false;
   gameChartSamples = [];
   games.length = 0;
   gameResultChips.length = 0;
