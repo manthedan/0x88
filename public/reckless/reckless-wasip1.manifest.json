@@ -1,6 +1,6 @@
 {
   "schema": "lc0-webgpu.browser-engine-artifact-manifest.v1",
-  "generatedAt": "2026-07-15T19:46:51.319Z",
+  "generatedAt": "2026-11-21T17:45:21.592Z",
   "distributionPolicy": "docs/engine_artifact_distribution.md",
   "engine": "reckless",
   "flavor": "wasip1-browser",
@@ -14,70 +14,70 @@
     "script": "scripts/build_reckless_release_assets.mjs",
     "command": "npm run reckless:build-release",
     "patches": [],
-    "toolchain": "Rust cargo with wasm32-wasip1 target; scalar, SIMD, relaxed-SIMD, explicit non-default external-NNUE WASI prototype, and browser-API builds from the pinned Reckless source."
+    "toolchain": "rustc 1.95.0 (59807616e 2026-04-14), wasm32-wasip1 (scalar, SIMD, relaxed SIMD and external NNUE); existing browser-API builds unchanged."
   },
   "artifacts": [
     {
       "path": "public/reckless/reckless.wasm",
-      "bytes": 64577670,
-      "sha256": "6ca10b8fc802020d702ee5581f15a35636b37e183ca517c51492ed7b57ea3884",
+      "bytes": 64576195,
+      "sha256": "ee4f87cd0af5bd10650fd9f122d6a53107782ab0962aec1be79822b29f59b58b",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 4; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 43871357,
+          "bytes": 43871342,
           "ratio": 0.6794
         },
         "brotli": {
-          "bytes": 43032565,
-          "ratio": 0.6664
+          "bytes": 43025063,
+          "ratio": 0.6663
         }
       }
     },
     {
       "path": "public/reckless/reckless-simd128.wasm",
-      "bytes": 64579221,
-      "sha256": "9b65d3b5c0ab08d8f16dfb30103cecd829c9fa0d05fc31dce81b710dbc7bb546",
+      "bytes": 64577744,
+      "sha256": "a743d4676a9c065916c8708911a0b8fa70ab31ee89710a4b7edf4f75c0be54ed",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 4; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 43870709,
-          "ratio": 0.6793
+          "bytes": 43870900,
+          "ratio": 0.6794
         },
         "brotli": {
-          "bytes": 43036404,
-          "ratio": 0.6664
+          "bytes": 43027853,
+          "ratio": 0.6663
         }
       }
     },
     {
       "path": "public/reckless/reckless-simd128-external.wasm",
-      "bytes": 1316053,
-      "sha256": "5886d817599a7a15e13c64512ff538a30434ef182e1af0098649919d0528e2f2",
+      "bytes": 1314592,
+      "sha256": "278751a98cd6e146d97a99b5ecb3cba61c67a1c28d858727e040b243e6176826",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 4; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 192753,
-          "ratio": 0.1465
+          "bytes": 192930,
+          "ratio": 0.1468
         },
         "brotli": {
-          "bytes": 196710,
-          "ratio": 0.1495
+          "bytes": 197264,
+          "ratio": 0.1501
         }
       }
     },
     {
       "path": "public/reckless/reckless-relaxed-simd128.wasm",
-      "bytes": 64578859,
-      "sha256": "a9b4b292688d7952fee643dacbb1b1d4b991bcf7f0a8a2e7ad5690afe2134fcb",
+      "bytes": 64577382,
+      "sha256": "9f7a707306870793b483a7dd920a6fb33b9b45339dc7c5e1807dbe4a24261ec5",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 4; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 43870932,
-          "ratio": 0.6793
+          "bytes": 43871039,
+          "ratio": 0.6794
         },
         "brotli": {
-          "bytes": 43037133,
-          "ratio": 0.6664
+          "bytes": 43029151,
+          "ratio": 0.6663
         }
       }
     },
@@ -147,64 +147,64 @@
     },
     {
       "path": "public/reckless/reckless-scalar-corresponding-source.tar.gz",
-      "bytes": 44570233,
-      "sha256": "758050feb49052961ab57a6fb0f3a4ebc229bf5db47ed189b085fbebf0c2b81c",
+      "bytes": 44532468,
+      "sha256": "9a66b7ee8ef24062e7b449f7f10aa87573c642083fd79fda1070ac6175ef43ae",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 4; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 44583158,
+          "bytes": 44543993,
           "ratio": 1.0003
         },
         "brotli": {
-          "bytes": 44570262,
+          "bytes": 44532496,
           "ratio": 1
         }
       }
     },
     {
       "path": "public/reckless/reckless-simd128-corresponding-source.tar.gz",
-      "bytes": 44572104,
-      "sha256": "b39dab5d3c46f2707e7e4ced1972c36b3ada8fa58814531c6f09cc20e4d6ffaa",
+      "bytes": 44534075,
+      "sha256": "659323e21c87881fdbf2ec7413cf1fad1e759774898176e0c3e69f79981693ac",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 4; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 44584915,
+          "bytes": 44545673,
           "ratio": 1.0003
         },
         "brotli": {
-          "bytes": 44572137,
+          "bytes": 44534100,
           "ratio": 1
         }
       }
     },
     {
       "path": "public/reckless/reckless-simd128-external-corresponding-source.tar.gz",
-      "bytes": 44572430,
-      "sha256": "efdeb216989ac76b688e34a4881b6067c5e75ee5a242cb194518a5d65557da69",
+      "bytes": 44534219,
+      "sha256": "7bb6c14193e663437e84abcd0297270733fe1019b1ecd9768b1dd44eec593725",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 4; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 44585168,
+          "bytes": 44545806,
           "ratio": 1.0003
         },
         "brotli": {
-          "bytes": 44572459,
+          "bytes": 44534244,
           "ratio": 1
         }
       }
     },
     {
       "path": "public/reckless/reckless-relaxed-simd128-corresponding-source.tar.gz",
-      "bytes": 44572171,
-      "sha256": "a273b9429e76f846490181757164bf7d955854793e0904d547672a4334c54daa",
+      "bytes": 44534088,
+      "sha256": "f4a9bb95e5d14ce31467121461187113d870a20e789ee15e90a2a5f91fca15ea",
       "compression": {
         "note": "Estimated precompressed transfer sizes using Node zlib gzip level 9 and brotli quality 4; actual CDN/server settings may differ.",
         "gzip": {
-          "bytes": 44584978,
+          "bytes": 44545605,
           "ratio": 1.0003
         },
         "brotli": {
-          "bytes": 44572196,
+          "bytes": 44534117,
           "ratio": 1
         }
       }
@@ -220,17 +220,17 @@
     }
   ],
   "totals": {
-    "bytes": 566919795,
-    "gzipBytes": 441682600,
-    "brotliBytes": 436624480,
-    "gzipRatio": 0.7791,
-    "brotliRatio": 0.7702
+    "bytes": 566761817,
+    "gzipBytes": 441525918,
+    "brotliBytes": 436448902,
+    "gzipRatio": 0.779,
+    "brotliRatio": 0.7701
   },
   "sourceArchive": {
     "required": true,
     "path": "public/reckless/reckless-scalar-corresponding-source.tar.gz",
-    "bytes": 44570233,
-    "sha256": "758050feb49052961ab57a6fb0f3a4ebc229bf5db47ed189b085fbebf0c2b81c",
+    "bytes": 44532468,
+    "sha256": "9a66b7ee8ef24062e7b449f7f10aa87573c642083fd79fda1070ac6175ef43ae",
     "url": "/reckless/reckless-scalar-corresponding-source.tar.gz",
     "note": "Source archive recorded for public distribution."
   }

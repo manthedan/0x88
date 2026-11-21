@@ -123,6 +123,11 @@ export class SharedStopFlag extends Fd {
   fd_read(size: number): { ret: number; data: Uint8Array } {
     return { ret: wasi.ERRNO_SUCCESS, data: size > 0 ? Uint8Array.of(Atomics.load(this.flag, 0) !== 0 ? 1 : 0) : new Uint8Array() };
   }
+
+  fd_prestat_get(): { ret: number; prestat: null } {
+    // wasi-libc requires EBADF to end its scan of the contiguous preopens.
+    return { ret: wasi.ERRNO_BADF, prestat: null };
+  }
 }
 
 async function fetchAndCompileModule(wasmUrl: string): Promise<WebAssembly.Module> {
@@ -376,7 +381,7 @@ async function runPersistentWasiUci(
 ): Promise<void> {
   const wasiInstance = new WASI(
     [executableName],
-    [],
+    stopBuffer ? ['LEELAWEB_WASI_STOP=1'] : [],
     [
       new SharedStdin(inputBuffer),
       lineCollector(null, (line) => post({ type: 'persistent-line', stream: 'stdout', line }), isUsefulUciStdoutLine),

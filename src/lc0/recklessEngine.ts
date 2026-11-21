@@ -184,6 +184,7 @@ export class RecklessEngine implements BrowserUciEngine {
   private browserApiPending = new Map<number, BrowserApiPending>();
   private persistentPending: PersistentPending | null = null;
   private sharedInput: SharedInput | null = null;
+  private sharedStop: Int32Array<SharedArrayBuffer> | null = null;
   private persistentDisabled = false;
   private persistentHashCommand: string | null = null;
   private persistentThreadsCommand: string | null = null;
@@ -318,10 +319,12 @@ export class RecklessEngine implements BrowserUciEngine {
     this.worker = worker;
     this.workerMode = 'persistent';
     this.sharedInput = sharedInput;
+    this.sharedStop = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
     worker.postMessage({
       type: 'start-persistent',
       wasmUrl: this.wasmUrl,
       inputBuffer: sharedInput.buffer,
+      stopBuffer: this.sharedStop.buffer,
       preopenFiles: this.wasiPreopenFiles(),
     });
     return worker;
@@ -392,6 +395,7 @@ export class RecklessEngine implements BrowserUciEngine {
     this.worker = null;
     this.workerMode = null;
     this.sharedInput = null;
+    this.sharedStop = null;
     this.persistentHashCommand = null;
     this.persistentThreadsCommand = null;
     this.persistentMultipvCommand = null;
@@ -466,21 +470,14 @@ export class RecklessEngine implements BrowserUciEngine {
   ): Promise<RunResult> {
     if (signal?.aborted) return Promise.reject(abortError());
     this.ensurePersistentWorker();
-    const sharedInput = this.sharedInput;
-    if (!sharedInput) return Promise.reject(new Error('Reckless persistent stdin was not initialized'));
+    const sharedInput = this.sharedInput!;
+    const sharedStop = this.sharedStop!;
     return new Promise<RunResult>((resolve, reject) => {
       let active: PersistentPending;
       const onAbort = () => {
         if (this.persistentPending !== active) return;
         active.aborted = true;
-        try {
-          writeSharedInput(sharedInput, 'stop\n');
-        } catch {
-          this.persistentPending = null;
-          this.disposeWorker();
-          reject(abortError());
-          return;
-        }
+        Atomics.store(sharedStop, 0, 1);
         active.abortTimer = setTimeout(() => {
           if (this.persistentPending !== active) return;
           this.persistentPending = null;
@@ -504,6 +501,7 @@ export class RecklessEngine implements BrowserUciEngine {
       this.persistentPending = active;
       signal?.addEventListener('abort', onAbort, { once: true });
       try {
+        Atomics.store(sharedStop, 0, 0);
         writeSharedInput(sharedInput, `${this.optimizePersistentCommands(commands).join('\n')}\n`);
       } catch (error) {
         signal?.removeEventListener('abort', onAbort);

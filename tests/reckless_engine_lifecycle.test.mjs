@@ -79,6 +79,42 @@ test('Reckless ignores late messages and errors from a replaced persistent worke
   assert.equal(await next, 'e2e4');
 });
 
+test('Reckless signals a running WASI search and drains it before stepping to the next position', async (t) => {
+  const engine = setup(t, true, { disablePersistentFallback: true });
+  const controller = new AbortController();
+  const cancelled = assert.rejects(engine.analyze(FEN, { signal: controller.signal, depth: 40 }), { name: 'AbortError' });
+  await flush();
+  const worker = MockWorker.instances[0];
+  assert.match(worker.commands(), /go depth 40/);
+  const stop = new Int32Array(worker.messages[0].stopBuffer);
+  assert.equal(stop.length, 1);
+  controller.abort();
+  assert.equal(Atomics.load(stop, 0), 1);
+  const next = engine.bestMove(FEN, undefined, { moves: ['e2e4'] });
+  await flush();
+  assert.equal(worker.commands(), '');
+  worker.line('bestmove d2d4');
+  await cancelled;
+  await flush();
+  assert.equal(worker.terminated, false);
+  assert.equal(Atomics.load(stop, 0), 0);
+  assert.equal(worker.commands(), `position fen ${FEN} moves e2e4\ngo depth 3\n`);
+  worker.line('bestmove e7e5');
+  assert.equal(await next, 'e7e5');
+});
+
+test('Reckless retires a persistent worker that never acknowledges the stop flag', async (t) => {
+  const engine = setup(t, true, { disablePersistentFallback: true });
+  const controller = new AbortController();
+  const cancelled = assert.rejects(engine.bestMove(FEN, controller.signal), { name: 'AbortError' });
+  await flush();
+  const worker = MockWorker.instances[0];
+  controller.abort();
+  assert.equal(worker.terminated, false);
+  await cancelled;
+  assert.equal(worker.terminated, true);
+});
+
 test('Reckless ignores late one-shot replies from a replaced worker', async (t) => {
   const engine = setup(t, false);
   const controller = new AbortController();

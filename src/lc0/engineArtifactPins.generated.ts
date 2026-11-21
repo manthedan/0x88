@@ -86,19 +86,19 @@ export const ENGINE_ARTIFACT_PINS = {
     br: 'ae2c759296844fcdd5f6450de2147b26f487e86a4c589cfe592741a12e503ccb',
   },
   '/reckless/reckless-relaxed-simd128.wasm': {
-    sha256: 'a9b4b292688d7952fee643dacbb1b1d4b991bcf7f0a8a2e7ad5690afe2134fcb',
-    bytes: 64578859,
-    br: '000955cb88fb4250926a4bf761bf3587c52ba9927ded06341514de6df20c6f9c',
+    sha256: '9f7a707306870793b483a7dd920a6fb33b9b45339dc7c5e1807dbe4a24261ec5',
+    bytes: 64577382,
+    br: '33d71fbdf50cd67266c889bbdb9acb046bb9bd091260542ffd410c3452ee6d1f',
   },
   '/reckless/reckless-simd128-external.wasm': {
-    sha256: '5886d817599a7a15e13c64512ff538a30434ef182e1af0098649919d0528e2f2',
-    bytes: 1316053,
-    br: '88c4846e302ed2b3bc996dfa76f20be9dca16b5fdc088a48a01413c2883ed57d',
+    sha256: '278751a98cd6e146d97a99b5ecb3cba61c67a1c28d858727e040b243e6176826',
+    bytes: 1314592,
+    br: '179b840d2cb5512f23cde398c1609b7a63454c5f173b523188018a4c641e14cf',
   },
   '/reckless/reckless-simd128.wasm': {
-    sha256: '9b65d3b5c0ab08d8f16dfb30103cecd829c9fa0d05fc31dce81b710dbc7bb546',
-    bytes: 64579221,
-    br: 'a35bd5a98203e94abfdb2b10a3108faafd8e52a55281c3dec0b9f7b4c49b141c',
+    sha256: 'a743d4676a9c065916c8708911a0b8fa70ab31ee89710a4b7edf4f75c0be54ed',
+    bytes: 64577744,
+    br: '780026aeaab582eec91cf9d87e2f6b079b9586b8a720ea77ebf4cada74edc121',
   },
   '/reckless/reckless-v60-7f587dfb.nnue': {
     sha256: '7f587dfb1fe5d74d53909328afa6fd51650c8c7f45907602db7fbb1e52948c61',
@@ -106,9 +106,9 @@ export const ENGINE_ARTIFACT_PINS = {
     br: '97d94d8d147934df111443a0927434f5163c8432e81a71ff75fe1b8a99c18e0c',
   },
   '/reckless/reckless.wasm': {
-    sha256: '6ca10b8fc802020d702ee5581f15a35636b37e183ca517c51492ed7b57ea3884',
-    bytes: 64577670,
-    br: 'b3eb7f6826d2ac6880d23237c4459433c070465cd33ec05ae6de2ba63b95bb00',
+    sha256: 'ee4f87cd0af5bd10650fd9f122d6a53107782ab0962aec1be79822b29f59b58b',
+    bytes: 64576195,
+    br: '849bf2f938677d1ec387cf772423f4e4dad06622044c3b738d35ead6fae0a5db',
   },
   '/stockfish/stockfish-19-lite-single-relaxed.js': {
     sha256: '182b582432f76000e61a3b727cd9d8d6df99fdff174a2ab329ef93ca3631f03a',

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
+import { wasi } from '@bjorn3/browser_wasi_shim';
 import { createEngineArtifactLoader, engineArtifacts } from '../src/lc0/engineArtifacts.ts';
 
 let workerModule;
@@ -16,13 +17,14 @@ async function loadWorkerModule(messages) {
   return workerModule;
 }
 
-test('Viridithas shared stop descriptor is nonblocking, sticky and resettable independently of stdin', async () => {
+test('the shared stop descriptor is nonblocking, sticky and not a preopened directory', async () => {
   const previousSelf = globalThis.self;
   try {
     const { SharedStopFlag } = await loadWorkerModule([]);
     const buffer = new SharedArrayBuffer(4);
     const flag = new Int32Array(buffer);
     const fd = new SharedStopFlag(buffer);
+    assert.deepEqual(fd.fd_prestat_get(), { ret: wasi.ERRNO_BADF, prestat: null });
     assert.deepEqual([...fd.fd_read(1).data], [0]);
     Atomics.store(flag, 0, 1);
     assert.deepEqual([...fd.fd_read(1).data], [1]);
