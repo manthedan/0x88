@@ -4,11 +4,35 @@ import test from 'node:test';
 import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange, subscribeAssetProbeRetry } from '../src/lc0/assetProbe.ts';
 import { berserkVariantAssetStatus, checkBerserkVariantAsset } from '../src/lc0/berserkVariants.ts';
 import { browserVariantOption } from '../src/lc0/browserVariantOption.ts';
+import { createEngineArtifactLoader } from '../src/lc0/engineArtifacts.ts';
 import { bigNetAssetStatusSync, bigNetOptionState, checkBigNetAsset } from '../src/lc0/bt4Engine.ts';
 import { checkPlentyChessVariantAsset, plentyChessVariantAssetStatus } from '../src/lc0/plentychessVariants.ts';
 import { checkRecklessVariantAsset, recklessVariantAssetStatus } from '../src/lc0/recklessVariants.ts';
 import { checkStormphraxVariantAsset, stormphraxVariantAssetStatus } from '../src/lc0/stormphraxVariants.ts';
 import { checkViridithasVariantAsset, viridithasVariantAssetStatus } from '../src/lc0/viridithasVariants.ts';
+
+test('an offline CPU picker and verified loader use cached GETs, not network HEADs', async (t) => {
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+  t.after(() => delete navigator.onLine);
+  const variant = { key: 'custom', jsUrl: '/berserk/offline.js', wasmUrl: '/berserk/offline.wasm', dataUrl: '/berserk/offline.data' };
+  const cancelled = t.mock.fn();
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    assert.notEqual(options.method, 'HEAD');
+    assert.equal(options.cache, 'force-cache');
+    return new Response(new ReadableStream({ cancel: cancelled }));
+  });
+  assert.equal(await checkBerserkVariantAsset(variant), 'present');
+  assert.equal(cancelled.mock.callCount(), 3);
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url, variant.wasmUrl);
+    assert.equal(options.cache, 'force-cache');
+    return new Response('abc');
+  });
+  const loader = createEngineArtifactLoader({
+    [variant.wasmUrl]: { bytes: 3, sha256: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad' },
+  });
+  assert.equal(new TextDecoder().decode(await loader.bytes(variant.wasmUrl)), 'abc');
+});
 
 for (const code of [404, 410]) {
   test(`confirmed ${code} resolves missing even when another required HEAD hangs`, async (t) => {

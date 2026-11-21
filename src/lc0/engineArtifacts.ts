@@ -62,7 +62,7 @@ export function createEngineArtifactLoader(
     if (hash !== entry.sha256) throw failure(url, 'SHA-256 mismatch');
     return bytes;
   }
-  async function response(url: string, cache: RequestCache = 'default'): Promise<Response> {
+  async function response(url: string, cache: RequestCache = globalThis.navigator?.onLine === false ? 'force-cache' : 'default'): Promise<Response> {
     expected(url);
     // Match Analysis prefetch's default mode/credentials so both requests use
     // the same HTTP cache entry, including cross-origin asset-base URLs.

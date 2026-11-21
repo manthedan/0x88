@@ -108,12 +108,22 @@ export function assetProbeRetryAllowed(urls: readonly string[], onRetry?: () => 
   return false;
 }
 
+async function probeHttpCache(url: string, signal: AbortSignal): Promise<boolean> {
+  const response = await fetch(url, { cache: 'force-cache', mode: 'cors', credentials: 'same-origin', signal });
+  void response.body?.cancel().catch(() => undefined);
+  return response.ok;
+}
+
 /** Only HTTP success and 404/410 are definitive. A bounded transient failure
  * leaves availability unknown until the third attempt, then settles missing for
  * the session so existing pickers stop displaying checking indefinitely. */
 export async function probeAssetUrls(
   urls: readonly string[],
-  { timeoutMs = 8_000, signal }: { timeoutMs?: number; signal?: AbortSignal } = {},
+  { timeoutMs = 8_000, signal, probeOffline = probeHttpCache }: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    probeOffline?: (url: string, signal: AbortSignal) => Promise<boolean>;
+  } = {},
 ): Promise<AssetProbeStatus> {
   const key = JSON.stringify(urls);
   if ((failures.get(key)?.attempts ?? 0) >= maxAttempts) {
@@ -135,9 +145,11 @@ export async function probeAssetUrls(
   (timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
   if (signal?.aborted) abort();
   try {
+    const offline = globalThis.navigator?.onLine === false;
     const statuses = Promise.all(
       urls.map(async (url): Promise<AssetProbeStatus> => {
         try {
+          if (offline) return (await probeOffline(url, controller.signal)) ? 'present' : 'unknown';
           const response = await fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal });
           if (response.ok) return 'present';
           if (response.status === 404 || response.status === 410) {

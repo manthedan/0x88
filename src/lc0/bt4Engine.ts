@@ -8,6 +8,7 @@ import {
   probeOrtWebGpuShaderF16Support,
   requestedOrtExecutionProvider,
   requestedOrtRuntimeDiagnosticOptions,
+  resolveFreshWorkerOrtSessionPlacement,
 } from '../nn/ortConfig.ts';
 import type { OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
 import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange } from './assetProbe.ts';
@@ -16,8 +17,9 @@ import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import { terminateEngineWorker } from './engineRetirement.ts';
 import { type LargeNetPrefetchOptions, type LargeNetPrefetchResult, largeNetWorkerEp, phoneColdPrefetch } from './largeNetDownload.ts';
-import { lc0SplitKUrl } from './lc0ModelUrls.ts';
+import { lc0SplitKUrl, selectLc0OrtModelUrl } from './lc0ModelUrls.ts';
 import type { Lc0Evaluation, Lc0EvaluatorInput } from './lc0EvaluatorBase.ts';
+import { inspectLc0ModelDownload } from './modelCache.ts';
 import { PHONE_LARGE_NET_SUFFIX, phoneBigNetBlocked } from './phoneLargeNetPolicy.ts';
 
 export interface BigNetConfig {
@@ -250,7 +252,14 @@ export async function checkBigNetAsset(config: BigNetConfig = BT4_NET, onStatus?
     return 'missing';
   }
   if (!assetProbeRetryAllowed(urls, onStatus)) return 'unknown';
-  const probe = probeAssetUrls(urls).then((status) => {
+  const probe = probeAssetUrls(urls, {
+    probeOffline: async (url, signal) => {
+      if ((await inspectLc0ModelDownload(url, { signal })).cached) return true;
+      if (!lc0SplitKUrl(url)) return false;
+      const selected = selectLc0OrtModelUrl(url, await resolveFreshWorkerOrtSessionPlacement(largeNetWorkerEp()));
+      return selected !== url && (await inspectLc0ModelDownload(selected, { signal })).cached;
+    },
+  }).then((status) => {
     assetStatuses.set(probeKey, status);
     assetProbes.delete(probeKey);
     return status;
