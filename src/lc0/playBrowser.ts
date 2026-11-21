@@ -34,11 +34,9 @@ import {
   bigNetOptionState,
   bt4SupportedSync,
   checkBigNetAsset,
-  LQO_NET,
   phoneBlockedBigNetModelUrl,
   probeBt4Support,
   renderBigNetCpuWarning,
-  T3_NET,
 } from './bt4Engine.ts';
 import { writeClipboard } from './clipboard.ts';
 import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryClass.ts';
@@ -1777,11 +1775,13 @@ function ctxInit(ctx: PlayContext): void {
     showPhoneLargeNetFallback();
   }
   const preferredOption = ENGINE_OPTIONS.find((option) => option.id === preferences.engineId && (!ctx.practicePosition || option.group !== 'odds'));
-  const preferredBigNetStatus =
-    preferredOption?.family === 'lc0' && preferredOption.variant !== 'small' ? bigNetAssetStatusSync(BIG_NETS[preferredOption.variant as BigNetKey]) : null;
-  const preferredBigNetCanProbe =
-    preferredOption?.family === 'lc0' && preferredOption.variant !== 'small' && (!isV0DeployProfile() || preferredOption.variant === 'lqo');
-  ctx.pendingPreferredEngineId = !saved && preferredOption && preferredBigNetCanProbe && preferredBigNetStatus === 'unknown' ? preferredOption.id : null;
+  ctx.pendingPreferredEngineId =
+    !saved &&
+    preferredOption?.family === 'lc0' &&
+    preferredOption.variant !== 'small' &&
+    bigNetAssetStatusSync(BIG_NETS[preferredOption.variant as BigNetKey]) === 'unknown'
+      ? preferredOption.id
+      : null;
   ctx.dom.selectEl('engineSelect').value = preferredOption && (saved || !ctxEngineOptionState(preferredOption).disabled) ? preferredOption.id : 'maia3';
   ctx.dom.selectEl('colorSelect').value =
     ctx.practicePosition && !saved ? (replayPlayPosition(ctx.practicePosition).board.turn === 'w' ? 'white' : 'black') : preferences.color;
@@ -2035,14 +2035,9 @@ function ctxInit(ctx: PlayContext): void {
       ctxResolvePendingPreferredEngine(ctx);
     }
   };
-  if (!isV0DeployProfile()) {
-    void probeBt4Support().then(refreshIfMounted);
-    void checkBigNetAsset(BIG_NETS.bt4).then(refreshIfMounted);
-    void checkBigNetAsset(T3_NET).then(refreshIfMounted);
-    void checkBigNetAsset(LQO_NET).then(refreshIfMounted);
-  } else {
-    void probeBt4Support().then(refreshIfMounted);
-    void checkBigNetAsset(LQO_NET).then(refreshIfMounted);
+  void probeBt4Support().then(refreshIfMounted);
+  for (const option of ENGINE_OPTIONS) {
+    if (option.family === 'lc0' && option.variant !== 'small') void checkBigNetAsset(BIG_NETS[option.variant as BigNetKey]).then(refreshIfMounted);
   }
   ctxRender(ctx);
   if (ctx.pendingPreferredEngineId) {
