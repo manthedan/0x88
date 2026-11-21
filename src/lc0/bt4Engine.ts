@@ -14,6 +14,7 @@ import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscri
 import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
+import { WorkerDeviceLostError, WorkerDeviceRecovery } from './workerDeviceRecovery.ts';
 import { terminateEngineWorker } from './engineRetirement.ts';
 import { type LargeNetPrefetchOptions, type LargeNetPrefetchResult, largeNetWorkerEp, phoneColdPrefetch } from './largeNetDownload.ts';
 import { lc0SplitKUrl } from './lc0ModelUrls.ts';
@@ -133,6 +134,7 @@ export interface Bt4SearchProgress extends Bt4SearchResult {
 
 export interface Bt4SearchOptions {
   visits?: number | ((backend: string) => number);
+  retryOnDeviceLoss?: boolean;
   movetimeMs?: number;
   multiPv?: number;
   reuseTree?: boolean;
@@ -346,9 +348,13 @@ export class Bt4WorkerSearcher {
   private lifecycleGeneration = 0;
   private configuredEvalCacheEntries = -1;
   private configuredDiagnosticKey = '';
+  private cacheOnly = false;
+  private readonly deviceRecovery = new WorkerDeviceRecovery();
+  onDeviceLossWarning?: (warning: string) => void;
   backend = '';
   ortRuntime: OrtSessionDiagnostics | null = null;
   deviceLost: OrtDeviceLoss | null = null;
+  deviceFailure: WorkerDeviceLostError | null = null;
   fallback: OrtRuntimeDiagnostics['fallback'];
   /**
    * URL of the model the worker runs: config.modelUrl, or its split-K rewrite on
@@ -399,7 +405,7 @@ export class Bt4WorkerSearcher {
    * `noDownload`: a cache-hit approval; a load that needs network bytes fails with
    * LC0_MODEL_DOWNLOAD_NOT_APPROVED instead. An init already in flight is shared as is.
    */
-  async init(options: { evalCacheEntries?: number; noDownload?: boolean } = {}): Promise<string> {
+  async init(options: { evalCacheEntries?: number; noDownload?: boolean; signal?: AbortSignal } = {}): Promise<string> {
     const evalCacheEntries = normalizedEvalCacheEntries(options.evalCacheEntries);
     const diagnostics = bigNetDiagnosticRequest(this.config);
     const diagnosticKey = JSON.stringify(diagnostics);
@@ -423,7 +429,7 @@ export class Bt4WorkerSearcher {
       // so big nets stay playable (slowly) without WebGPU — callers read
       // `backend` and scale visit budgets via config.wasmLevels. An explicit
       // ?ortEp=wasm page override forces the CPU path end to end.
-      const ep = largeNetWorkerEp();
+      const ep = this.deviceRecovery.provider(largeNetWorkerEp());
       // Phones only: a cold net is fetched into Cache Storage by a throwaway worker
       // first, so this worker's load is a cached load (largeNetDownload.ts).
       // A load that may not download has nothing to prefetch.
@@ -476,6 +482,8 @@ export class Bt4WorkerSearcher {
       );
       if (this.worker !== worker) throw new Error('Lc0 BT4 worker invalidated during initialization');
       this.ready = true;
+      this.deviceFailure = null;
+      this.cacheOnly = options.noDownload === true;
       this.configuredEvalCacheEntries = evalCacheEntries;
       this.configuredDiagnosticKey = diagnosticKey;
       this.ortRuntime = ready.ortRuntime ?? this.ortRuntime;
@@ -483,27 +491,31 @@ export class Bt4WorkerSearcher {
       this.fallback = ready.ortFallback;
       this.servedModelUrl = ready.servedModelUrl ?? this.config.modelUrl;
       return this.backend;
-    })();
-    this.initPromise = initializing;
-    try {
-      return await initializing;
-    } catch (error) {
+    })().catch((error: unknown) => {
+      if (error instanceof WorkerDeviceLostError && error.retry && generation === this.lifecycleGeneration && !options.signal?.aborted) {
+        return this.init(options);
+      }
       // A retired init must not invalidate its replacement.
       if (this.initPromise === initializing) this.invalidate(this.worker, error instanceof Error ? error : new Error(String(error)));
       throw error;
-    }
+    });
+    this.initPromise = initializing;
+    return initializing;
   }
 
   private startWorker(): Worker {
     if (this.worker) return this.worker;
-    this.deviceLost = null;
     const worker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module' });
     this.worker = worker;
     worker.addEventListener('message', (event: MessageEvent) => {
       if (this.worker !== worker) return;
       const message = event.data as { id?: number; type: string; error?: string; loadedBytes?: number; totalBytes?: number; loss?: OrtDeviceLoss };
       if (message.type === 'deviceLost') {
-        this.deviceLost = message.loss ?? null;
+        this.deviceLost = message.loss!;
+        const error = this.deviceRecovery.lost(this.deviceLost);
+        this.deviceFailure = error;
+        this.invalidate(worker, error);
+        this.onDeviceLossWarning?.(error.warning(`Lc0 ${this.config.name}`));
         return;
       }
       if (message.type === 'downloadProgress') {
@@ -537,12 +549,13 @@ export class Bt4WorkerSearcher {
     if (signal?.aborted) return cancelled;
     let backend: string;
     try {
-      backend = await this.init({ evalCacheEntries });
+      backend = await this.init({ evalCacheEntries, noDownload: !!this.deviceFailure && this.cacheOnly, signal });
     } catch (error) {
       if (signal?.aborted) return cancelled;
       throw error;
     }
     if (signal?.aborted) return cancelled;
+    const generation = this.lifecycleGeneration;
     options.onSessionReady?.();
     let searchId: number | null = null;
     const onAbort = () => {
@@ -579,16 +592,32 @@ export class Bt4WorkerSearcher {
         onProgress ? (progress) => onProgress(swapColors ? swapColorsResult(progress, input) : progress) : undefined,
       );
       return swapColors ? swapColorsResult(response.result, input) : response.result;
+    } catch (error) {
+      if (signal?.aborted) return cancelled;
+      if (error instanceof WorkerDeviceLostError && error.retry && options.retryOnDeviceLoss !== false && generation === this.lifecycleGeneration) {
+        return this.search(input, options);
+      }
+      throw error;
     } finally {
       signal?.removeEventListener('abort', onAbort);
       if (this.activeSearchId === searchId) this.activeSearchId = null;
     }
   }
 
-  async evaluate(input: Lc0EvaluatorInput, options: { evalCacheEntries?: number } = {}): Promise<Lc0Evaluation> {
-    await this.init({ evalCacheEntries: options.evalCacheEntries });
-    const response = await this.post<{ result: Lc0Evaluation }>({ type: 'evaluate', input });
-    return response.result;
+  async evaluate(input: Lc0EvaluatorInput, options: { evalCacheEntries?: number; signal?: AbortSignal } = {}): Promise<Lc0Evaluation> {
+    await this.init({ ...options, noDownload: !!this.deviceFailure && this.cacheOnly });
+    options.signal?.throwIfAborted();
+    const generation = this.lifecycleGeneration;
+    try {
+      const response = await this.post<{ result: Lc0Evaluation }>({ type: 'evaluate', input });
+      return response.result;
+    } catch (error) {
+      if (error instanceof WorkerDeviceLostError && error.retry && generation === this.lifecycleGeneration) {
+        options.signal?.throwIfAborted();
+        return this.evaluate(input, options);
+      }
+      throw error;
+    }
   }
 
   async resetTree(): Promise<void> {

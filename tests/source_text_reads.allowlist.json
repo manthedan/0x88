@@ -281,14 +281,7 @@
     },
     "tests/ort_device_loss.test.mjs": {
       "reason": "baseline 2026-11-18: pre-existing source-text test, grandfathered; convert to behavior tests when touching it",
-      "reads": [
-        "src/lc0/analysisBrowser.ts",
-        "src/lc0/batchingStrengthBrowser.ts",
-        "src/lc0/criticalMomentsEngines.ts",
-        "src/lc0/maia3Worker.ts",
-        "src/lc0/policyOnlyBrowser.ts",
-        "src/lc0/searchWorkerCore.ts"
-      ]
+      "reads": ["src/lc0/batchingStrengthBrowser.ts", "src/lc0/maia3Worker.ts", "src/lc0/policyOnlyBrowser.ts", "src/lc0/searchWorkerCore.ts"]
     },
     "tests/ort_fallback_policy.test.mjs": {
       "reason": "runs the module-private EP resolution and artifact lock together; the lock state is per-thread module state with no export to drive it",

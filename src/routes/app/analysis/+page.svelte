@@ -147,6 +147,7 @@ onMount(() => {
     <div id="pgnImportNotice" role="status" aria-live="polite"></div>
     <div class="runtime-warnings">
       <div id="runtimeWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
+      <div id="deviceLossWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
       <div id="bigNetCpuWarning" class="runtime-warning" role="status" aria-live="polite" hidden></div>
     </div>
     <div id="downloadProgress" class="model-load-progress" hidden></div>

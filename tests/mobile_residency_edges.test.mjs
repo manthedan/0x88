@@ -50,6 +50,7 @@ test('the Maia reload control cannot race a constrained big-net run, but works o
     let maia3PanelLoadGeneration=0,maia3PanelTask=null,maia3PanelTimer=null,maia3PanelPending=null;
     let maia3PanelEvaluator=null,maia3PanelLoading=false,maia3PanelAbort=null,explorerMaia=null;
     const controller=new AbortController();let maia3PanelBlockedByRun=controller;
+    const maia3PanelRecovery = {}, showAnalysisDeviceWarning = () => {};
     ${extract(text, 'function unloadMaia3Panel(', 'function scheduleMaia3Panel(')}
     unloadMaia3Panel('Unloaded');
     return {enable:enableMaia3Panel,settle(){

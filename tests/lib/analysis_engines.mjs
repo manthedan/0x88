@@ -10,13 +10,13 @@ const controller = readFileSync(new URL('../../src/lc0/analysisBrowser.ts', impo
  * given page bindings (mountAbort, show/hideLoadingProgressItem,
  * renderRecklessRuntimeInfo), so host tests run through the production wiring.
  */
-export function productionEnginePort(bindings) {
+export function productionEnginePort({ showAnalysisDeviceWarning = () => {}, ...bindings }) {
   const start = controller.indexOf('const engines = createAnalysisEngines({\n  port: {');
   const from = controller.indexOf('{', controller.indexOf('port:', start));
   const to = controller.indexOf('\n  },\n', from);
   assert.ok(start >= 0 && to > from, 'controller engine port');
   const literal = stripTypeScriptTypes(`(${controller.slice(from, to + 4)})`);
-  return new Function(...Object.keys(bindings), `return ${literal};`)(...Object.values(bindings));
+  return new Function('showAnalysisDeviceWarning', ...Object.keys(bindings), `return ${literal};`)(showAnalysisDeviceWarning, ...Object.values(bindings));
 }
 
 /** The real host with inert defaults; tests override what they exercise. */

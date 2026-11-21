@@ -2,6 +2,7 @@ import { boardToFen, parseFen } from '../chess/board.ts';
 import { moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../chess/movegen.ts';
 import { ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortConfig.ts';
+import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { type Lc0SearchLike, lc0AnalysisLines, stockfishAnalysisLines } from './analysisFormat.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { type CriticalLane, type CriticalMoment, type CriticalProvenance, type CriticalResult } from './criticalMoments.ts';
@@ -14,6 +15,7 @@ import { MAIA3_DEFAULT_MODEL_URL, Maia3BrowserEvaluator } from './maia3.ts';
 import { untilAborted } from './modelCache.ts';
 import type { EngineResourceBroker } from './resourceBroker.ts';
 import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
+import { WorkerDeviceLostError, WorkerDeviceRecovery, retryWorkerDeviceLoss } from './workerDeviceRecovery.ts';
 
 export const CRITICAL_LC0_MODEL = resolvePublicAssetUrl(LC0_SMALL_BATCH1_QDQ8_PATH);
 
@@ -22,22 +24,26 @@ export function createCriticalEngines(
   broker: EngineResourceBroker,
   rating: number | undefined,
   signal: AbortSignal,
+  onDeviceLossWarning?: (warning: string) => void,
 ): { lanes: CriticalLane[]; dispose: () => void } {
   let sf: StockfishEngine | undefined;
   let worker: Worker | undefined;
   let maia: Maia3BrowserEvaluator | undefined;
   let lc0Ready: Promise<{ backend: string; servedModelUrl?: string }> | undefined;
   let maiaReady: Promise<Maia3BrowserEvaluator> | undefined;
+  const lc0Recovery = new WorkerDeviceRecovery();
+  const maiaRecovery = new WorkerDeviceRecovery();
   const constrained = isMemoryConstrainedDevice();
   let sequence = 0;
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; progress: (text: string) => void }>();
   const ids = ['critical-sf', 'critical-lc0', ...(rating === undefined ? [] : ['critical-maia'])];
   // Reserve CPU capacity even for neural providers: ORT may fall back to WASM.
   for (const id of ids) broker.register(id, { resourceClass: 'cpu', maxThreads: 1 });
-  const stopWorker = () => {
+  const stopWorker = (error: Error = new DOMException('Report worker stopped', 'AbortError')) => {
     terminateEngineWorker(worker);
     worker = undefined;
-    for (const request of pending.values()) request.reject(new DOMException('Report worker stopped', 'AbortError'));
+    lc0Ready = undefined;
+    for (const request of pending.values()) request.reject(error);
     pending.clear();
   };
   const dispose = () => {
@@ -69,10 +75,18 @@ export function createCriticalEngines(
   };
   const initLc0 = (progress: (text: string) => void) => {
     if (!lc0Ready) {
-      worker = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module', name: 'critical-moments-lc0' });
-      worker.addEventListener('message', (event) => {
+      const owned = new Worker(new URL('./searchWorker.ts', import.meta.url), { type: 'module', name: 'critical-moments-lc0' });
+      worker = owned;
+      owned.addEventListener('message', (event) => {
+        if (worker !== owned) return;
         const data = event.data;
-        if (data.type === 'deviceLost' || typeof data.id !== 'number') return;
+        if (data.type === 'deviceLost') {
+          const error = lc0Recovery.lost(data.loss as OrtDeviceLoss);
+          stopWorker(error);
+          onDeviceLossWarning?.(error.warning('Lc0 Small'));
+          return;
+        }
+        if (typeof data.id !== 'number') return;
         const request = pending.get(data.id);
         if (!request) return;
         if (data.type === 'downloadProgress') request.progress(`Downloading ${(data.loadedBytes / 1e6).toFixed(1)} MB`);
@@ -83,16 +97,15 @@ export function createCriticalEngines(
           else request.resolve(data);
         }
       });
-      worker.addEventListener('error', (event) => {
-        for (const request of pending.values()) request.reject(new Error(event.message || 'Lc0 worker failed.'));
-        pending.clear();
+      owned.addEventListener('error', (event) => {
+        if (worker === owned) stopWorker(new Error(event.message || 'Lc0 worker failed.'));
       });
       lc0Ready = post<{ backend: string; servedModelUrl?: string }>(
         {
           type: 'init',
           modelUrl: CRITICAL_LC0_MODEL,
           deviceModelSelection: true,
-          ep: 'auto',
+          ep: lc0Recovery.provider('auto'),
           ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(),
           dequantFold: ortDequantFoldEnabled(),
           runtime: 'onnx',
@@ -109,7 +122,7 @@ export function createCriticalEngines(
   const protectedWork = async <T>(id: string, task: (operationSignal: AbortSignal) => Promise<T>): Promise<T> => {
     const lease = await broker.acquire({ engineId: id, signal });
     try {
-      return await withEngineTimeout(id, signal, 180000, task);
+      return await withEngineTimeout(id, signal, 180000, (operationSignal) => retryWorkerDeviceLoss(() => task(operationSignal), operationSignal));
     } finally {
       lease.release();
     }
@@ -227,6 +240,11 @@ export function createCriticalEngines(
               signal: operationSignal,
               wasmThreads: 1,
               onInitCleanup: constrained ? trackEngineRetirement : undefined,
+              deviceRecovery: maiaRecovery,
+              onDeviceLossWarning,
+              onFailure: (error) => {
+                if (error instanceof WorkerDeviceLostError) maiaReady = undefined;
+              },
               onProgress: (loaded) => progress(`Downloading ${(loaded / 1e6).toFixed(1)} MB`),
             });
             return maia;

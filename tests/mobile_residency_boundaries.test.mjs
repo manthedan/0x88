@@ -128,6 +128,8 @@ test('Analysis teardown while fallback diagnostics are pending still retires the
       selectEl: element,
       showModelProgress: () => {},
       hideModelProgress: () => {},
+      smallWorkerRecovery: { provider: (preference) => preference },
+      retryWorkerDeviceLoss: (work) => work(),
       initWorker: async () => {
         throw new Error('worker init failed');
       },

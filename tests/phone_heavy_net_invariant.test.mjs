@@ -15,6 +15,7 @@ import { untilAborted } from '../src/lc0/modelCache.ts';
 import { phoneBigNetBlocked, phoneLargeNetPreference } from '../src/lc0/phoneLargeNetPolicy.ts';
 import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
 import { EngineResourceBroker } from '../src/lc0/resourceBroker.ts';
+import { WorkerDeviceRecovery } from '../src/lc0/workerDeviceRecovery.ts';
 
 const { disposeAllBigNetSearchersNow } = pool;
 const { awaitEngineRetirements } = retirement;
@@ -246,6 +247,7 @@ function analysisOwner(native) {
   return link(
     `
     const mountAbort=new AbortController();
+    const maia3PanelRecovery=new WorkerDeviceRecovery(), showAnalysisDeviceWarning=()=>{};
     let explorerMaia=null, activeAnalysisSelectionKey='';
     const analysisRunState={revision:0,execution:{tag:'idle'}},owner={},analysisOperations=new Map();
     const activeAnalysisRunId=1,hiddenTab={hidden:false};
@@ -258,6 +260,7 @@ function analysisOwner(native) {
     const criticalCallbacks={${slice(analysis, '    pauseAnalysis: (maiaOwner) => {', '    updateView: (moment, lines) => {')}};
     ${slice(analysis, 'const MAIA3_PANEL_RATINGS', 'function scheduleMaia3Panel()')}
     async function prepare(rows, controller = new AbortController()){
+      const needsSmallLc0Backend = false;
       analysisOperations.set(1,controller);
       analysisAbort=controller;
       try {
@@ -276,6 +279,7 @@ function analysisOwner(native) {
     return {prepare,cancel:()=>cancelAnalysisOperation(1),stop,changeRows:()=>invalidateAnalysisSettings({disposeUnused:true},true),enableMaia3Panel,unloadMaia3Panel,...criticalCallbacks,getStockfish:engines.getStockfish,message,disposeAnalysisCpuEngines:engines.disposeAnalysisCpuEngines};`,
     {
       engines,
+      WorkerDeviceRecovery,
       ANALYSIS_BIG_NET_KEYS,
       ANALYSIS_BIG_NET_SESSION,
       message,

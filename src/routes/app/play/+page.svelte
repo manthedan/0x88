@@ -54,6 +54,7 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
       <div id="status" class="game-status">Loading…</div>
       <div id="engineNote" hidden></div>
       <div id="runtimeWarning" class="runtime-warning small" role="status" aria-live="polite" hidden></div>
+      <div id="deviceLossWarning" class="runtime-warning small" role="status" aria-live="polite" hidden></div>
       <div id="bigNetCpuWarning" class="runtime-warning small" role="status" aria-live="polite" hidden></div>
       <button id="retryEngine" type="button" hidden>Retry engine</button>
       <div id="dlProgress" hidden><progress></progress><div class="dl-label small"></div></div>
@@ -423,7 +424,7 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
   .play-workspace:global([data-phase=setup]) :is(.opponent-summary, .moves-block, .nav-row, .record-actions, #takeback, #resign){display:none}
   .play-workspace:global([data-phase=setup]) .setup-pane{flex:0 1 auto; min-height:0}
   .play-workspace:global([data-phase=setup]) .game-actions{grid-template-columns:1fr; padding:0 14px 14px; border-top:0}
-  .play-workspace:global([data-phase=playing][data-quiet=true]) .status-block:not(:has(:global(#dlProgress:not([hidden]), #runtimeWarning:not([hidden]), #bigNetCpuWarning:not([hidden]), #retryEngine:not([hidden]), #engineNote[data-routine=false]:not([hidden])))){display:none}
+  .play-workspace:global([data-phase=playing][data-quiet=true]) .status-block:not(:has(:global(#dlProgress:not([hidden]), :is(#runtimeWarning, #deviceLossWarning):not([hidden]), #bigNetCpuWarning:not([hidden]), #retryEngine:not([hidden]), #engineNote[data-routine=false]:not([hidden])))){display:none}
   .play-workspace:global([data-phase=setup]) #newGame{min-height:48px; font-size:16px; font-weight:700}
   .play-workspace:global([data-phase=setup]) .play-icon{display:block}
   .play-workspace:global([data-phase=setup]) .new-icon{display:none}
@@ -465,7 +466,7 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
     .player-id small{font-size:12px}
     :global(.play-workspace #ground coords){font-size:11px}
     .status-block{padding:10px 12px 8px}
-    .play-workspace:global([data-phase=setup]) .status-block:not(:has(:global(#dlProgress:not([hidden]), #runtimeWarning:not([hidden]), #bigNetCpuWarning:not([hidden]), #retryEngine:not([hidden])))){display:none}
+    .play-workspace:global([data-phase=setup]) .status-block:not(:has(:global(#dlProgress:not([hidden]), :is(#runtimeWarning, #deviceLossWarning):not([hidden]), #bigNetCpuWarning:not([hidden]), #retryEngine:not([hidden])))){display:none}
     .setup-pane{padding:12px; gap:9px}
     .play-workspace:global([data-phase=setup]) .pane-heading{display:none}
     .opponent-blurb{display:none}

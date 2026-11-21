@@ -201,6 +201,7 @@ import {
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { Lc0PuctSearcher, type Lc0SearchProgress, type Lc0SearchResult } from './search.ts';
 import { StockfishEngine, type StockfishFlavor, type StockfishInfoLine, stockfishFlavorLabel, stockfishFlavorUrl } from './stockfishEngine.ts';
+import { showWorkerDeviceWarning } from './workerDeviceRecovery.ts';
 import { StormphraxEngine } from './stormphraxEngine.ts';
 import {
   checkStormphraxVariantAsset,
@@ -547,6 +548,9 @@ async function bigNetFor(key: 'bt4' | 't3', signal: AbortSignal): Promise<{ conf
   if (reclaim) await reclaim;
   const searcher = await acquireBigNetSearcherAsync(key, true, signal);
   signal.throwIfAborted();
+  searcher.onDeviceLossWarning = (warning) => {
+    if (!signal.aborted) showWorkerDeviceWarning(el('deviceLossWarning'), warning);
+  };
   if (!searcher.isInitializedFor({ evalCacheEntries })) {
     // init() does not watch the match signal, and a cold prefetch can stall:
     // Stop retires a net that is still loading, as Analysis does.

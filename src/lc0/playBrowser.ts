@@ -407,6 +407,7 @@ function playOptionMatchesRuntimeAudit(option: PlayEngineOption, detail: Browser
 }
 
 function ctxRestoreSelectedRuntimeWarning(ctx: PlayContext): void {
+  ctx.engineUi.deviceWarning?.('');
   const warning = ctx.dom.el('runtimeWarning');
   clearRuntimeFallbackWarning(warning);
   const option = ctxSelectedEngine(ctx);
@@ -558,7 +559,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
       }
       const evaluation = await (async () => {
         try {
-          return await searcher.evaluate({ positions: ctx.positions }, { evalCacheEntries: 2048 });
+          return await searcher.evaluate({ positions: ctx.positions }, { evalCacheEntries: 2048, signal });
         } finally {
           if (progressShown && !signal.aborted && !ctxIsDisposed(ctx)) ctxHideDownloadProgress(ctx);
         }
@@ -579,9 +580,11 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     }
   }
   if (option.family === 'maia3') {
-    const player = await engines.ensureMaia3(ctx.opponent.active.maiaElo, ctx.engineUi, ctx.maia3ModelUrls);
-    if (signal.aborted) return null;
-    const choice = await player.chooseMove(
+    const choice = await engines.maia3Move(
+      preferences.maiaElo,
+      ctx.engineUi,
+      ctx.maia3ModelUrls,
+      signal,
       { positions: ctx.positions },
       {
         selfElo: preferences.maiaElo,
@@ -721,8 +724,11 @@ async function ctxVerifySelectedEngineReady(ctx: PlayContext): Promise<void> {
     await retirement;
     if (signal.aborted || ctx.disposed || generation !== ctx.enginePreparationGeneration) return;
     if (option.family === 'maia3') {
-      const player = await engines.ensureMaia3(ctx.opponent.active.maiaElo, ctx.engineUi, ctx.maia3ModelUrls);
-      await player.chooseMove(
+      await engines.maia3Move(
+        preferences.maiaElo,
+        ctx.engineUi,
+        ctx.maia3ModelUrls,
+        signal,
         { positions: ctx.positions },
         {
           selfElo: preferences.maiaElo,
@@ -1423,7 +1429,11 @@ function ctxRenderChrome(ctx: PlayContext, shownPly: number): void {
     option.family === 'lc0' && option.variant !== 'small' ? bigNetCpuWarning(BIG_NETS[key], peekBigNetSearcher(key)?.backend) : '',
   ]);
   const hasNotice =
-    !bigNetWarning.hidden || !ctx.dom.buttonEl('retryEngine').hidden || !ctx.dom.el('runtimeWarning').hidden || !ctx.dom.el('dlProgress').hidden;
+    !bigNetWarning.hidden ||
+    !ctx.dom.buttonEl('retryEngine').hidden ||
+    !ctx.dom.el('runtimeWarning').hidden ||
+    !ctx.dom.el('deviceLossWarning').hidden ||
+    !ctx.dom.el('dlProgress').hidden;
   main.dataset.quiet = String(
     !hasNotice && ctx.engineReady && !ctx.preparingEngine && !ctx.thinkingShown && !ctx.pendingPromotion && ctx.viewPly === null && !boardCheck(ctx.board),
   );
@@ -2094,6 +2104,7 @@ function hasPlayBrowserDom(root: HTMLElement): boolean {
     'engineCaution',
     'engineNote',
     'runtimeWarning',
+    'deviceLossWarning',
     'bigNetCpuWarning',
     'retryEngine',
     'dlProgress',

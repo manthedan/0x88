@@ -4,6 +4,7 @@ import test from 'node:test';
 import ts from 'typescript';
 import { disposeOrtWorker } from '../src/lc0/disposeOrtWorker.ts';
 import { terminateEngineWorker } from '../src/lc0/engineRetirement.ts';
+import { WorkerDeviceLostError, WorkerDeviceRecovery } from '../src/lc0/workerDeviceRecovery.ts';
 
 // Exercise the actual controller functions with only browser/transport effects
 // stubbed. Importing the page would mount its DOM and load model assets.
@@ -13,6 +14,7 @@ function controller() {
   const workers = [];
   class Worker {
     listeners = new Map();
+    ep = undefined;
     terminated = false;
     constructor() {
       workers.push(this);
@@ -33,7 +35,10 @@ function controller() {
     }
     postMessage(message) {
       if (message.type === 'dispose') queueMicrotask(() => this.emit('message', { data: { id: message.id, type: 'disposed' } }));
-      if (message.type === 'init') queueMicrotask(() => this.emit('message', { data: { id: message.id, type: 'ready', backend: 'fake' } }));
+      if (message.type === 'init') {
+        this.ep = message.ep;
+        queueMicrotask(() => this.emit('message', { data: { id: message.id, type: 'ready', backend: 'fake' } }));
+      }
     }
     terminate() {
       this.terminated = true;
@@ -45,16 +50,23 @@ function controller() {
     let activeWorkerSearchId = null, workerSearchWarm = false, analysisWorkerProgressMessages = 0, lc0ServedModelUrl = '';
     const workerPending = new Map();
     const trackEngineRetirement = (promise) => promise;
-    const selectedLc0Runtime = () => 'onnx', lc0InitMessage = () => ({ type: 'init' });
+    const smallWorkerRecovery = new WorkerDeviceRecovery();
+    const warnings = [], showAnalysisDeviceWarning = (warning) => warnings.push(warning);
+    const selectedLc0Runtime = () => 'onnx', lc0InitMessage = () => ({ type: 'init', ep: smallWorkerRecovery.provider('auto') });
     const publishBrowserRuntimeAudit = () => {}, lc0ResolvedRuntime = () => 'fake', multiPv = () => 1;
     const showModelProgress = () => {}, MODEL_URL = '/unused', LC0_WHOLE_MODEL_WEBGPU_RUNTIME = 'whole';
     const LC0_WHOLE_MODEL_MANIFEST_URL = '', PACK_URL = '';
     ${functions.replaceAll('import.meta.url', "'file:///test/analysisBrowser.ts'")}
-    return { initWorker, postWorker, resetSearchWorker, snapshot: () => ({ workerReady, workerBackend, workerRuntime }) };
+    return { initWorker, postWorker, resetSearchWorker, warnings, snapshot: () => ({ workerReady, workerBackend, workerRuntime }) };
   `,
     { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
   );
-  return { ...new Function('Worker', 'disposeOrtWorker', 'terminateEngineWorker', code)(Worker, disposeOrtWorker, terminateEngineWorker), workers };
+  return {
+    ...new Function('Worker', 'disposeOrtWorker', 'terminateEngineWorker', 'WorkerDeviceRecovery', code)(
+      Worker, disposeOrtWorker, terminateEngineWorker, WorkerDeviceRecovery,
+    ),
+    workers,
+  };
 }
 
 for (const type of ['error', 'messageerror']) {
@@ -75,6 +87,24 @@ for (const type of ['error', 'messageerror']) {
     api.resetSearchWorker('cleanup');
   });
 }
+
+test('Analysis rejects interrupted requests and switches replacement workers to WASM after two losses', async () => {
+  const api = controller();
+  for (let i = 0; i < 2; i++) {
+    await api.initWorker();
+    const worker = api.workers[i];
+    assert.equal(worker.ep, 'auto');
+    const rejected = assert.rejects(api.postWorker({ type: 'search' }), WorkerDeviceLostError);
+    worker.emit('message', { data: { type: 'deviceLost', loss: { reason: 'unknown', message: 'reset' } } });
+    assert.equal(api.snapshot().workerReady, false);
+    assert.equal(worker.terminated, true);
+    await rejected;
+  }
+  await api.initWorker();
+  assert.equal(api.workers[2].ep, 'wasm');
+  assert.match(api.warnings[1], /Switching to CPU/);
+  api.resetSearchWorker('cleanup');
+});
 
 // Leaving Analysis mid-load: Svelte removes the page's DOM before the mount cleanup dispatches
 // DISPOSE, which cancels the running operation. That cancel must not throw on the missing

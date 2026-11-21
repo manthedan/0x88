@@ -26,6 +26,7 @@ import {
 } from '../src/lc0/hiddenTabPause.ts';
 import { lc0SplitKUrl } from '../src/lc0/lc0SmallModelSelection.ts';
 import { LC0_MODEL_DOWNLOAD_NOT_APPROVED } from '../src/lc0/modelCache.ts';
+import { WorkerDeviceLostError } from '../src/lc0/workerDeviceRecovery.ts';
 
 // A big net picks its served model (the shipped export or, on Apple WebGPU, its
 // split-K rewrite) when its worker initializes, and that URL is part of every
@@ -124,6 +125,7 @@ class FakeWorker {
       this.searchMessages.push(message);
       FakeWorker.searchLog.push({ model: this.init.modelUrl, multiPv: message.multiPv });
       if (this.outcome.crashOnSearch) setImmediate(() => this.emit('error', { message: 'injected GPU crash' }));
+      else if (this.outcome.loseDeviceOnSearch) this.reply({ type: 'deviceLost', loss: { reason: 'unknown', message: 'reset' } });
       else
         this.reply(
           {
@@ -218,7 +220,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
   const code = ts.transpile(
     `
     const { analysisRunBroker, analysisRunRowKey, captureAnalysisRun, parseFen } = snapshotHelpers;
-    const { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, appendAnalysisTransitionLog, initialAnalysisRunState, transitionAnalysis } = stateHelpers;
+    const { analysisCanPrepare, analysisIsAnalyzing, analysisOperationId, appendAnalysisTransitionLog, initialAnalysisRunState, transitionAnalysis, WorkerDeviceLostError } = stateHelpers;
     let analysisTransitionLog = Object.freeze([]);
     const { cancelHiddenTabWork, classifyHiddenReload, hiddenAnalysisStopEnabled, initialHiddenTabPause, requestHiddenTabWork, transitionHiddenTab } = hiddenHelpers;
     let analysisBackendGeneration = 1;
@@ -300,6 +302,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     const shouldAutoAnalyzePosition = () => true, mainlineNodes = () => [];
     const awaitEngineRetirements = async () => {}, hasEngineRetirements = () => false;
     const reconcileActiveRuntimeFallbackWarning = () => {}, renderRecklessRuntimeInfo = () => {}, renderBigNetWarning = () => {};
+    const showAnalysisDeviceWarning = () => {};
     let centipawnHybridManifestStatus = 'unknown';
     // The TVMJS manifest fallback only runs for the legacy research override;
     // the shipped s4fix model is ORT-only and skips the manifest probe.
@@ -431,6 +434,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
       initialAnalysisRunState,
       appendAnalysisTransitionLog,
       CriticalAnalysisRefresh,
+      WorkerDeviceLostError,
       transitionAnalysis: observeTransition,
       admissions,
     },
@@ -516,6 +520,25 @@ function assertPublishedUnder(page, row, servedUrl) {
   assert.deepEqual([...page.engineLineCache.keys()], [key]);
   assert.deepEqual([...page.completeAnalysisKeys], [page.analysisSelectionCacheKey()]);
 }
+
+test('Analysis retries a lost big-net search under the replacement model key', () =>
+  withWorkers({ [T3_ORIGINAL]: [
+    { servedModelUrl: T3_SPLITK, loseDeviceOnSearch: true },
+    { servedModelUrl: T3_SPLITK, loseDeviceOnSearch: true },
+    { servedModelUrl: T3_ORIGINAL },
+  ] }, async () => {
+    const t3 = new Bt4WorkerSearcher(T3_NET);
+    try {
+      const page = analysisPage({ rows: [t3Row], searchers: new Map([['t3', t3]]) });
+      await page.analyzeCurrent();
+      await until(() => page.completeAnalysisKeys.size === 1);
+      assert.deepEqual(searches(), [1, 1, 1]);
+      assert.equal(FakeWorker.instances[2].init.ep, 'wasm');
+      assertPublishedUnder(page, t3Row, T3_ORIGINAL);
+    } finally {
+      await t3.dispose();
+    }
+  }));
 
 for (const [device, servedUrl] of [
   ['Apple WebGPU (split-K)', T3_SPLITK],
