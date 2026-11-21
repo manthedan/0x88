@@ -66,17 +66,7 @@ export function createEngineArtifactLoader(
     expected(url);
     // Match Analysis prefetch's default mode/credentials so both requests use
     // the same HTTP cache entry, including cross-origin asset-base URLs.
-    const resolved = resolveUrl(url);
-    const request = { mode: 'cors', credentials: 'same-origin', cache } as const;
-    const fetchCached = () => fetch(resolved, { ...request, cache: 'force-cache' });
-    let result = await fetch(resolved, request).catch((error) => {
-      if (cache !== 'default') throw error;
-      return undefined;
-    });
-    if (!result || (cache === 'default' && (result.status >= 500 || result.status === 408 || result.status === 429))) {
-      void result?.body?.cancel().catch(() => undefined);
-      result = await fetchCached();
-    }
+    const result = await fetch(resolveUrl(url), { mode: 'cors', credentials: 'same-origin', cache });
     if (!result.ok) throw new Error(`Failed to fetch engine artifact ${url}: HTTP ${result.status}`);
     return result;
   }

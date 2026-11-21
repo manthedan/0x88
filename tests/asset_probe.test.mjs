@@ -42,17 +42,12 @@ test('transient HEAD failures probe the cache even when the browser reports onli
       if (url === '/offline-wifi') throw new TypeError('network unreachable');
       return new Response(null, { status: Number(url.slice(1)) });
     }
-    if (options.cache === 'default') throw new TypeError('network unreachable');
     assert.equal(options.cache, 'force-cache');
     return new Response('abc');
   });
   for (const [url, expected] of [['/offline-wifi', 'present'], ['/503', 'present'], ['/404', 'missing'], ['/410', 'missing']]) {
     assert.equal(await probeAssetUrls([url]), expected);
   }
-  const loader = createEngineArtifactLoader({
-    '/offline-wifi': { bytes: 3, sha256: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad' },
-  });
-  assert.equal(new TextDecoder().decode(await loader.bytes('/offline-wifi')), 'abc');
 });
 
 for (const code of [404, 410]) {
