@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, webcrypto } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { workerScript as berserkWorkerScript } from '../src/lc0/berserkEngine.ts';
@@ -104,6 +104,82 @@ test('every Emscripten worker can resolve its pinned sidecars at runtime', async
     assert.equal(messages.at(-1)?.id, 7, family);
   }
 });
+
+const STARTUP_ENGINES = [
+  ['stormphrax', 'Stormphrax', stormphraxWorkerScript(), '/undertown.nnue'],
+  ['plentychess', 'PlentyChess', plentyChessWorkerScript(), '/processed.bin'],
+];
+
+const startupAsset = (family) => `/${family}/${family}-emscripten`;
+const startupFixtures = (family) => [`public${startupAsset(family)}.wasm`, `public${startupAsset(family)}.data`];
+
+function isLfsPointer(path) {
+  const file = new URL(`../${path}`, import.meta.url);
+  return statSync(file).size < 1024 && readFileSync(file, 'utf8').startsWith('version https://git-lfs.github.com/spec/v1\n');
+}
+
+test('the CI test job fetches the Emscripten startup fixtures', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const job = workflow.split('\n  test:\n')[1].split('\n  build:\n')[0];
+  const fixtures = /TEST_LFS_INCLUDE: (.+)/.exec(job)?.[1].split(',') ?? [];
+  for (const [family] of STARTUP_ENGINES) {
+    for (const path of startupFixtures(family)) assert.ok(fixtures.includes(path), `${path} must be hydrated in CI`);
+  }
+  assert.ok(job.includes('git lfs pull --include="$LFS_INCLUDE,$TEST_LFS_INCLUDE"'));
+});
+
+for (const [family, factoryName, script, netPath] of STARTUP_ENGINES) {
+  const pointer = startupFixtures(family).find(isLfsPointer);
+  test(`${factoryName} releases the mounted NNUE after startup and still searches after ucinewgame`, {
+    timeout: 15_000,
+    skip: pointer ? `unhydrated LFS fixture: ${pointer}` : false,
+  }, async () => {
+    const asset = startupAsset(family);
+    const workerUrl = new URL('https://app.example/worker.js');
+    const lines = [];
+    let reply;
+    let mod;
+    const context = {
+      location: workerUrl,
+      WorkerGlobalScope: class {},
+      URL,
+      Blob,
+      TextDecoder,
+      Uint8Array,
+      setTimeout,
+      clearTimeout,
+      performance,
+      crypto: webcrypto,
+      fetch: async (url) => new Response(readFileSync(new URL(`../public${new URL(url).pathname}`, import.meta.url))),
+      importScripts() {
+        runInNewContext(readFileSync(new URL(`../public${asset}.js`, import.meta.url), 'utf8'), context);
+        const factory = context[factoryName];
+        context[factoryName] = async (options) => (mod = await factory(options));
+      },
+      postMessage(message) {
+        if (message.type === 'line') lines.push(message.line);
+        else if (message.type === 'error' || message.type === reply.type) reply.resolve(message);
+      },
+    };
+    context.self = context;
+    runInNewContext(script, context);
+    let id = 0;
+    const send = async (msg, type) => {
+      reply = { ...Promise.withResolvers(), type };
+      context.onmessage({ data: { ...msg, id: ++id, jsUrl: `${asset}.js` } });
+      const result = await reply.promise;
+      assert.equal(result.type, type, result.message);
+    };
+    await send({ type: 'init' }, 'ready');
+    assert.throws(() => mod.FS_unlink(netPath), { errno: 44 }, 'the preload is already unlinked');
+    for (const command of ['ucinewgame', 'isready', 'position startpos', 'go depth 1']) await send({ type: 'command', command }, 'commandDone');
+    assert.ok(lines.includes('readyok'));
+    assert.ok(
+      lines.some((line) => /^bestmove [a-h][1-8][a-h][1-8]/.test(line)),
+      lines.join('\n'),
+    );
+  });
+}
 
 // The resolver above is only half the contract. It is the *generated* glue that
 // decides whether to consult Module.locateFile at all: if a future Emscripten

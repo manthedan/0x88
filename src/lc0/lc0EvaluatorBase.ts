@@ -1,6 +1,7 @@
 import { type BoardState, boardToFen, parseFen } from '../chess/board.ts';
 import { type Move, moveToActionId, moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
+import { f16BitsToF32 } from '../nn/float16.ts';
 import type { Lc0PositionHistoryInput } from './encoder112.ts';
 import { LC0_MIRROR_TRANSFORM, uciToLc0PolicyIndex } from './policyMap.ts';
 
@@ -167,16 +168,22 @@ export function legalPolicyPriors(
   logits: ArrayLike<number>,
   policyTemperature: number,
   prepared?: readonly Lc0PreparedLegalMove[],
+  policyOffset = 0,
+  f16Bits = false,
 ): Lc0LegalPrior[] {
+  const logitAt = (index: number) => {
+    const value = logits[policyOffset + index];
+    return (f16Bits && value !== undefined ? f16BitsToF32(value) : Number(value)) / policyTemperature;
+  };
   const moveTransform = board.turn === 'b' ? LC0_MIRROR_TRANSFORM : 0;
   const legal = (prepared ?? legalMoves(board)).map((entry) => {
     if ('policyIndex' in entry) {
-      return { uci: entry.uci, index: entry.policyIndex, actionId: entry.actionId, logit: Number(logits[entry.policyIndex]) / policyTemperature };
+      return { uci: entry.uci, index: entry.policyIndex, actionId: entry.actionId, logit: logitAt(entry.policyIndex) };
     }
     const uci = moveToUci(entry);
     const index = uciToLc0PolicyIndex(uci, moveTransform, { standardCastling: isStandardCastlingMove(board, entry) });
     if (index === undefined) throw new Error(`No LC0 policy index for legal move ${uci}`);
-    return { uci, index, logit: Number(logits[index]) / policyTemperature };
+    return { uci, index, logit: logitAt(index) };
   });
   if (legal.length === 0) return [];
   // Same contract as softmax() in src/nn/numerics.ts: fail here rather than hand NaN priors to search.

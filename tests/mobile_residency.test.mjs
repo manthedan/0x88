@@ -60,6 +60,34 @@ function playOwner(options = {}) {
   };
 }
 
+test('Play keeps only the active CPU worker on phones and awaits its retirement when switching to Maia', async (t) => {
+  globalThis.location = { search: '?memoryClass=phone' };
+  t.after(() => delete globalThis.location);
+  const disposed = [];
+  const cpuReady = Promise.withResolvers();
+  const first = { id: 'sf-lite', family: 'sf', variant: 'lite' };
+  const second = { id: 'berserk', family: 'berserk' };
+  const engines = createPlayEngines({
+    loadCentipawn: noCentipawn,
+    createCpuEngine: (option) => (option === second ? cpuReady.promise : { dispose: () => disposed.push(first.id) }),
+  });
+
+  await engines.cpuEngineFor(first, ui);
+  const loading = engines.cpuEngineFor(second, ui);
+  await awaitEngineRetirements();
+  assert.deepEqual(disposed, [first.id], 'a second CPU engine evicts the first');
+  engines.opponentCommitted(second.id, 'maia3');
+  let retired = false;
+  const retirement = engines.retireUnusedEngines({ id: 'maia3', family: 'maia3' }).then(() => {
+    retired = true;
+  });
+  await new Promise(setImmediate);
+  assert.equal(retired, false, 'Maia must wait even for an in-flight CPU worker retired on commit');
+  cpuReady.resolve({ dispose: () => disposed.push(second.id) });
+  await Promise.all([loading, retirement]);
+  assert.deepEqual(disposed, [first.id, second.id]);
+});
+
 for (const old of ['maia', 'small']) {
   test(`Play ${old} retires before a replacement, reloads lazily, and keeps the selected owner`, async () => {
     const api = playOwner();

@@ -3,8 +3,10 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { ARENA_BIG_NET_MEMORY_REASON, arenaBigNetPairingBlocked, arenaBigNetSeatBlocked } from '../src/lc0/arenaMemoryGuard.ts';
+import { arenaCpuOnlyPool } from '../src/lc0/arenaScheduleRunner.ts';
 import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
+import { DisposableVariantPool } from '../src/lc0/disposableVariantPool.ts';
 import { PHONE_LARGE_NET_REASON, phoneSafeEngineVariant } from '../src/lc0/phoneLargeNetPolicy.ts';
 
 const big = (variant) => ({ family: 'lc0', variant, strength: 100 });
@@ -43,6 +45,25 @@ function extract(start, end, wrap = (text) => text) {
   assert.ok(from >= 0 && to > from);
   return stripTypeScriptTypes(wrap(source.slice(from, to)));
 }
+
+test('constrained Arena reuses the shared workers even with a one-thread CPU pool', () => {
+  let constrained = true;
+  const isolatedCpuPool = new Function(
+    'activeSeatRows',
+    'arenaCpuOnlyPool',
+    'stockfishThreadsPlanned',
+    'isMemoryConstrainedDevice',
+    `${extract('function isolatedCpuPool(', 'function selectedArenaConcurrency(')}\nreturn isolatedCpuPool;`,
+  )(
+    () => [cpu, cpu],
+    arenaCpuOnlyPool,
+    () => 1,
+    () => constrained,
+  );
+  assert.equal(isolatedCpuPool(), false);
+  constrained = false;
+  assert.equal(isolatedCpuPool(), true, 'desktop can still use private workers');
+});
 
 test('Arena start entry blocks restored/URL/programmatic pairings before acquiring assets or searchers', async () => {
   const nodes = new Map();
@@ -130,10 +151,14 @@ test('safe gauntlet warmup uses only each game on phones; desktop still warms th
         { whiteId: '2', blackId: '0' },
       ],
       byPid: new Map([
-        ['0', { engine: { id: 'sf:lite:8' } }],
-        ['1', { engine: { id: 'lc0:bt4:100' } }],
-        ['2', { engine: { id: 'lc0:t3:100' } }],
+        ['0', { index: 0, engine: { id: 'sf:lite:8' } }],
+        ['1', { index: 1, engine: { id: 'lc0:bt4:100' } }],
+        ['2', { index: 2, engine: { id: 'lc0:t3:100' } }],
       ]),
+      seatRows: [cpu, big('bt4'), big('t3')],
+      sharesArenaCpuWorker: () => false,
+      disposeStockfish() {},
+      disposeUnusedUciEngines() {},
       async warmUpSelectedEngines(ids) {
         calls.push(ids);
         for (const id of ids) {
@@ -161,6 +186,126 @@ test('safe gauntlet warmup uses only each game on phones; desktop still warms th
     );
     pool.disposeAllNow();
   }
+});
+
+test('constrained Arena retires CPUs outside the next pairing and disposes the final pairing on exit', async () => {
+  const resident = new Set();
+  const families = ['stormphrax', 'plentychess', 'berserk', 'reckless', 'viridithas'];
+  const pools = Object.fromEntries(
+    families.map((family) => [
+      family,
+      new DisposableVariantPool(
+        (key) => key,
+        () => {
+          resident.add(family);
+          return { dispose: () => resident.delete(family) };
+        },
+      ),
+    ]),
+  );
+  const seatIds = families.slice(0, 3);
+  const schedule = [
+    { whiteId: 'stormphrax', blackId: 'plentychess' },
+    { whiteId: 'plentychess', blackId: 'berserk' },
+  ];
+  const matchAbort = new AbortController();
+  let warmups = 0;
+  const deps = {
+    matchAbort,
+    abort: matchAbort,
+    checkpointWrites: Promise.resolve(),
+    isMemoryConstrainedDevice: () => true,
+    isStaleMount: () => false,
+    mountSignal: matchAbort.signal,
+    schedule,
+    seatIds,
+    minimumWarmupVisibleMs: 0,
+    pendingIndices: [0, 1],
+    byPid: new Map(seatIds.map((id, index) => [id, { index, engine: { id } }])),
+    seatRows: seatIds.map((id) => ({ family: id, variant: id })),
+    sharesArenaCpuWorker: () => false,
+    isolatedCpuEngines: new Set(),
+    isolatedCpuSeats: new Map(),
+    async warmUpSelectedEngines(ids) {
+      assert.deepEqual([...resident], warmups++ === 0 ? [] : ['plentychess'], 'evict before warming the next pair');
+      for (const id of ids) pools[id].getOrCreate(id);
+    },
+  };
+  for (const family of families) {
+    const prefix = family === 'plentychess' ? 'plentyChess' : family;
+    deps[`${prefix}Engines`] = pools[family];
+    deps[`${prefix}VariantForKey`] = (key) => key;
+  }
+  const warmup = extract(
+    '      const constrained = isMemoryConstrainedDevice();\n      if (!constrained) {',
+    '        resetLc0SearchTrees(seatIds);\n        for (const key of ARENA_BIG_NET_KEYS)',
+    (text) => `async function warmup() { let enginesReady = false;\n${text}\n} }`,
+  );
+  const match = source.slice(source.indexOf('  let enginesReady = false;'), source.indexOf('\nasync function startMatch('));
+  const cleanup = match.slice(match.lastIndexOf('  } finally {'), match.indexOf('    const ownsMatchState = abort === matchAbort;'));
+  const run = new Function(
+    'deps',
+    `const { ${Object.keys(deps).join(', ')} } = deps;
+    let stockfishLite = null, stockfishFull = null;
+    ${extract('function disposeStockfish(', 'function availableRecklessVariants(')}
+    ${extract('function disposeUnusedUciEngines(', 'function reconcileArenaNeuralSessions(')}
+    ${extract('function disposeArenaCpuEngines(', 'function disposeRuntimeResources(')}
+    ${warmup}
+    return async function() { try { await warmup(); ${cleanup} } };`,
+  )(deps);
+  await run();
+  assert.equal(warmups, 2);
+  assert.deepEqual([...resident], []);
+});
+
+test('constrained Arena uses two private seats only for pairings that would share a CPU worker', async () => {
+  const seatRows = [
+    { ...cpu, strength: 6 },
+    { ...cpu, strength: 14 },
+    { ...cpu, variant: 'full' },
+  ];
+  const seatIds = ['lite-6', 'lite-14', 'full'];
+  const schedule = [
+    { whiteId: '0', blackId: '1' },
+    { whiteId: '0', blackId: '2' },
+    { whiteId: '1', blackId: '0' },
+  ];
+  const privateGames = [];
+  const sharedWarmups = [];
+  const deps = {
+    seatRows,
+    seatIds,
+    schedule,
+    byPid: new Map(seatIds.map((id, index) => [String(index), { index, engine: { id } }])),
+    pendingIndices: [0, 1, 2],
+    minimumWarmupVisibleMs: 0,
+    matchAbort: new AbortController(),
+    mountSignal: new AbortController().signal,
+    isMemoryConstrainedDevice: () => true,
+    isStaleMount: () => false,
+    el: () => ({}),
+    completeGame() {},
+    async runIsolatedCpuTournament(_schedule, pendingIndices) {
+      privateGames.push(...pendingIndices);
+    },
+    async warmUpSelectedEngines(ids) {
+      sharedWarmups.push(ids);
+    },
+    disposeStockfish() {},
+    disposeUnusedUciEngines() {},
+  };
+  const warmup = extract(
+    '      const constrained = isMemoryConstrainedDevice();\n      if (!constrained) {',
+    '        resetLc0SearchTrees(seatIds);\n        for (const key of ARENA_BIG_NET_KEYS)',
+    (text) => `async function run() { let enginesReady = false;\n${text}\n} }`,
+  );
+  const run = new Function(
+    'deps',
+    `const { ${Object.keys(deps).join(', ')} } = deps;\n${extract('function arenaCpuWorkerKey(', 'function createIsolatedCpuEngine(')}\n${warmup}\nreturn run;`,
+  )(deps);
+  await run();
+  assert.deepEqual(privateGames, [0, 2], 'both color assignments use the existing independent seat workers');
+  assert.deepEqual(sharedWarmups, [['lite-6', 'full']], 'different variants still reuse the shared pool');
 });
 
 test('Arena diagnostic rendering never acquires or replaces a resident net', () => {

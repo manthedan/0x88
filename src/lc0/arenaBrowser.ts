@@ -200,7 +200,14 @@ import {
 } from './recklessVariants.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { Lc0PuctSearcher, type Lc0SearchProgress, type Lc0SearchResult } from './search.ts';
-import { StockfishEngine, type StockfishFlavor, type StockfishInfoLine, stockfishFlavorLabel, stockfishFlavorUrl } from './stockfishEngine.ts';
+import {
+  StockfishEngine,
+  type StockfishFlavor,
+  type StockfishInfoLine,
+  stockfishFlavorLabel,
+  stockfishFlavorUrl,
+  threadedStockfishAvailable,
+} from './stockfishEngine.ts';
 import { StormphraxEngine } from './stormphraxEngine.ts';
 import {
   checkStormphraxVariantAsset,
@@ -2083,6 +2090,7 @@ function refreshSeatControls(): void {
 }
 
 function isolatedCpuPool(): boolean {
+  if (isMemoryConstrainedDevice()) return false;
   return (
     arenaCpuOnlyPool(activeSeatRows().map((row) => row.family)) && (!activeSeatRows().some((row) => row.family === 'sf') || stockfishThreadsPlanned() === 1)
   );
@@ -2099,7 +2107,7 @@ function selectedArenaConcurrency(): number {
 function refreshArenaConcurrencyNote(): void {
   el('arenaConcurrencyNote').textContent = isolatedCpuPool()
     ? `${selectedArenaConcurrency()} game(s) at once · private workers, Threads=1, Hash=64 MiB per engine. Board follows the earliest active game.`
-    : 'One game at a time for neural pools or threaded Stockfish.';
+    : 'One game at a time with shared engine workers.';
 }
 
 function arenaBudgetMode(): 'fixed' | 'movetime' {
@@ -2599,10 +2607,6 @@ function recordPendingLc0ReplyProbes(replyEngine: ArenaEngine, replyBoard: Board
   renderSearchTelemetryInfo();
 }
 
-function threadedStockfishAvailable(): boolean {
-  return runtimeIsolation && runtimeSharedArrayBuffer;
-}
-
 function stockfishFlavorFor(kind: 'lite' | 'full'): StockfishFlavor {
   const threaded = threadedStockfishAvailable() && stockfishThreadsPlanned() > 1;
   if (kind === 'lite') return threaded ? 'lite-threaded' : 'lite-single';
@@ -2626,11 +2630,15 @@ function stockfishEngineFor(kind: 'lite' | 'full'): StockfishEngine {
   return stockfishFull;
 }
 
-function disposeStockfish(): void {
-  stockfishLite?.dispose();
-  stockfishLite = null;
-  stockfishFull?.dispose();
-  stockfishFull = null;
+function disposeStockfish(keep: readonly EngineRow[] = []): void {
+  if (!keep.some((row) => row.family === 'sf' && row.variant !== 'full')) {
+    stockfishLite?.dispose();
+    stockfishLite = null;
+  }
+  if (!keep.some((row) => row.family === 'sf' && row.variant === 'full')) {
+    stockfishFull?.dispose();
+    stockfishFull = null;
+  }
 }
 
 function availableRecklessVariants(): RecklessVariant[] {
@@ -2970,8 +2978,7 @@ function pruneUnusedLc0Searchers(activeIds: Set<string>): void {
   }
 }
 
-function disposeUnusedUciEngines(): void {
-  const rows = activeSeatRows();
+function disposeUnusedUciEngines(rows: readonly EngineRow[] = activeSeatRows()): void {
   recklessEngines.retain(rows.filter((row) => row.family === 'reckless').map((row) => recklessVariantForKey(row.variant)));
   viridithasEngines.retain(rows.filter((row) => row.family === 'viridithas').map((row) => viridithasVariantForKey(row.variant)));
   berserkEngines.retain(rows.filter((row) => row.family === 'berserk').map((row) => berserkVariantForKey(row.variant)));
@@ -3899,6 +3906,31 @@ function clearStartPending(): void {
   else syncArenaPhase();
 }
 
+function arenaCpuWorkerKey(row: EngineRow): string | undefined {
+  switch (row.family) {
+    case 'sf':
+      return row.variant === 'full' ? 'full' : 'lite';
+    case 'reckless':
+      return recklessCacheKey(recklessVariantForKey(row.variant));
+    case 'viridithas':
+      return viridithasCacheKey(viridithasVariantForKey(row.variant));
+    case 'berserk':
+      return berserkCacheKey(berserkVariantForKey(row.variant));
+    case 'plentychess':
+      return plentyChessCacheKey(plentyChessVariantForKey(row.variant));
+    case 'stormphrax':
+      return stormphraxCacheKey(stormphraxVariantForKey(row.variant));
+    default:
+      return undefined;
+  }
+}
+
+function sharesArenaCpuWorker(white: EngineRow, black: EngineRow): boolean {
+  if (white.family !== black.family) return false;
+  const key = arenaCpuWorkerKey(white);
+  return key !== undefined && key === arenaCpuWorkerKey(black);
+}
+
 function createIsolatedCpuEngine(row: EngineRow): BrowserUciEngine {
   if (row.family === 'sf')
     return new StockfishEngine(
@@ -4564,7 +4596,16 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
         const black = byPid.get(blackId)!;
         const whiteEngine = white.engine!;
         const blackEngine = black.engine!;
+        const pairRows = [seatRows[white.index], seatRows[black.index]] as const;
         if (constrained) {
+          if (sharesArenaCpuWorker(...pairRows)) {
+            enginesReady = true;
+            el('message').textContent = 'Preparing private CPU workers…';
+            await runIsolatedCpuTournament(schedule, [i], byPid, matchAbort.signal, completeGame);
+            continue;
+          }
+          disposeStockfish(pairRows);
+          disposeUnusedUciEngines(pairRows);
           await warmUpSelectedEngines([whiteEngine.id, blackEngine.id], matchAbort.signal, enginesReady ? 0 : minimumWarmupVisibleMs);
           enginesReady = true;
         }
@@ -4574,7 +4615,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
           if (!searcher) continue;
           if (searcher.loaded) await searcher.resetTree();
         }
-        for (const engine of cpuEnginesToResetForGame([rowForEngineId(whiteEngine.id), rowForEngineId(blackEngine.id)])) {
+        for (const engine of cpuEnginesToResetForGame(pairRows)) {
           await engine.newGame(matchAbort.signal);
         }
         if (isStaleMount(mountSignal) || matchAbort.signal.aborted) break;
@@ -4608,6 +4649,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       }
     }
   } finally {
+    if (abort === matchAbort && isMemoryConstrainedDevice()) disposeArenaCpuEngines();
     await checkpointWrites;
     const ownsMatchState = abort === matchAbort;
     if (ownsMatchState) {

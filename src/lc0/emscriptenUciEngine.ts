@@ -40,6 +40,7 @@ export interface EmscriptenUciEngineConfig {
   factoryGlobal: string;
   /** Appended to glue/module load failures so a missing artifact names its rebuild command. */
   missingArtifactHint?: string;
+  startupPreloadPath?: string;
   /**
    * Longest UCI command (in bytes) the engine reads without truncating it. A
    * longer `position ... moves ...` is re-rooted at the last irreversible move,
@@ -77,7 +78,9 @@ function abortError(message: string): Error {
   return error;
 }
 
-export function emscriptenUciWorkerScript(config: Pick<EmscriptenUciEngineConfig, 'label' | 'factoryGlobal' | 'missingArtifactHint'>): string {
+export function emscriptenUciWorkerScript(
+  config: Pick<EmscriptenUciEngineConfig, 'label' | 'factoryGlobal' | 'missingArtifactHint' | 'startupPreloadPath'>,
+): string {
   // The factory global is spliced in as an identifier (a `var` declared by
   // importScripts may not be a property of `self` in every engine).
   if (!/^[A-Za-z_$][\w$]*$/.test(config.factoryGlobal)) throw new Error(`Invalid Emscripten factory global: ${config.factoryGlobal}`);
@@ -88,12 +91,12 @@ ${engineArtifactWorkerScript()}
 const resolveEmscriptenAssetUrl = ${resolveEmscriptenAssetUrl.toString()};
 const ENGINE_LABEL = ${label};
 const MISSING_ARTIFACT_HINT = ${JSON.stringify(config.missingArtifactHint ?? null)};
+const STARTUP_PRELOAD_PATH = ${JSON.stringify(config.startupPreloadPath ?? null)};
 function artifactLoadError(error, urls) {
   if (!MISSING_ARTIFACT_HINT) return error;
   const detail = error && error.message ? error.message : String(error);
   return new Error(ENGINE_LABEL + ' artifacts failed to load (' + urls.filter(Boolean).join(', ') + '): ' + detail + ' — ' + MISSING_ARTIFACT_HINT);
 }
-let factory = null;
 let modulePromise = null;
 let engine = null;
 let artifactUrls = [];
@@ -103,9 +106,8 @@ function postError(id, error) {
 function resolveUrl(url) {
   return new URL(url, self.location.href).href;
 }
-async function importEmscriptenGlue(resolvedJsUrl, trustedJsUrl) {
-  if (!trustedJsUrl && new URL(resolvedJsUrl).origin !== self.location.origin) throw new Error('Refusing to execute untrusted ' + ENGINE_LABEL + ' Emscripten glue: ' + resolvedJsUrl);
-  const source = new TextDecoder().decode(await engineArtifacts.bytes(resolvedJsUrl));
+function importEmscriptenGlue(resolvedJsUrl, glueBytes) {
+  const source = new TextDecoder().decode(glueBytes);
   const blobUrl = URL.createObjectURL(new Blob([source + '\n//# sourceURL=' + resolvedJsUrl], { type: 'text/javascript' }));
   try {
     importScripts(blobUrl);
@@ -123,21 +125,36 @@ async function init(id, jsUrl, wasmUrl, dataUrl, trustedJsUrl) {
     siblingDataUrl.pathname = siblingDataUrl.pathname.replace(/\.js$/, '.data');
     const resolvedDataUrl = dataUrl ? resolveUrl(dataUrl) : siblingDataUrl.href;
     artifactUrls = [resolvedJsUrl, resolvedWasmUrl, resolvedDataUrl];
+    let wasmBytes, dataBytes;
     try {
-      // Verify the entire set before ANY engine glue executes or data mounts.
-      var wasmBytes = await engineArtifacts.bytes(resolvedWasmUrl || resolvedJsUrl.replace(/\.js$/, '.wasm'));
-      var dataBytes = resolvedDataUrl ? await engineArtifacts.bytes(resolvedDataUrl) : null;
-      await importEmscriptenGlue(resolvedJsUrl, trustedJsUrl);
+      if (!trustedJsUrl && new URL(resolvedJsUrl).origin !== self.location.origin) throw new Error('Refusing to execute untrusted ' + ENGINE_LABEL + ' Emscripten glue: ' + resolvedJsUrl);
+      let glueBytes;
+      [wasmBytes, dataBytes, glueBytes] = await Promise.all([
+        engineArtifacts.bytes(resolvedWasmUrl || resolvedJsUrl.replace(/\.js$/, '.wasm')),
+        engineArtifacts.bytes(resolvedDataUrl),
+        engineArtifacts.bytes(resolvedJsUrl),
+      ]);
+      importEmscriptenGlue(resolvedJsUrl, glueBytes);
     } catch (error) {
       throw artifactLoadError(error, [resolvedJsUrl]);
     }
-    factory = self.${factory} || (typeof ${factory} !== 'undefined' ? ${factory} : null);
+    const factory = self.${factory} || (typeof ${factory} !== 'undefined' ? ${factory} : null);
     if (!factory) throw new Error(ENGINE_LABEL + ' Emscripten factory was not found after importScripts()');
     modulePromise = factory({
       wasmBinary: new Uint8Array(wasmBytes),
       getPreloadedPackage() {
         if (!dataBytes) throw new Error('Missing verified ' + ENGINE_LABEL + ' preload data');
-        return dataBytes;
+        const bytes = dataBytes;
+        dataBytes = null;
+        return bytes;
+      },
+      postRun(mod) {
+        if (!STARTUP_PRELOAD_PATH) return;
+        try {
+          mod.FS_unlink(STARTUP_PRELOAD_PATH);
+        } catch (error) {
+          if (error.errno !== 44) throw error; // WASI ENOENT (e.g. a local build with a different net filename).
+        }
       },
       locateFile(file) {
         return resolveEmscriptenAssetUrl(file, { jsUrl: resolvedJsUrl, wasmUrl: resolvedWasmUrl, dataUrl: resolvedDataUrl });
@@ -145,9 +162,12 @@ async function init(id, jsUrl, wasmUrl, dataUrl, trustedJsUrl) {
       print(line) { self.postMessage({ type: 'line', line: String(line), stream: 'stdout' }); },
       printErr(line) { self.postMessage({ type: 'line', line: String(line), stream: 'stderr' }); },
     }).then((mod) => {
+      delete mod.wasmBinary;
+      delete mod.getPreloadedPackage;
       engine = mod;
       return mod;
     });
+    wasmBytes = null;
   }
   try {
     await modulePromise;

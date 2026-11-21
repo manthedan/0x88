@@ -28,7 +28,6 @@ import {
   cpuAnalysisTimeoutMs,
   cpuColdStartTimeoutMs,
   createAnalysisEngines,
-  threadedStockfishAvailable,
 } from './analysis/analysisEngines.ts';
 import { cachedAnalysisSelection, cachedReviewPosition } from './analysisCache.ts';
 import { analysisGamePosition } from './analysisContinuity.ts';
@@ -273,7 +272,7 @@ import {
 } from './recklessVariants.ts';
 import { loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { Lc0PuctSearcher } from './search.ts';
-import { StockfishEngine, stockfishFlavorUrl } from './stockfishEngine.ts';
+import { StockfishEngine, stockfishFlavorUrl, threadedStockfishAvailable } from './stockfishEngine.ts';
 import {
   checkStormphraxVariantAsset,
   hasExplicitStormphraxVariant,
@@ -851,6 +850,7 @@ function lc0WholeModelTensorCache(): boolean {
 function lc0InitMessage(runtime = selectedLc0Runtime()): Record<string, unknown> {
   const common = {
     type: 'init',
+    memoryConstrained: isMemoryConstrainedDevice(),
     modelUrl: MODEL_URL,
     deviceModelSelection: LC0_DEVICE_MODEL_SELECTION,
     ep: requestedEp(),

@@ -18,6 +18,7 @@ const PLENTYCHESS_CONFIG: EmscriptenUciEngineConfig = {
   name: 'plentychess-emscripten',
   label: 'PlentyChess',
   factoryGlobal: 'PlentyChess',
+  startupPreloadPath: '/processed.bin',
 };
 
 export function plentyChessGoCommand(options: PlentyChessOptions): string {

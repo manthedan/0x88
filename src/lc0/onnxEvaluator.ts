@@ -1,7 +1,7 @@
-import { f16BitsToF32, f32ToF16Bits } from '../nn/float16.ts';
+import { f16BitsToF32 } from '../nn/float16.ts';
 import { OrtGpuIoBinding, type OrtGpuIoOutputs, type OrtGpuIoTensorSpec, ortGraphCaptureSessionOptions } from '../nn/ortGpuIo.ts';
 import * as ort from '../nn/ortRuntime.ts';
-import { encodeLc0Classical112, type Lc0EncoderInput, type Lc0HistoryFill } from './encoder112.ts';
+import { encodeLc0PlanesInto, type Lc0EncoderInput, type Lc0HistoryFill } from './encoder112.ts';
 import { trackEngineRetirement } from './engineRetirement.ts';
 import {
   CachedLc0Evaluator,
@@ -98,15 +98,15 @@ export function defaultLc0OrtIoMode(deviceModelSelection: boolean): Lc0OrtIoMode
   return deviceModelSelection ? 'gpu-capture' : 'cpu';
 }
 
-function coerceTensorData(tensor: { type?: string }, rawData: unknown): number[] | Float32Array {
-  if (tensor.type === 'float16') {
-    const data = rawData as ArrayLike<number> & { constructor?: { name?: string } };
-    // ORT-web returns Uint16Array float16 bits in Node today, while modern
-    // browsers may expose Float16Array values directly. Handle both forms.
-    if (data.constructor?.name === 'Float16Array') return Array.from(data);
-    return Array.from(data, f16BitsToF32);
-  }
-  return rawData as Float32Array | number[];
+type Lc0Output = { data: ArrayLike<number>; f16Bits: boolean };
+
+function outputData(type: string | undefined, data: ArrayLike<number>): Lc0Output {
+  return { data, f16Bits: type === 'float16' && data instanceof Uint16Array };
+}
+
+function outputValue(output: Lc0Output, index: number): number {
+  const value = output.data[index];
+  return output.f16Bits && value !== undefined ? f16BitsToF32(value) : Number(value);
 }
 
 async function tensorDataTimed(
@@ -114,12 +114,12 @@ async function tensorDataTimed(
   name: string,
   timingKey: string,
   timing: Record<string, number>,
-): Promise<number[] | Float32Array> {
+): Promise<Lc0Output> {
   const tensor = outputs[name];
   if (!tensor) throw new Error(`LC0 ONNX output ${name} missing`);
   const started = ort.tinyLeelaNowMs();
   try {
-    return coerceTensorData(tensor, await ort.ortTensorData(tensor));
+    return outputData(tensor.type, (await ort.ortTensorData(tensor)) as ArrayLike<number>);
   } finally {
     timing[`${timingKey}GetDataMs`] = ort.tinyLeelaNowMs() - started;
   }
@@ -131,19 +131,10 @@ function sessionInputMetadata(session: ort.InferenceSession): { type?: string; s
     | undefined;
 }
 
-function arraySlice<T extends ArrayLike<number>>(values: T, start: number, length: number): ArrayLike<number> {
-  const end = start + length;
-  const maybe = values as T & { subarray?: (start: number, end?: number) => ArrayLike<number>; slice?: (start: number, end?: number) => ArrayLike<number> };
-  if (typeof maybe.subarray === 'function') return maybe.subarray(start, end);
-  if (typeof maybe.slice === 'function') return maybe.slice(start, end);
-  return Array.from({ length }, (_, i) => Number(values[start + i]));
-}
-
-function gpuIoOutput(outputs: OrtGpuIoOutputs, binding: OrtGpuIoBinding, name: string): number[] | Float32Array {
+function gpuIoOutput(outputs: OrtGpuIoOutputs, binding: OrtGpuIoBinding, name: string): Lc0Output {
   const data = outputs[name];
   if (!data) throw new Error(`LC0 ONNX output ${name} missing`);
-  const spec = binding.outputs.find((output) => output.name === name);
-  return coerceTensorData({ type: spec?.type }, data);
+  return outputData(binding.outputs.find((spec) => spec.name === name)?.type, data);
 }
 
 /**
@@ -283,6 +274,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   private readonly gpuIo: OrtGpuIoBinding | null;
   /** IO mode actually in use (a requested GPU mode can fall back to 'cpu'). */
   readonly ioMode: Lc0OrtIoMode;
+  private idleF16Planes?: Uint16Array<ArrayBuffer>;
   private disposed = false;
   private closePromise: Promise<void> | null = null;
   private admitted = new Set<Promise<unknown>>();
@@ -339,6 +331,7 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       this.disposed = true;
       this.closePromise = (async () => {
         await Promise.allSettled(this.admitted);
+        this.idleF16Planes = undefined;
         try {
           await ort.releaseOrtSession(this.session);
         } finally {
@@ -374,10 +367,27 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
   private async runPhysicalBatch(inputs: Lc0EvaluatorInput[], physicalBatchSize: number): Promise<Lc0Evaluation[]> {
     if (!inputs.length) return [];
     const totalStarted = ort.tinyLeelaNowMs();
-    const encodedPlanes = new Float32Array(physicalBatchSize * LC0_INPUT_PLANES_SIZE);
+    const elements = physicalBatchSize * LC0_INPUT_PLANES_SIZE;
+    const type = this.gpuIo?.input.type ?? sessionInputMetadata(this.session)?.type;
+    if (type !== 'float16') return this.runWithPlanes(inputs, physicalBatchSize, new Float32Array(elements), totalStarted);
+    const planes = this.idleF16Planes?.length === elements ? this.idleF16Planes : new Uint16Array(elements);
+    this.idleF16Planes = undefined;
+    try {
+      return await this.runWithPlanes(inputs, physicalBatchSize, planes, totalStarted);
+    } finally {
+      this.idleF16Planes ??= planes;
+    }
+  }
+
+  private async runWithPlanes(
+    inputs: Lc0EvaluatorInput[],
+    physicalBatchSize: number,
+    encodedPlanes: Float32Array<ArrayBuffer> | Uint16Array<ArrayBuffer>,
+    totalStarted: number,
+  ): Promise<Lc0Evaluation[]> {
     const encodeStarted = ort.tinyLeelaNowMs();
     const currents = inputs.map((input, i) => {
-      encodedPlanes.set(encodeLc0Classical112(input as Lc0EncoderInput, { historyFill: this.historyFill }).planes, i * LC0_INPUT_PLANES_SIZE);
+      encodeLc0PlanesInto(input as Lc0EncoderInput, encodedPlanes, i * LC0_INPUT_PLANES_SIZE, this.historyFill);
       return currentBoardAndFen(input);
     });
     // Fixed batch-N artifacts require a full physical batch. Pad by copying the
@@ -387,25 +397,16 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       encodedPlanes.copyWithin(i * LC0_INPUT_PLANES_SIZE, (inputs.length - 1) * LC0_INPUT_PLANES_SIZE, inputs.length * LC0_INPUT_PLANES_SIZE);
     }
     const encodeMs = ort.tinyLeelaNowMs() - encodeStarted;
-    // f16 inputs as Uint16Array bits: the GPU-IO path writes these bytes as they are
-    // (an ort.Tensor may re-wrap them as a Float16Array in browsers that have one).
-    let f16Input: Uint16Array | undefined;
-    if (sessionInputMetadata(this.session)?.type === 'float16') {
-      f16Input = new Uint16Array(encodedPlanes.length);
-      for (let i = 0; i < encodedPlanes.length; i++) {
-        f16Input[i] = f32ToF16Bits(encodedPlanes[i]);
-      }
-    }
     const webgpuBefore = ort.getOrtWebGpuDiagnosticsSnapshot();
     const ortRunStarted = ort.tinyLeelaNowMs();
     const downloadTiming: Record<string, number> = {};
-    let policy: number[] | Float32Array;
-    let wdlRaw: number[] | Float32Array;
-    let mlhRaw: number[] | Float32Array | undefined;
+    let policy: Lc0Output;
+    let wdlRaw: Lc0Output;
+    let mlhRaw: Lc0Output | undefined;
     let ortRunMs: number;
     let allGetDataMs: number;
     if (this.gpuIo) {
-      const gpuOutputs = await this.gpuIo.run(f16Input ?? encodedPlanes);
+      const gpuOutputs = await this.gpuIo.run(encodedPlanes);
       ortRunMs = ort.tinyLeelaNowMs() - ortRunStarted;
       const allGetDataStarted = ort.tinyLeelaNowMs();
       policy = gpuIoOutput(gpuOutputs, this.gpuIo, LC0_ONNX_OUTPUT_POLICY);
@@ -413,9 +414,10 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       mlhRaw = LC0_ONNX_OUTPUT_MLH in gpuOutputs ? gpuIoOutput(gpuOutputs, this.gpuIo, LC0_ONNX_OUTPUT_MLH) : undefined;
       allGetDataMs = ort.tinyLeelaNowMs() - allGetDataStarted;
     } else {
-      const inputTensor = f16Input
-        ? new ort.Tensor('float16', f16Input, [physicalBatchSize, 112, 8, 8])
-        : new ort.Tensor('float32', encodedPlanes, [physicalBatchSize, 112, 8, 8]);
+      const inputTensor =
+        encodedPlanes instanceof Uint16Array
+          ? new ort.Tensor('float16', encodedPlanes, [physicalBatchSize, 112, 8, 8])
+          : new ort.Tensor('float32', encodedPlanes, [physicalBatchSize, 112, 8, 8]);
       const outputs = await this.session.run({ [LC0_ONNX_INPUT_PLANES]: inputTensor });
       ortRunMs = ort.tinyLeelaNowMs() - ortRunStarted;
       const allGetDataStarted = ort.tinyLeelaNowMs();
@@ -467,20 +469,22 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
     };
     const results: Lc0Evaluation[] = currents.map((current, i) => {
       const legalPriorsStarted = ort.tinyLeelaNowMs();
-      const wdlSlice = arraySlice(wdlRaw, i * LC0_WDL_SIZE, LC0_WDL_SIZE);
-      const wdl: [number, number, number] = [Number(wdlSlice[0]), Number(wdlSlice[1]), Number(wdlSlice[2])];
+      const wdlOffset = i * LC0_WDL_SIZE;
+      const wdl: [number, number, number] = [outputValue(wdlRaw, wdlOffset), outputValue(wdlRaw, wdlOffset + 1), outputValue(wdlRaw, wdlOffset + 2)];
       const legalPriors = legalPolicyPriors(
         current.board,
-        arraySlice(policy, i * LC0_POLICY_SIZE, LC0_POLICY_SIZE),
+        policy.data,
         this.policyTemperature,
         current.preparedLegalMoves,
+        i * LC0_POLICY_SIZE,
+        policy.f16Bits,
       );
       const legalPriorsMs = ort.tinyLeelaNowMs() - legalPriorsStarted;
       return {
         fen: current.fen,
         wdl,
         q: wdl[0] - wdl[2],
-        mlh: mlhRaw === undefined ? 0 : Number(arraySlice(mlhRaw, i * LC0_MLH_SIZE, LC0_MLH_SIZE)[0]),
+        mlh: mlhRaw === undefined ? 0 : outputValue(mlhRaw, i * LC0_MLH_SIZE),
         legalPriors,
         bestMove: legalPriors[0]?.uci,
         timing: { ...baseTiming, batchPosition: i, legalPriorsMs },

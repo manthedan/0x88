@@ -39,7 +39,7 @@ import { LC0_MODEL_DOWNLOAD_NOT_APPROVED } from '../modelCache.ts';
 import { type PlentyChessVariant, plentyChessVariantUnsupportedReason } from '../plentychessVariants.ts';
 import type { RecklessVariant } from '../recklessVariants.ts';
 import { EngineResourceBroker, type PerformanceDial } from '../resourceBroker.ts';
-import { StockfishEngine, stockfishFlavorUrl } from '../stockfishEngine.ts';
+import { StockfishEngine, stockfishFlavorUrl, threadedStockfishAvailable } from '../stockfishEngine.ts';
 import { type StormphraxVariant, stormphraxVariantUnsupportedReason } from '../stormphraxVariants.ts';
 import type { ViridithasVariant } from '../viridithasVariants.ts';
 
@@ -107,10 +107,6 @@ const sharedBigNetPool: AnalysisBigNetPool = {
   release: releaseBigNetSearcher,
   disposeNow: disposeBigNetSearcherNow,
 };
-
-export function threadedStockfishAvailable(): boolean {
-  return typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated === true && typeof SharedArrayBuffer !== 'undefined';
-}
 
 export function cpuAnalysisTimeoutMs(row: EngineRow): number {
   if (row.family === 'sf') return Math.max(60000, row.strength * 5000);

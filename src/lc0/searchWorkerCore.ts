@@ -1,5 +1,6 @@
 import { createOrtDeviceLossMonitor, type OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import { releaseOrtWorkerResources } from '../nn/ortWorkerDispose.ts';
+import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { ExclusiveQueue } from './exclusiveQueue.ts';
 import '../nn/ortConsoleFilter.ts';
 import {
@@ -35,6 +36,7 @@ type InitMessage = {
   type: 'init';
   id: number;
   modelUrl: string;
+  memoryConstrained?: boolean;
   /**
    * Let the worker swap the default Lc0 Small model for its split-K rewrite on
    * Apple WebGPU (src/lc0/lc0SmallModelSelection.ts). Product callers set it
@@ -258,7 +260,7 @@ function post(message: WorkerResponse): void {
 
 const deviceLossMonitor = createOrtDeviceLossMonitor((loss) => post({ type: 'deviceLost', loss }));
 
-async function handleInit(message: InitMessage): Promise<void> {
+async function handleInit(message: InitMessage, signal: AbortSignal): Promise<void> {
   const selectedModelUrl = message.prefetchedModel?.url;
   const physicalBatchMode = message.physicalBatchMode === 'logical' ? 'logical' : 'declared';
   const initKey = JSON.stringify({
@@ -295,6 +297,15 @@ async function handleInit(message: InitMessage): Promise<void> {
     const { initKey: _key, ...ready } = configured;
     post({ type: 'ready', id: message.id, ...ready, modelCache: `${configured.modelCache} · reused existing worker session` });
     return;
+  }
+
+  if (evaluator && (message.memoryConstrained ?? isMemoryConstrainedDevice())) {
+    const previous = evaluator;
+    evaluator = null;
+    searcher = null;
+    configured = null;
+    await previous.dispose?.();
+    signal.throwIfAborted();
   }
 
   const evalCacheEntries = Math.max(0, Math.floor(message.evalCacheEntries ?? 0));
@@ -345,8 +356,6 @@ async function handleInit(message: InitMessage): Promise<void> {
     // Throttle progress posts to ~2MB steps so a large net does not flood the
     // main thread with one message per network chunk.
     let lastReportedBytes = -Infinity;
-    const initAbort = new AbortController();
-    activeInit = initAbort;
     let prefetchedLoad = message.prefetchedModel?.load;
     message.prefetchedModel = undefined;
     const deps = prefetchedLoad && {
@@ -373,7 +382,7 @@ async function handleInit(message: InitMessage): Promise<void> {
           requestPersistentStorage: message.requestPersistentModelStorage,
           minimumFreeBytesAfterCache: message.minimumFreeBytesAfterModelCache,
           noDownload: message.noModelDownload,
-          signal: initAbort.signal,
+          signal,
           onProgress: message.reportDownloadProgress
             ? (loadedBytes, totalBytes) => {
                 if (loadedBytes - lastReportedBytes < 2_000_000 && loadedBytes !== totalBytes) return;
@@ -384,9 +393,7 @@ async function handleInit(message: InitMessage): Promise<void> {
         },
       },
       deps,
-    ).finally(() => {
-      if (activeInit === initAbort) activeInit = null;
-    });
+    );
     const onnxEvaluator = created.evaluator;
     baseEvaluator = onnxEvaluator;
     try {
@@ -543,7 +550,13 @@ export function startSearchWorker(options: { createHybridEvaluator?: HybridEvalu
           });
           post({ type: 'disposed', id: message.id });
         } else if (message.type === 'init') {
-          await handleInit(message);
+          const initAbort = new AbortController();
+          activeInit = initAbort;
+          try {
+            await handleInit(message, initAbort.signal);
+          } finally {
+            activeInit = null;
+          }
         } else if (message.type === 'resetSearch') {
           searcher?.resetTree();
           if (message.clearEvalCache) (evaluator as CachedLc0Evaluator | null)?.clearCache?.();
