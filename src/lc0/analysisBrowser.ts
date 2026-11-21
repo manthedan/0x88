@@ -211,7 +211,7 @@ import {
   stockfishEngineLabel,
   stockfishVariantOptions,
 } from './engineCatalog.ts';
-import { engineLogoFamilyForEngineFamily, engineLogoHtml, probeEngineLogos } from './engineLogos.ts';
+import { engineLogoFamilyForEngineFamily, engineLogoHtml } from './engineLogos.ts';
 import {
   BUILT_IN_PROFILE_VALUE_PREFIX,
   ENGINE_PROFILE_BACKUP_KIND,
@@ -397,9 +397,11 @@ const LC0_WHOLE_MODEL_MANIFEST_URL = sameOriginPathParam(
 
 let openingNameIndex: OpeningNameIndex | null = null;
 let openingNamesUnavailable = false;
+let openingNamesRequestSignal: AbortSignal | undefined;
 
 async function loadOpeningNames(signal: AbortSignal): Promise<void> {
-  if (openingNameIndex) return;
+  if (openingNameIndex || openingNamesRequestSignal === signal) return;
+  openingNamesRequestSignal = signal;
   try {
     const response = await fetch(resolvePublicAssetUrl('/openings/eco.json'), { signal });
     if (!response.ok) throw new Error(`Opening names: HTTP ${response.status}`);
@@ -427,6 +429,7 @@ async function loadOpeningNames(signal: AbortSignal): Promise<void> {
 
 function renderOpeningName(): void {
   if (retry) return;
+  if (tree.current !== tree.root || tree.root.fen !== START_FEN) void loadOpeningNames(mountAbort.signal);
   const label = el('openingName');
   const opening = openingNameIndex ? openingNameAt(openingNameIndex, tree.current) : null;
   label.hidden = !opening && tree.current === tree.root;
@@ -1563,7 +1566,6 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     return lc0VariantOptions(true).map((option) => {
       if (!isLc0BigNetVariant(option.value)) return option;
       const config = BIG_NETS[option.value];
-      if (bigNetAssetStatusSync(config) === 'unknown') void checkBigNetAsset(config, whileAnalysisMounted(renderEngineList));
       const state = bigNetOptionState(config, peekBigNetSearcher(config.key)?.backend);
       return { ...option, label: `${option.label}${state.suffix}`, disabled: option.disabled || state.disabled };
     });
@@ -1796,6 +1798,8 @@ function renderBigNetWarning(): void {
 }
 
 function renderRecklessRuntimeInfo(): void {
+  const target = el('recklessRuntimeInfo');
+  if (!target.closest('details[open]')) return;
   const sab = typeof SharedArrayBuffer !== 'undefined' ? 'SAB yes' : 'SAB no';
   const bigNetTexts = isV0DeployProfile()
     ? []
@@ -4992,11 +4996,13 @@ function wireEvents() {
   const manager = el('engineManager') as HTMLDialogElement;
   const openEngineManager = (index?: number) => {
     manager.showModal();
+    void refreshBigNetAvailability();
     if (index !== undefined) manager.querySelector<HTMLElement>(`.row-var[data-i="${index}"]`)?.focus();
   };
   el('manageEngines').addEventListener('click', () => openEngineManager());
   el('closeEngineManager').addEventListener('click', () => manager.close());
   manager.addEventListener('close', () => el('manageEngines').focus({ preventScroll: true }));
+  el('recklessRuntimeInfo').closest('details')?.addEventListener('toggle', renderRecklessRuntimeInfo);
   const tabs = [...el('analysisContent').querySelectorAll<HTMLButtonElement>('[role="tab"]')];
   const setView = (tab: HTMLButtonElement) => {
     if (retry && tab.dataset.view !== 'review') return;
@@ -6002,36 +6008,23 @@ async function reloadLc0Backend(
   return loaded;
 }
 
+async function resolveAnalysisCpuDefault(family: EngineFamily): Promise<void> {
+  const onChange = whileAnalysisMounted(renderRecklessRuntimeInfo);
+  if (family === 'reckless' && !isV0DeployProfile()) {
+    REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(REQUESTED_RECKLESS_VARIANT, REQUESTED_RECKLESS_EXPLICIT, onChange);
+  } else if (family === 'viridithas') {
+    REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(REQUESTED_VIRIDITHAS_VARIANT, REQUESTED_VIRIDITHAS_EXPLICIT, onChange);
+  } else if (family === 'berserk') {
+    REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(REQUESTED_BERSERK_VARIANT, REQUESTED_BERSERK_EXPLICIT, onChange);
+  } else if (family === 'plentychess') {
+    REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(REQUESTED_PLENTYCHESS_VARIANT, REQUESTED_PLENTYCHESS_EXPLICIT, onChange);
+  } else if (family === 'stormphrax') {
+    REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(REQUESTED_STORMPHRAX_VARIANT, REQUESTED_STORMPHRAX_EXPLICIT, onChange);
+  }
+}
+
 async function init(mountSignal: AbortSignal) {
   restoreAnalysisWorkspace();
-  if (!isV0DeployProfile()) {
-    REQUESTED_RECKLESS_VARIANT = await resolveDefaultRecklessVariantAssetFallback(
-      REQUESTED_RECKLESS_VARIANT,
-      REQUESTED_RECKLESS_EXPLICIT,
-      whileAnalysisMounted(renderRecklessRuntimeInfo),
-    );
-  }
-  REQUESTED_VIRIDITHAS_VARIANT = await resolveDefaultViridithasVariantAssetFallback(
-    REQUESTED_VIRIDITHAS_VARIANT,
-    REQUESTED_VIRIDITHAS_EXPLICIT,
-    whileAnalysisMounted(renderRecklessRuntimeInfo),
-  );
-  REQUESTED_BERSERK_VARIANT = await resolveDefaultBerserkVariantAssetFallback(
-    REQUESTED_BERSERK_VARIANT,
-    REQUESTED_BERSERK_EXPLICIT,
-    whileAnalysisMounted(renderRecklessRuntimeInfo),
-  );
-  REQUESTED_PLENTYCHESS_VARIANT = await resolveDefaultPlentyChessVariantAssetFallback(
-    REQUESTED_PLENTYCHESS_VARIANT,
-    REQUESTED_PLENTYCHESS_EXPLICIT,
-    whileAnalysisMounted(renderRecklessRuntimeInfo),
-  );
-  REQUESTED_STORMPHRAX_VARIANT = await resolveDefaultStormphraxVariantAssetFallback(
-    REQUESTED_STORMPHRAX_VARIANT,
-    REQUESTED_STORMPHRAX_EXPLICIT,
-    whileAnalysisMounted(renderRecklessRuntimeInfo),
-  );
-  if (isStaleMount(mountSignal)) return;
   if (analysisPagehideHandler) window.removeEventListener('pagehide', analysisPagehideHandler);
   analysisPagehideHandler = (event: PageTransitionEvent) => {
     workspaceAutosave?.flush();
@@ -6058,21 +6051,14 @@ async function init(mountSignal: AbortSignal) {
   } else {
     engineRows = loadManualEngineRows() ?? engineRows;
   }
+  await Promise.all([...new Set(engineRows.map((row) => row.family))].map(resolveAnalysisCpuDefault));
+  if (isStaleMount(mountSignal)) return;
   renderEngineProfiles(lastProfile?.name ?? '');
   installRuntimeAuditPanel();
   renderAll();
   renderEngineList();
-  renderRecklessRuntimeInfo();
-  void probeEngineLogos(
-    whileAnalysisMounted(() => {
-      renderEngineList();
-      renderAll();
-    }),
-  );
   wireEvents();
-  void loadOpeningNames(mountSignal);
   void refreshPgnDatabaseCollections(activePgnCollectionId, mountSignal);
-  void refreshBigNetAvailability();
   if (!isV0DeployProfile()) void refreshCentipawnHybridManifestStatus();
   const smallLc0 = activeEngineRows().some((row) => row.family === 'lc0' && !isLc0BigNetVariant(row.variant));
   if (!automaticAnalysisAllowed() || (!smallLc0 && !inputEl('autoAnalyze').checked)) {

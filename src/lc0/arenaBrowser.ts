@@ -143,7 +143,6 @@ import {
   stockfishEngineLabel,
   stockfishVariantOptions,
 } from './engineCatalog.ts';
-import { probeEngineLogos } from './engineLogos.ts';
 import {
   berserkCacheKey,
   cpuEngineHashMbForSurface,
@@ -1738,14 +1737,6 @@ function variantOptions(family: EngineFamily): { value: string; label: string; d
     return lc0VariantOptions(true).map((option) => {
       if (!isLc0BigNetVariant(option.value)) return option;
       const config = BIG_NETS[option.value];
-      if (bigNetAssetStatusSync(config) === 'unknown')
-        void checkBigNetAsset(
-          config,
-          whileArenaMounted(() => {
-            renderSeatSelectors();
-            refreshSeatControls();
-          }),
-        );
       const state = bigNetOptionState(config, peekBigNetSearcher(config.key)?.backend);
       return { ...option, label: `${option.label}${state.suffix}`, disabled: option.disabled || state.disabled };
     });
@@ -2891,8 +2882,9 @@ async function refreshBigNetAvailability(mountSignal = mountAbort.signal): Promi
     checkBigNetAsset(BIG_NETS.bt4, whileArenaMounted(renderSeatSelectors)),
     checkBigNetAsset(BIG_NETS.t3, whileArenaMounted(renderSeatSelectors)),
   ]);
-  bt4AvailabilityResolved = true;
   if (isStaleMount(mountSignal)) return;
+  bt4AvailabilityResolved = true;
+  if (running || startPending) return;
   for (const row of activeSeatRows()) {
     if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectable(BIG_NETS[row.variant])) row.variant = 'small';
   }
@@ -5133,6 +5125,14 @@ function revokeArenaPhoneLargeNets(): void {
 }
 
 function wireEvents() {
+  let probingSeatOptions = false;
+  const probeSeatOptions = () => {
+    if (bt4AvailabilityResolved || probingSeatOptions || running || startPending) return;
+    probingSeatOptions = true;
+    void refreshBigNetAvailability();
+  };
+  el('arenaSeatList').addEventListener('focusin', probeSeatOptions);
+  el('arenaSeatList').addEventListener('pointerenter', probeSeatOptions);
   window.addEventListener(PHONE_LARGE_NET_CHANGE_EVENT, revokeArenaPhoneLargeNets, { signal: mountAbort.signal });
   const runtimeStatus = el('runtimeBadge').closest('details')!;
   runtimeStatus.addEventListener(
@@ -5496,14 +5496,7 @@ async function init(mountSignal: AbortSignal) {
   if (isStaleMount(mountSignal)) return;
   buildEngines();
   populateSeats();
-  void refreshBigNetAvailability();
-  void probeEngineLogos(
-    whileArenaMounted(() => {
-      renderSeatSelectors();
-      refreshSeatControls();
-      renderSideLabels();
-    }),
-  );
+  if (activeSeatRows().some((row) => row.family === 'lc0' && isLc0BigNetVariant(row.variant))) void refreshBigNetAvailability();
   wireEvents();
   refreshBudgetControls();
   refreshOpeningPreview();

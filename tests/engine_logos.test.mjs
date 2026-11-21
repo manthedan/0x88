@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { engineLogoFamilyForEngineFamily, engineLogoFamilyForName, engineLogoUrl, probeEngineLogos } from '../src/lc0/engineLogos.ts';
+import { engineLogoFamilyForEngineFamily, engineLogoFamilyForName, engineLogoHtml, engineLogoUrl } from '../src/lc0/engineLogos.ts';
 
 test('engine logo helper maps displayed engine names to bundled logo families', () => {
   assert.equal(engineLogoFamilyForName('Lc0 BT4'), 'lc0');
@@ -35,15 +35,14 @@ test('engine logo URLs match the committed public asset names and extensions', (
   assert.equal(engineLogoUrl('generic'), '/engine-logos/generic.svg');
 });
 
-test('analysis and arena probe bundled logos in every deploy profile', async () => {
-  const [analysisSource, arenaSource] = await Promise.all([
-    readFile(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8'),
-  ]);
-  assert.match(analysisSource, /void probeEngineLogos\(\s*whileAnalysisMounted/);
-  assert.match(arenaSource, /void probeEngineLogos\(\s*whileArenaMounted/);
-  assert.doesNotMatch(analysisSource, /if \(!isV0DeployProfile\(\)\) void probeEngineLogos/);
-  assert.doesNotMatch(arenaSource, /if \(!isV0DeployProfile\(\)\) void probeEngineLogos/);
+test('bundled logos render as lazy images without an availability probe', async (t) => {
+  const fetch = t.mock.method(globalThis, 'fetch', () => assert.fail('bundled logo must not require fetch()'));
+  for (const family of ['lc0', 'centipawn', 'sf', 'reckless', 'viridithas', 'berserk', 'generic']) {
+    const url = engineLogoUrl(family);
+    assert.ok((await readFile(new URL(`../public${url}`, import.meta.url))).byteLength > 0);
+    assert.ok(engineLogoHtml(family).includes(`src="${url}" alt="" loading="lazy"`));
+  }
+  assert.equal(fetch.mock.callCount(), 0);
 });
 
 test('engine comparison retains readable engine-and-variant display names', async () => {
@@ -55,22 +54,4 @@ test('engine comparison retains readable engine-and-variant display names', asyn
   const source = await readFile(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
   const comparisonSource = source.slice(source.indexOf('function renderEngineComparison'), source.indexOf('function renderLines'));
   assert.match(comparisonSource, /htmlEscape\(analysisEngineName\(line\.engine\)\)/);
-});
-
-test('concurrent engine logo probes retain every re-render callback', async () => {
-  const originalFetch = globalThis.fetch;
-  const callbacks = [];
-  try {
-    globalThis.fetch = async () =>
-      new Response(null, {
-        status: 200,
-        headers: { 'content-type': 'image/png' },
-      });
-    const first = probeEngineLogos(() => callbacks.push('first'));
-    const second = probeEngineLogos(() => callbacks.push('second'));
-    await Promise.all([first, second]);
-    assert.deepEqual(callbacks.sort(), ['first', 'second']);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
 });

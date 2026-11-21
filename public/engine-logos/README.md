@@ -1,8 +1,7 @@
 # Engine logos
 
 Small decorative engine marks used next to engine names in the Arena and Analysis pages.
-The browser probes these files once and only renders an `<img>` when the file exists
-with an image content type, so missing logos fall back to text-only labels.
+Analysis and Arena render the bundled files as lazy-loaded decorative images.
 
 | File | Engine family | Used for |
 |---|---|---|

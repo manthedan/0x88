@@ -451,14 +451,16 @@ test('Play checks its overrides before it creates any engine', () => {
   assert.ok(reload < mount.indexOf('ctxInit(ctx)'), 'before any engine starts');
 });
 
-test('v0 Play probes BT4 and Queen Odds so their hosted models become selectable, without probing t3', async (t) => {
+test('v0 Play waits for picker intent before probing its optional opponents', async (t) => {
   const play = readFileSync('src/lc0/playBrowser.ts', 'utf8');
   const start = play.indexOf('  const refreshIfMounted =');
   const code = play.slice(start, play.indexOf('  ctxRender(ctx);', start));
   const urls = [];
   const refreshed = [];
+  const listeners = new Map();
   const deps = {
-    ctx: {},
+    ctx: { dom: { selectEl: () => ({}) }, scope: { listen: (_, type, fn) => listeners.set(type, fn) } },
+    ctxSelectedEngine: () => ({ family: 'maia3' }),
     ENGINE_OPTIONS: enginePlayOptions().filter((option) => option.v0),
     BIG_NETS,
     probeBt4Support: async () => false,
@@ -474,6 +476,9 @@ test('v0 Play probes BT4 and Queen Odds so their hosted models become selectable
   });
   assert.equal(bigNetOptionState(BIG_NETS.bt4).disabled, true);
   new Function(...Object.keys(deps), stripTypeScriptTypes(code))(...Object.values(deps));
+  await new Promise(setImmediate);
+  assert.deepEqual(urls, [], 'default Maia mount does not probe optional nets');
+  listeners.get('focus')();
   await new Promise(setImmediate);
   assert.deepEqual(urls.sort(), [BIG_NETS.bt4.modelUrl, BIG_NETS.lqo.modelUrl].sort());
   assert.equal(refreshed.at(-1), false, 'the probe refresh enables BT4');

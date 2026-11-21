@@ -17,11 +17,6 @@ const ENGINE_LOGO_ASSETS: Record<EngineLogoFamily, EngineLogoAsset> = {
   generic: { family: 'generic', url: '/engine-logos/generic.svg' },
 };
 
-const availableEngineLogos = new Set<EngineLogoFamily>(['generic', 'centipawn']);
-const pendingProbeCallbacks = new Set<() => void>();
-let probed = false;
-let probing: Promise<void> | null = null;
-
 export function engineLogoFamilyForName(name: string): EngineLogoFamily {
   const n = name.toLowerCase();
   if (n.includes('centipawn')) return 'centipawn';
@@ -46,49 +41,10 @@ export function engineLogoUrl(family: EngineLogoFamily | undefined): string | un
 }
 
 export function engineLogoHtml(family: EngineLogoFamily | undefined, className = 'engine-logo'): string {
-  const resolved = family ?? 'generic';
-  const url = engineLogoUrl(resolved);
-  if (url && availableEngineLogos.has(resolved)) return `<img class="${className}" src="${url}" alt="">`;
-  if (resolved === 'generic') return `<img class="${className}" src="/engine-logos/generic.svg" alt="">`;
-  if (resolved === 'centipawn') return `<img class="${className}" src="/engine-logos/centipawn.svg" alt="">`;
-  return `<span class="${className} engine-logo-placeholder"></span>`;
+  const { url } = ENGINE_LOGO_ASSETS[family ?? 'generic'];
+  return `<img class="${className}" src="${url}" alt="" loading="lazy">`;
 }
 
 export function engineLogoHtmlForName(name: string, className = 'engine-logo'): string {
   return engineLogoHtml(engineLogoFamilyForName(name), className);
-}
-
-function notifyProbeCallbacks(): void {
-  const callbacks = [...pendingProbeCallbacks];
-  pendingProbeCallbacks.clear();
-  if (!availableEngineLogos.size) return;
-  for (const callback of callbacks) {
-    try {
-      callback();
-    } catch {
-      // A logo-triggered re-render is best-effort; do not fail the shared probe.
-    }
-  }
-}
-
-export async function probeEngineLogos(onChange?: () => void): Promise<void> {
-  if (onChange) pendingProbeCallbacks.add(onChange);
-  if (probed) {
-    notifyProbeCallbacks();
-    return;
-  }
-  probing ??= Promise.all(
-    Object.values(ENGINE_LOGO_ASSETS).map(async ({ family, url }) => {
-      try {
-        const response = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-        if (response.ok && (response.headers.get('content-type') ?? '').startsWith('image/')) availableEngineLogos.add(family);
-      } catch {
-        // Logo assets are decorative; missing files fall back to text-only labels.
-      }
-    }),
-  ).then(() => {
-    probed = true;
-    notifyProbeCallbacks();
-  });
-  await probing;
 }

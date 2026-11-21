@@ -513,12 +513,12 @@ async function resolveChannelArtifactUrl(modelUrl: string, channelUrl: string | 
 async function resolveArtifactUrl(
   modelUrl: string,
   manifest: { entry?: Lc0ModelManifestEntry; manifestUrl: string },
-  channelUrl: string | undefined,
+  channel: Promise<ResolvedModelArtifact | undefined>,
 ): Promise<ResolvedModelArtifact> {
   const artifactUrl = manifestArtifactUrl(manifest.entry, manifest.manifestUrl);
   if (artifactUrl)
     return { url: artifactUrl, downloadBytes: manifest.entry?.bytes, expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
-  const channelArtifact = await resolveChannelArtifactUrl(modelUrl, channelUrl);
+  const channelArtifact = await channel;
   if (!channelArtifact)
     return { url: modelUrl, downloadBytes: manifest.entry?.bytes, expectedBytes: manifest.entry?.bytes, expectedSha256: manifest.entry?.sha256 };
   // The asset host cannot replace pins supplied by the app-origin manifest.
@@ -645,14 +645,26 @@ export async function inspectLc0ModelDownload(modelUrl: string, options: Lc0Mode
   }
 }
 
+async function resolveModelMetadata(modelUrl: string, options: Lc0ModelLoadOptions) {
+  options.signal?.throwIfAborted();
+  const manifestFlight = options.manifestEntry
+    ? Promise.resolve({ entry: options.manifestEntry, manifestUrl: options.manifestUrl ?? modelUrl, elapsedMs: 0 })
+    : fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl));
+  const channelUrl = options.channelUrl === null || options.manifestEntry?.artifactUrl
+    ? undefined
+    : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
+  const parallelChannel = options.requireManifestEntry ? undefined : resolveChannelArtifactUrl(modelUrl, channelUrl);
+  const manifest = await untilAborted(manifestFlight, options.signal);
+  if (options.requireManifestEntry && !/^[a-f0-9]{64}$/i.test(manifest.entry?.sha256 ?? '')) {
+    throw new Error(`App-origin model integrity metadata is unavailable for ${modelUrl}. Please retry loading the model.`);
+  }
+  const channel = parallelChannel ?? resolveChannelArtifactUrl(modelUrl, manifest.entry?.artifactUrl ? undefined : channelUrl);
+  return { resolved: await untilAborted(resolveArtifactUrl(modelUrl, manifest, channel), options.signal), manifest };
+}
+
 /** The artifact (URL and integrity pins) the loader would fetch for modelUrl. */
 async function resolveLoaderArtifact(modelUrl: string, options: Lc0ModelLoadOptions): Promise<ResolvedModelArtifact> {
-  options.signal?.throwIfAborted();
-  const manifest = options.manifestEntry
-    ? { entry: options.manifestEntry, manifestUrl: options.manifestUrl ?? modelUrl }
-    : await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
-  const channelUrl = options.channelUrl === null ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
-  return untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
+  return (await resolveModelMetadata(modelUrl, options)).resolved;
 }
 
 /** Whether Cache Storage has an entry for the loader's exact artifact, without
@@ -866,14 +878,7 @@ export function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undef
 async function loadLc0ModelForOrtUnshared(modelUrl: string, options: Lc0ModelLoadOptions): Promise<Lc0ModelLoadResult> {
   options.signal?.throwIfAborted();
   const started = nowMs();
-  const channelUrl = options.channelUrl === null ? undefined : (cleanChannelUrl(options.channelUrl) ?? configuredChannelUrl());
-  const manifest = options.manifestEntry
-    ? { entry: options.manifestEntry, manifestUrl: options.manifestUrl ?? modelUrl, elapsedMs: 0 }
-    : await untilAborted(fetchManifestEntryWithTiming(modelUrl, options.manifestUrl ?? defaultManifestUrlForModel(modelUrl)), options.signal);
-  if (options.requireManifestEntry && !/^[a-f0-9]{64}$/i.test(manifest.entry?.sha256 ?? '')) {
-    throw new Error(`App-origin model integrity metadata is unavailable for ${modelUrl}. Please retry loading the model.`);
-  }
-  const resolved = await untilAborted(resolveArtifactUrl(modelUrl, manifest, channelUrl), options.signal);
+  const { resolved, manifest } = await resolveModelMetadata(modelUrl, options);
   const expectation: Lc0ModelBytesExpectation = { expectedBytes: resolved.expectedBytes, expectedSha256: resolved.expectedSha256 };
   if (!options.allowUnverified && !/^[a-f0-9]{64}$/i.test(expectation.expectedSha256 ?? '')) {
     throw new Error(`LC0 model integrity metadata is unavailable for ${modelUrl}. Please retry loading the model.`);

@@ -109,6 +109,29 @@ const CHANNEL_URL = 'http://localhost/channels/stable.json';
 const RELEASE_URL = 'http://localhost/releases/test-release.json';
 const MODEL_V2_BR_URL = `http://localhost/artifacts/sha256/${ABC_SHA256}/br/${'b'.repeat(64)}`;
 
+test('channel and release requests can finish before the app manifest, but the body waits for its pins', async (t) => {
+  const manifest = Promise.withResolvers();
+  const urls = [];
+  t.mock.method(globalThis, 'fetch', async (input) => {
+    const url = String(input.url ?? input);
+    urls.push(url);
+    if (url === MANIFEST_URL) return manifest.promise;
+    if (url === CHANNEL_URL) return Response.json({ releaseManifestUrl: RELEASE_URL });
+    if (url === RELEASE_URL) return Response.json({ artifacts: [{ logicalUrl: '/models/lc0/test.onnx', artifactUrl: MODEL_ARTIFACT_URL, bytes: 3, sha256: ABC_SHA256 }] });
+    assert.equal(url, MODEL_ARTIFACT_URL);
+    return new Response(bytesOf('abc'));
+  });
+  const loading = loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL });
+  try {
+    await new Promise(setImmediate);
+    assert.deepEqual(urls, [MANIFEST_URL, CHANNEL_URL, RELEASE_URL]);
+  } finally {
+    manifest.resolve(Response.json({ models: [{ file: 'test.onnx', url: MODEL_URL, bytes: 3, sha256: ABC_SHA256 }] }));
+    assert.equal((await loading).sha256Valid, true);
+  }
+  assert.equal(urls.at(-1), MODEL_ARTIFACT_URL);
+});
+
 async function withMockedEnv(
   run,
   { serveBytes, manifestSha256, manifestBytes, manifestArtifactUrl, channelArtifacts, channelManifest, releaseManifest, artifactUrls = [] },

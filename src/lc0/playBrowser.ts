@@ -2062,9 +2062,22 @@ function ctxInit(ctx: PlayContext): void {
       ctxResolvePendingPreferredEngine(ctx);
     }
   };
-  void probeBt4Support().then(refreshIfMounted);
-  for (const option of ENGINE_OPTIONS) {
-    if (option.family === 'lc0' && option.variant !== 'small') void checkBigNetAsset(BIG_NETS[option.variant as BigNetKey]).then(refreshIfMounted);
+  let opponentOptionsProbed = false;
+  const probeOpponentOptions = () => {
+    if (opponentOptionsProbed) return;
+    opponentOptionsProbed = true;
+    void probeBt4Support().then(refreshIfMounted);
+    for (const option of ENGINE_OPTIONS) {
+      if (option.family === 'lc0' && option.variant !== 'small') void checkBigNetAsset(BIG_NETS[option.variant as BigNetKey]).then(refreshIfMounted);
+    }
+  };
+  const opponentSelect = ctx.dom.selectEl('engineSelect');
+  ctx.scope.listen(opponentSelect, 'focus', probeOpponentOptions);
+  ctx.scope.listen(opponentSelect, 'pointerenter', probeOpponentOptions);
+  const startupOpponent = ENGINE_OPTIONS.find((option) => option.id === ctx.pendingPreferredEngineId) ?? ctxSelectedEngine(ctx);
+  if (startupOpponent.family === 'lc0' && startupOpponent.variant !== 'small') {
+    void probeBt4Support().then(refreshIfMounted);
+    void checkBigNetAsset(BIG_NETS[startupOpponent.variant as BigNetKey]).then(refreshIfMounted);
   }
   ctxRender(ctx);
   if (ctx.pendingPreferredEngineId) {
