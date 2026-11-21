@@ -906,9 +906,7 @@ function recordSessionAttempt(providers: string[], ok: boolean, ms: number, erro
 }
 
 function logOrtSessionReady(providers: string[], ms: number, note?: string) {
-  const message = providers.includes('webgpu')
-    ? 'ORT: session ready with WebGPU provider requested/accepted.'
-    : 'ORT: session ready with WASM provider.';
+  const message = providers.includes('webgpu') ? 'ORT: session ready with WebGPU provider requested/accepted.' : 'ORT: session ready with WASM provider.';
   console.info(message, {
     requestedEp: requestedOrtExecutionProvider(),
     sessionProviders: providers,

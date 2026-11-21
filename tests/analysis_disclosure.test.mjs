@@ -70,14 +70,23 @@ test('both Load triggers open the FEN tools and reflect their actual expanded st
     button.dispatchEvent(new Event('click'));
     assert.equal(panel.open, true);
     assert.equal(doc.activeElement, fenInput);
-    assert.deepEqual([trigger, mobile].map((el) => el.attrs['aria-expanded']), ['true', 'true']);
+    assert.deepEqual(
+      [trigger, mobile].map((el) => el.attrs['aria-expanded']),
+      ['true', 'true'],
+    );
     button.dispatchEvent(new Event('click'));
     assert.equal(panel.open, false);
-    assert.deepEqual([trigger, mobile].map((el) => el.attrs['aria-expanded']), ['false', 'false']);
+    assert.deepEqual(
+      [trigger, mobile].map((el) => el.attrs['aria-expanded']),
+      ['false', 'false'],
+    );
   }
   panel.open = true;
   panel.dispatchEvent(new Event('toggle'));
-  assert.deepEqual([trigger, mobile].map((el) => el.attrs['aria-expanded']), ['true', 'true']);
+  assert.deepEqual(
+    [trigger, mobile].map((el) => el.attrs['aria-expanded']),
+    ['true', 'true'],
+  );
 });
 
 test('desktop keeps existing tools visible; resizing to mobile closes them', () => {

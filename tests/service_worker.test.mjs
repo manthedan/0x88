@@ -200,8 +200,7 @@ const SHELL_WITH_ROOT_ERROR_STYLE = `${SHELL_HTML}<meta name="0x88-shell-style" 
 
 test('the error-node stylesheet is available offline without a link on the Play page', async () => {
   const worker = loadWorker({
-    fetch: async (input) =>
-      input === '/app/play/' ? basic(SHELL_WITH_ROOT_ERROR_STYLE, { contentType: 'text/html' }) : basic('root error style'),
+    fetch: async (input) => (input === '/app/play/' ? basic(SHELL_WITH_ROOT_ERROR_STYLE, { contentType: 'text/html' }) : basic('root error style')),
   });
   await dispatchLifecycle(worker, 'install');
   worker.state.fetch = () => assert.fail('must serve the required stylesheet from cache');

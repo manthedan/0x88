@@ -2181,7 +2181,7 @@ function renderEngineSummaries(lines: AnalysisLine[]): void {
         const raw = progress
           ? searchProgressText(progress).replace(`${progress.label}: `, '')
           : line
-            ? line.engineSummary ?? line.detail
+            ? (line.engineSummary ?? line.detail)
             : failure
               ? 'Unavailable'
               : `Budget · ${row.strength} ${strengthMeta(row.family).unit}`;

@@ -3,11 +3,15 @@ export function mountPositionTools(panel: HTMLDetailsElement, input: HTMLInputEl
     for (const trigger of triggers) trigger.setAttribute('aria-expanded', String(panel.open));
   };
   for (const trigger of triggers) {
-    trigger.addEventListener('click', () => {
-      panel.open = !panel.open;
-      sync();
-      if (panel.open) input.focus();
-    }, { signal });
+    trigger.addEventListener(
+      'click',
+      () => {
+        panel.open = !panel.open;
+        sync();
+        if (panel.open) input.focus();
+      },
+      { signal },
+    );
   }
   panel.addEventListener('toggle', sync, { signal });
   sync();

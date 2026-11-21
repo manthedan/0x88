@@ -5,7 +5,8 @@ import test from 'node:test';
 const template = readFileSync(new URL('../src/routes/app/analysis/+page.svelte', import.meta.url), 'utf8');
 
 test('the mobile toolbar wraps before the running status loses its width budget', () => {
-  const wrapped = /@container \(max-width:(\d+)px\)\{\s*\.analysis-overview:has\(#stop:not\(:disabled\)\)\{grid-template-columns:minmax\(0,1fr\) auto auto\}/.exec(template);
+  const wrapped =
+    /@container \(max-width:(\d+)px\)\{\s*\.analysis-overview:has\(#stop:not\(:disabled\)\)\{grid-template-columns:minmax\(0,1fr\) auto auto\}/.exec(template);
   assert.ok(wrapped, 'the compact toolbar has a row for Stop and a separate row for engine actions');
   const breakpoint = Number(wrapped[1]);
   // Allow up to 32px for “Stop”, 82px for “Add engine” and 84px for “Analyzing…”.

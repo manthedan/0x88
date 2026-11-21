@@ -8,9 +8,9 @@
  */
 
 import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
-import { setPgnStartTags } from '../chess/pgn.ts';
 import { insufficientMaterial } from '../chess/drawRules.ts';
 import { inCheck, legalMoves } from '../chess/movegen.ts';
+import { setPgnStartTags } from '../chess/pgn.ts';
 
 export type MoveClass = 'best' | 'good' | 'inaccuracy' | 'mistake' | 'blunder' | 'forced';
 

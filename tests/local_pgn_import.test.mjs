@@ -244,8 +244,16 @@ for (const version of [1, 2]) {
   test(`v${version} collections migrate without reading payloads for the list, and stale indexes persist`, async (t) => {
     const indexedDB = installMemoryIdb();
     const legacy = {
-      id: 'legacy', name: 'Legacy', pgn, source: 'manual', gameCount: 2, createdAt: 1, updatedAt: 2,
-      indexVersion: OPENING_INDEX_VERSION - 1, positionIndex: { bogus: [] }, indexedPositionCount: 1,
+      id: 'legacy',
+      name: 'Legacy',
+      pgn,
+      source: 'manual',
+      gameCount: 2,
+      createdAt: 1,
+      updatedAt: 2,
+      indexVersion: OPENING_INDEX_VERSION - 1,
+      positionIndex: { bogus: [] },
+      indexedPositionCount: 1,
     };
     const db = await new Promise((resolve, reject) => {
       const request = indexedDB.open('lc0-analysis-pgn-database', version);
@@ -274,7 +282,13 @@ for (const version of [1, 2]) {
     const stored = await loadPgnCollection(legacy.id);
     const { positionIndex } = await importStoredPgn(pgn);
     assert.equal(hit.total, 1);
-    assert.deepEqual(stored, { ...legacy, gameCount: 1, indexVersion: OPENING_INDEX_VERSION, positionIndex, indexedPositionCount: Object.keys(positionIndex).length });
+    assert.deepEqual(stored, {
+      ...legacy,
+      gameCount: 1,
+      indexVersion: OPENING_INDEX_VERSION,
+      positionIndex,
+      indexedPositionCount: Object.keys(positionIndex).length,
+    });
     assert.deepEqual(await listPgnCollections(), [hit.summary]);
 
     const writes = t.mock.method(IDBObjectStore.prototype, 'put');
@@ -341,7 +355,10 @@ test('backup round trip rebuilds poisoned indexes and collection CRUD stays loca
   assert.equal((await loadPgnCollection(copy.id)).name, 'Renamed');
   assert.equal((await listPgnCollections()).find(({ id }) => id === copy.id).name, 'Renamed');
   await deletePgnCollection(copy.id);
-  assert.deepEqual((await listPgnCollections()).map(({ id }) => id), [record.id]);
+  assert.deepEqual(
+    (await listPgnCollections()).map(({ id }) => id),
+    [record.id],
+  );
   assert.equal((await exportPgnDatabaseBackup(new Date(), record.id)).collections.length, 1);
   const backup = JSON.parse(JSON.stringify(await exportPgnDatabaseBackup()));
   assert.equal(backup.collections.length, 1);

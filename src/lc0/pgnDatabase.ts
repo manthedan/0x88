@@ -234,9 +234,7 @@ export async function savePgnCollection(input: SavePgnCollectionInput): Promise<
   const db = await openDatabase();
   try {
     const tx = db.transaction([STORE, META_STORE], 'readwrite');
-    const existing = input.id
-      ? await requestToPromise<PgnCollectionSummary | undefined>(tx.objectStore(META_STORE).get(input.id))
-      : undefined;
+    const existing = input.id ? await requestToPromise<PgnCollectionSummary | undefined>(tx.objectStore(META_STORE).get(input.id)) : undefined;
     const now = Date.now();
     const record: PgnCollectionRecord = {
       id: existing?.id ?? input.id ?? newId(),
