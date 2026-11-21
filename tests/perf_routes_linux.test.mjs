@@ -353,6 +353,28 @@ test('Linux sessions refuse journeys whose ORT sessions ran on WASM or reported 
   assert.match(source, /warmWebGpu\(browser, [^\n]*\{ signal \}\)/, 'warm-up observes the session shutdown signal');
 });
 
+test('Arena main-thread ORT reports the backend for both baseline and candidate builds', () => {
+  const source = readFileSync(new URL('../scripts/perf_routes/session.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf("page.on('console',");
+  const listener = source.slice(start, source.indexOf('page.setDefaultTimeout(', start));
+  let capture;
+  const page = {
+    on(event, handler) {
+      assert.equal(event, 'console');
+      capture = (text) => handler({ text: () => text, type: () => 'info' });
+    },
+  };
+  const result = { ortSessions: [] };
+  new Function('page', 'result', 'linux', listener)(page, result, true);
+  for (const prefix of ['ORT', 'Centipawn ORT']) {
+    capture(`${prefix}: session ready with WebGPU provider requested/accepted.`);
+    assert.equal(webgpuBackendProblem('arena-lc0', [], result.ortSessions), null);
+    assert.equal(result.ortSessions.pop(), 'webgpu');
+  }
+  capture('ORT: session ready with WASM provider.');
+  assert.match(webgpuBackendProblem('arena-lc0', [], result.ortSessions), /ORT ran on WASM/);
+});
+
 test('Linux rejects ORT dropping WebGPU even when Maia3 and the ready log still claim it', () => {
   const ready = [{ backend: 'auto->webgpu,wasm' }];
   const warning = 'removing requested execution provider "webgpu" from session options because it is not available: Error: Failed to get GPU adapter.';

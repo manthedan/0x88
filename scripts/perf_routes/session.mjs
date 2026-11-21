@@ -201,7 +201,7 @@ try {
     result.ortSessions = [];
     page.on('console', (message) => {
       const text = message.text();
-      const ready = /^Centipawn ORT: session ready with (WebGPU|WASM) provider/.exec(text);
+      const ready = /^(?:Centipawn )?ORT: session ready with (WebGPU|WASM) provider/.exec(text);
       if (ready) result.ortSessions.push(ready[1].toLowerCase());
       if (linux && message.type() === 'warning') consoleWarnings.push(text);
     });
