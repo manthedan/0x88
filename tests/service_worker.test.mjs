@@ -207,6 +207,46 @@ test('offline navigation and lazy imports survive a visit while the update was w
   assert.deepEqual(await a.caches.keys(), ['0x88-sw-state', b.context.CACHE_NAME, c.context.CACHE_NAME]);
 });
 
+test('chunks reused from the previous cache survive another activation', async () => {
+  const html = (body) => basic(body, { contentType: 'text/html' });
+  const a = loadWorker({ version: 'a', fetch: async () => html('A home') });
+  await dispatchLifecycle(a, 'install');
+  await dispatchLifecycle(a, 'activate');
+  const chunk = request('/_app/immutable/chunks/shared.js');
+  const page = request('/app/analysis/', { mode: 'navigate' });
+  await (await a.caches.open(a.context.CACHE_NAME)).put(chunk, basic('shared chunk'));
+  const b = loadWorker({ version: 'b', fetch: async () => html('B analysis'), caches: a.caches });
+  await dispatchLifecycle(b, 'install');
+  await dispatchLifecycle(b, 'activate');
+  for (const [req, expected] of [
+    [page, 'B analysis'],
+    [chunk, 'shared chunk'],
+  ]) {
+    const event = fetchEvent(req);
+    b.listeners.fetch(event);
+    assert.equal(await (await event.response).text(), expected);
+    assert.equal(event.pending.length, 1, 'cache writes keep the fetch event alive');
+    await Promise.all(event.pending);
+  }
+  assert.ok(!b.state.fetches.includes(chunk.url));
+  const c = loadWorker({ version: 'c', fetch: async () => html('C home'), caches: a.caches });
+  await dispatchLifecycle(c, 'install');
+  await dispatchLifecycle(c, 'activate');
+  assert.ok(!(await a.caches.keys()).includes(a.context.CACHE_NAME));
+  c.state.fetch = async () => {
+    throw new TypeError('offline');
+  };
+  for (const [req, expected] of [
+    [page, 'B analysis'],
+    [chunk, 'shared chunk'],
+  ]) {
+    const event = fetchEvent(req);
+    c.listeners.fetch(event);
+    assert.equal(await (await event.response).text(), expected);
+    await Promise.all(event.pending);
+  }
+});
+
 test('rollback retains the active worker’s offline pages and chunks despite cache creation order', async () => {
   const html = (body) => basic(body, { contentType: 'text/html' });
   const a = loadWorker({ version: 'a', fetch: async () => html('A home') });
@@ -454,6 +494,20 @@ test('a slow navigation with nothing cached keeps waiting for the network', asyn
   const worker = loadWorker({ fetch: () => new Promise((done) => setTimeout(() => done(basic('late', { contentType: 'text/html' })), 60)) });
   const response = await worker.context.networkFirst(request('/docs/', { mode: 'navigate' }), { timeoutMs: 10 });
   assert.equal(await response.text(), 'late');
+});
+
+test('offline navigation prefers an exact query match to an earlier page at the same path', async () => {
+  const worker = loadWorker({
+    fetch: async () => {
+      throw new TypeError('offline');
+    },
+  });
+  const cache = await worker.caches.open(worker.context.CACHE_NAME);
+  await cache.put('/app/analysis/?fen=first', basic('older page', { contentType: 'text/html' }));
+  await cache.put('/app/analysis/?fen=second', basic('exact page', { contentType: 'text/html' }));
+  const event = fetchEvent(request('/app/analysis/?fen=second', { mode: 'navigate' }));
+  worker.listeners.fetch(event);
+  assert.equal(await (await event.response).text(), 'exact page');
 });
 
 test('an offline navigation falls back to the page, then to the app shell', async () => {

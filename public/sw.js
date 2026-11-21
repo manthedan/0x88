@@ -137,18 +137,27 @@ async function precacheShell() {
 
 async function cacheFirst(request, waitUntil) {
   const cache = await caches.open(CACHE_NAME);
-  const cached = (await cache.match(request)) ?? (await (await previousCache(cache))?.match(request));
+  const cached = await cache.match(request);
   if (cached) return cached;
+  const previous = await (await previousCache(cache))?.match(request);
+  if (previous) {
+    waitUntil(cache.put(request, previous.clone()).catch(() => undefined));
+    return previous;
+  }
   const response = await fetch(request);
   if (cacheable(response)) waitUntil(cache.put(request, response.clone()).catch(() => undefined));
   return response;
 }
 
 async function cachedNavigation(request, cache) {
-  if (request.mode !== 'navigate') return cache.match(request);
+  const exact = await cache.match(request);
+  if (exact || request.mode !== 'navigate') return exact;
   const options = { ignoreSearch: true };
-  return (await cache.match(request, options)) ??
-    (await (await previousCache(cache))?.match(request, options)) ??
+  const samePath = await cache.match(request, options);
+  if (samePath) return samePath;
+  const previous = await previousCache(cache);
+  return (await previous?.match(request)) ??
+    (await previous?.match(request, options)) ??
     (await cache.match(APP_SHELL_FALLBACK));
 }
 
