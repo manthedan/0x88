@@ -114,6 +114,14 @@ async function probeHttpCache(url: string, signal: AbortSignal): Promise<boolean
   return response.ok;
 }
 
+function headAbortSignal(group: AbortSignal, head: AbortController): { signal: AbortSignal; cleanup?: () => void } {
+  if (typeof AbortSignal.any === 'function') return { signal: AbortSignal.any([group, head.signal]) };
+  const forwardAbort = () => head.abort(group.reason);
+  if (group.aborted) forwardAbort();
+  else group.addEventListener('abort', forwardAbort, { once: true });
+  return { signal: head.signal, cleanup: () => group.removeEventListener('abort', forwardAbort) };
+}
+
 /** Only HTTP success and 404/410 are definitive. A bounded transient failure
  * leaves availability unknown until the third attempt, then settles missing for
  * the session so existing pickers stop displaying checking indefinitely. */
@@ -149,7 +157,8 @@ export async function probeAssetUrls(
   (timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
   if (signal?.aborted) abort();
   const head = globalThis.navigator?.onLine === false ? undefined : new AbortController();
-  const headSignal = head && AbortSignal.any([controller.signal, head.signal]);
+  const headAbort = head && headAbortSignal(controller.signal, head);
+  const headSignal = headAbort?.signal;
   let headTimer: ReturnType<typeof setTimeout> | undefined;
   const headDeadline =
     head &&
@@ -197,6 +206,7 @@ export async function probeAssetUrls(
     notifyAssetProbeChange(urls);
     clearTimeout(timer);
     clearTimeout(headTimer);
+    headAbort?.cleanup?.();
     signal?.removeEventListener('abort', abort);
   }
 }
