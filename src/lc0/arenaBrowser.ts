@@ -2967,7 +2967,7 @@ function pruneUnusedLc0Searchers(activeIds: Set<string>): void {
   }
 }
 
-function disposeUnusedUciEngines(rows = activeSeatRows()): void {
+function disposeUnusedUciEngines(rows: readonly EngineRow[] = activeSeatRows()): void {
   recklessEngines.retain(rows.filter((row) => row.family === 'reckless').map((row) => recklessVariantForKey(row.variant)));
   viridithasEngines.retain(rows.filter((row) => row.family === 'viridithas').map((row) => viridithasVariantForKey(row.variant)));
   berserkEngines.retain(rows.filter((row) => row.family === 'berserk').map((row) => berserkVariantForKey(row.variant)));
@@ -3902,6 +3902,31 @@ function clearStartPending(): void {
   syncArenaPhase();
 }
 
+function arenaCpuWorkerKey(row: EngineRow): string | undefined {
+  switch (row.family) {
+    case 'sf':
+      return row.variant === 'full' ? 'full' : 'lite';
+    case 'reckless':
+      return recklessCacheKey(recklessVariantForKey(row.variant));
+    case 'viridithas':
+      return viridithasCacheKey(viridithasVariantForKey(row.variant));
+    case 'berserk':
+      return berserkCacheKey(berserkVariantForKey(row.variant));
+    case 'plentychess':
+      return plentyChessCacheKey(plentyChessVariantForKey(row.variant));
+    case 'stormphrax':
+      return stormphraxCacheKey(stormphraxVariantForKey(row.variant));
+    default:
+      return undefined;
+  }
+}
+
+function sharesArenaCpuWorker(white: EngineRow, black: EngineRow): boolean {
+  if (white.family !== black.family) return false;
+  const key = arenaCpuWorkerKey(white);
+  return key !== undefined && key === arenaCpuWorkerKey(black);
+}
+
 function createIsolatedCpuEngine(row: EngineRow): BrowserUciEngine {
   if (row.family === 'sf')
     return new StockfishEngine(
@@ -4567,8 +4592,14 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
         const black = byPid.get(blackId)!;
         const whiteEngine = white.engine!;
         const blackEngine = black.engine!;
-        const pairRows = [rowForEngineId(whiteEngine.id), rowForEngineId(blackEngine.id)].filter((row) => row !== undefined);
+        const pairRows = [seatRows[white.index], seatRows[black.index]] as const;
         if (constrained) {
+          if (sharesArenaCpuWorker(...pairRows)) {
+            enginesReady = true;
+            el('message').textContent = 'Preparing private CPU workers…';
+            await runIsolatedCpuTournament(schedule, [i], byPid, matchAbort.signal, completeGame);
+            continue;
+          }
           disposeStockfish(pairRows);
           disposeUnusedUciEngines(pairRows);
           await warmUpSelectedEngines([whiteEngine.id, blackEngine.id], matchAbort.signal, enginesReady ? 0 : minimumWarmupVisibleMs);
