@@ -40,6 +40,7 @@ export interface EmscriptenUciEngineConfig {
   factoryGlobal: string;
   /** Appended to glue/module load failures so a missing artifact names its rebuild command. */
   missingArtifactHint?: string;
+  startupPreloadPath?: string;
   /**
    * Longest UCI command (in bytes) the engine reads without truncating it. A
    * longer `position ... moves ...` is re-rooted at the last irreversible move,
@@ -77,7 +78,9 @@ function abortError(message: string): Error {
   return error;
 }
 
-export function emscriptenUciWorkerScript(config: Pick<EmscriptenUciEngineConfig, 'label' | 'factoryGlobal' | 'missingArtifactHint'>): string {
+export function emscriptenUciWorkerScript(
+  config: Pick<EmscriptenUciEngineConfig, 'label' | 'factoryGlobal' | 'missingArtifactHint' | 'startupPreloadPath'>,
+): string {
   // The factory global is spliced in as an identifier (a `var` declared by
   // importScripts may not be a property of `self` in every engine).
   if (!/^[A-Za-z_$][\w$]*$/.test(config.factoryGlobal)) throw new Error(`Invalid Emscripten factory global: ${config.factoryGlobal}`);
@@ -88,6 +91,7 @@ ${engineArtifactWorkerScript()}
 const resolveEmscriptenAssetUrl = ${resolveEmscriptenAssetUrl.toString()};
 const ENGINE_LABEL = ${label};
 const MISSING_ARTIFACT_HINT = ${JSON.stringify(config.missingArtifactHint ?? null)};
+const STARTUP_PRELOAD_PATH = ${JSON.stringify(config.startupPreloadPath ?? null)};
 function artifactLoadError(error, urls) {
   if (!MISSING_ARTIFACT_HINT) return error;
   const detail = error && error.message ? error.message : String(error);
@@ -143,6 +147,14 @@ async function init(id, jsUrl, wasmUrl, dataUrl, trustedJsUrl) {
         const bytes = dataBytes;
         dataBytes = null;
         return bytes;
+      },
+      postRun(mod) {
+        if (!STARTUP_PRELOAD_PATH) return;
+        try {
+          mod.FS_unlink(STARTUP_PRELOAD_PATH);
+        } catch (error) {
+          if (error.errno !== 44) throw error; // WASI ENOENT (e.g. a local build with a different net filename).
+        }
       },
       locateFile(file) {
         return resolveEmscriptenAssetUrl(file, { jsUrl: resolvedJsUrl, wasmUrl: resolvedWasmUrl, dataUrl: resolvedDataUrl });

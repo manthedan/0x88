@@ -19,6 +19,7 @@ const STORMPHRAX_CONFIG: EmscriptenUciEngineConfig = {
   name: 'stormphrax-emscripten',
   label: 'Stormphrax',
   factoryGlobal: 'Stormphrax',
+  startupPreloadPath: '/undertown.nnue',
 };
 
 export function stormphraxGoCommand(options: StormphraxOptions): string {

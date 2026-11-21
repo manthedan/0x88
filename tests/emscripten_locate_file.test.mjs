@@ -105,6 +105,49 @@ test('every Emscripten worker can resolve its pinned sidecars at runtime', async
   }
 });
 
+for (const [family, factoryName, script, netPath] of [
+  ['stormphrax', 'Stormphrax', stormphraxWorkerScript(), '/undertown.nnue'],
+  ['plentychess', 'PlentyChess', plentyChessWorkerScript(), '/processed.bin'],
+]) {
+  test(`${factoryName} releases the mounted NNUE after startup and still searches after ucinewgame`, { timeout: 15_000 }, async () => {
+    const asset = `/${family}/${family}-emscripten`;
+    const workerUrl = new URL('https://app.example/worker.js');
+    const lines = [];
+    let reply;
+    let mod;
+    const context = {
+      location: workerUrl,
+      WorkerGlobalScope: class {},
+      URL, Blob, TextDecoder, Uint8Array, setTimeout, clearTimeout, performance,
+      crypto: webcrypto,
+      fetch: async (url) => new Response(readFileSync(new URL(`../public${new URL(url).pathname}`, import.meta.url))),
+      importScripts() {
+        runInNewContext(readFileSync(new URL(`../public${asset}.js`, import.meta.url), 'utf8'), context);
+        const factory = context[factoryName];
+        context[factoryName] = async (options) => (mod = await factory(options));
+      },
+      postMessage(message) {
+        if (message.type === 'line') lines.push(message.line);
+        else if (message.type === 'error' || message.type === reply.type) reply.resolve(message);
+      },
+    };
+    context.self = context;
+    runInNewContext(script, context);
+    let id = 0;
+    const send = async (msg, type) => {
+      reply = { ...Promise.withResolvers(), type };
+      context.onmessage({ data: { ...msg, id: ++id, jsUrl: `${asset}.js` } });
+      const result = await reply.promise;
+      assert.equal(result.type, type, result.message);
+    };
+    await send({ type: 'init' }, 'ready');
+    assert.throws(() => mod.FS_unlink(netPath), { errno: 44 }, 'the preload is already unlinked');
+    for (const command of ['ucinewgame', 'isready', 'position startpos', 'go depth 1']) await send({ type: 'command', command }, 'commandDone');
+    assert.ok(lines.includes('readyok'));
+    assert.ok(lines.some((line) => /^bestmove [a-h][1-8][a-h][1-8]/.test(line)), lines.join('\n'));
+  });
+}
+
 // The resolver above is only half the contract. It is the *generated* glue that
 // decides whether to consult Module.locateFile at all: if a future Emscripten
 // version or build flag emitted a package fetch that bypassed the hook, every
