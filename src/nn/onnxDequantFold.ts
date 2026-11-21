@@ -295,6 +295,162 @@ function floatReader(t: TensorInfo): TensorReader | null {
 
 type DequantPlan = { total: number; write(view: DataView, offset: number, dataType: number): void };
 
+const IS_LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+const NativeFloat16Array = (globalThis as { Float16Array?: Float16ArrayConstructor }).Float16Array;
+const F16_SCRATCH_LEN = 4096;
+let f16Scratch: InstanceType<Float16ArrayConstructor> | undefined;
+let f16ScratchBytes: Uint8Array | undefined;
+let f32ScratchRow: Float32Array | undefined;
+let f32ScratchRowBytes: Uint8Array | undefined;
+
+function getF16Scratch(): { f16: InstanceType<Float16ArrayConstructor>; bytes: Uint8Array } {
+  if (!f16Scratch) {
+    f16Scratch = new NativeFloat16Array!(F16_SCRATCH_LEN);
+    f16ScratchBytes = new Uint8Array(f16Scratch.buffer);
+  }
+  return { f16: f16Scratch, bytes: f16ScratchBytes! };
+}
+
+function getF32ScratchRow(): { f32: Float32Array; bytes: Uint8Array } {
+  if (!f32ScratchRow) {
+    f32ScratchRow = new Float32Array(F16_SCRATCH_LEN);
+    f32ScratchRowBytes = new Uint8Array(f32ScratchRow.buffer);
+  }
+  return { f32: f32ScratchRow, bytes: f32ScratchRowBytes! };
+}
+
+function writePerColumnF16(
+  q: Int8Array | Uint8Array,
+  scales: Float64Array,
+  outer: number,
+  axisDim: number,
+  needFround: boolean,
+  view: DataView,
+  offset: number,
+): void {
+  const total = outer * axisDim;
+  const byteOffset = view.byteOffset + offset;
+  if ((byteOffset & 1) === 0) {
+    const dst = new NativeFloat16Array!(view.buffer, byteOffset, total);
+    if (needFround) {
+      for (let o = 0; o < outer; o++) {
+        const base = o * axisDim;
+        for (let j = 0; j < axisDim; j++) dst[base + j] = Math.fround(q[base + j] * scales[j]);
+      }
+    } else {
+      for (let o = 0; o < outer; o++) {
+        const base = o * axisDim;
+        for (let j = 0; j < axisDim; j++) dst[base + j] = q[base + j] * scales[j];
+      }
+    }
+    return;
+  }
+  const outBytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  const { f16, bytes } = getF16Scratch();
+  for (let o = 0; o < outer; o++) {
+    const base = o * axisDim;
+    for (let j0 = 0; j0 < axisDim; j0 += F16_SCRATCH_LEN) {
+      const len = Math.min(F16_SCRATCH_LEN, axisDim - j0);
+      const srcBase = base + j0;
+      if (needFround) {
+        for (let k = 0; k < len; k++) f16[k] = Math.fround(q[srcBase + k] * scales[j0 + k]);
+      } else {
+        for (let k = 0; k < len; k++) f16[k] = q[srcBase + k] * scales[j0 + k];
+      }
+      outBytes.set(len === F16_SCRATCH_LEN ? bytes : bytes.subarray(0, len * 2), offset + srcBase * 2);
+    }
+  }
+}
+
+function writePerColumnF32(q: Int8Array | Uint8Array, scales: Float64Array, outer: number, axisDim: number, view: DataView, offset: number): void {
+  const total = outer * axisDim;
+  const byteOffset = view.byteOffset + offset;
+  if ((byteOffset & 3) === 0) {
+    const dst = new Float32Array(view.buffer, byteOffset, total);
+    for (let o = 0; o < outer; o++) {
+      const base = o * axisDim;
+      for (let j = 0; j < axisDim; j++) dst[base + j] = q[base + j] * scales[j];
+    }
+    return;
+  }
+  const outBytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  const { f32, bytes } = getF32ScratchRow();
+  for (let o = 0; o < outer; o++) {
+    const base = o * axisDim;
+    for (let j0 = 0; j0 < axisDim; j0 += F16_SCRATCH_LEN) {
+      const len = Math.min(F16_SCRATCH_LEN, axisDim - j0);
+      const srcBase = base + j0;
+      for (let k = 0; k < len; k++) f32[k] = q[srcBase + k] * scales[j0 + k];
+      outBytes.set(len === F16_SCRATCH_LEN ? bytes : bytes.subarray(0, len * 4), offset + srcBase * 4);
+    }
+  }
+}
+
+function writeInnerAxisF16(
+  q: Int8Array | Uint8Array,
+  scales: Float64Array,
+  zeros: Int32Array | null,
+  outer: number,
+  axisDim: number,
+  inner: number,
+  needFround: boolean,
+  view: DataView,
+  offset: number,
+): void {
+  const total = outer * axisDim * inner;
+  const byteOffset = view.byteOffset + offset;
+  if ((byteOffset & 1) === 0) {
+    const dst = new NativeFloat16Array!(view.buffer, byteOffset, total);
+    let idx = 0;
+    for (let o = 0; o < outer; o++) {
+      for (let j = 0; j < axisDim; j++) {
+        const sv = scales[j];
+        const zv = zeros ? zeros[j] : 0;
+        const end = idx + inner;
+        if (zv === 0) {
+          if (needFround) {
+            for (; idx < end; idx++) dst[idx] = Math.fround(q[idx] * sv);
+          } else {
+            for (; idx < end; idx++) dst[idx] = q[idx] * sv;
+          }
+        } else if (needFround) {
+          for (; idx < end; idx++) dst[idx] = Math.fround((q[idx] - zv) * sv);
+        } else {
+          for (; idx < end; idx++) dst[idx] = (q[idx] - zv) * sv;
+        }
+      }
+    }
+    return;
+  }
+  const outBytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  const { f16, bytes } = getF16Scratch();
+  let idx = 0;
+  for (let o = 0; o < outer; o++) {
+    for (let j = 0; j < axisDim; j++) {
+      const sv = scales[j];
+      const zv = zeros ? zeros[j] : 0;
+      let rem = inner;
+      while (rem > 0) {
+        const len = Math.min(F16_SCRATCH_LEN, rem);
+        if (zv === 0) {
+          if (needFround) {
+            for (let k = 0; k < len; k++) f16[k] = Math.fround(q[idx + k] * sv);
+          } else {
+            for (let k = 0; k < len; k++) f16[k] = q[idx + k] * sv;
+          }
+        } else if (needFround) {
+          for (let k = 0; k < len; k++) f16[k] = Math.fround((q[idx + k] - zv) * sv);
+        } else {
+          for (let k = 0; k < len; k++) f16[k] = (q[idx + k] - zv) * sv;
+        }
+        outBytes.set(len === F16_SCRATCH_LEN ? bytes : bytes.subarray(0, len * 2), offset + idx * 2);
+        idx += len;
+        rem -= len;
+      }
+    }
+  }
+}
+
 /** Validate/plan without materializing any dequantized weights. */
 function planDequantize(x: TensorInfo, scale: TensorInfo, zeroPoint: TensorInfo | null, axisAttr: number, blockSize: number): DequantPlan | null {
   const q = integerReader(x);
@@ -326,9 +482,60 @@ function planDequantize(x: TensorInfo, scale: TensorInfo, zeroPoint: TensorInfo 
       if (scale.dims.length !== rank || scale.dims.some((dim, d) => dim !== (d === axis ? blocks : dims[d]))) return null;
     }
   }
+  const rawByteView: Int8Array | Uint8Array | null =
+    x.raw && (x.dataType === ONNX_INT8 || x.dataType === ONNX_UINT8)
+      ? x.dataType === ONNX_INT8
+        ? new Int8Array(x.raw.buffer, x.raw.byteOffset, x.raw.byteLength)
+        : x.raw
+      : null;
+  // An int8/uint8 delta (<= 255, 8 bits) times an f16 scale (11 significand bits) fits
+  // in float32 (24 bits) with zero rounding error, so Math.fround is redundant.
+  const needFround = scale.dataType !== ONNX_FLOAT16;
+
   return {
     total,
     write(view, offset, dataType) {
+      if (IS_LITTLE_ENDIAN && rawByteView && blockSize === 0) {
+        if (scalar) {
+          const sv = s.at(0);
+          const zv = zp ? zp.at(0) : 0;
+          if (Number.isFinite(sv) && dataType === ONNX_FLOAT16 && NativeFloat16Array) {
+            const scales = Float64Array.of(sv);
+            const zeros = zv === 0 ? null : Int32Array.of(zv);
+            writeInnerAxisF16(rawByteView, scales, zeros, 1, 1, total, needFround, view, offset);
+            return;
+          }
+        } else {
+          const scales = new Float64Array(axisDim);
+          let allFinite = true;
+          for (let j = 0; j < axisDim; j++) {
+            const sv = s.at(j);
+            scales[j] = sv;
+            if (!Number.isFinite(sv)) allFinite = false;
+          }
+          if (allFinite) {
+            if (inner === 1 && !zp) {
+              if (dataType === ONNX_FLOAT16 && NativeFloat16Array) {
+                writePerColumnF16(rawByteView, scales, outer, axisDim, needFround, view, offset);
+                return;
+              }
+              if (dataType === ONNX_FLOAT) {
+                writePerColumnF32(rawByteView, scales, outer, axisDim, view, offset);
+                return;
+              }
+            } else if (dataType === ONNX_FLOAT16 && NativeFloat16Array) {
+              let zeros: Int32Array | null = null;
+              if (zp) {
+                zeros = new Int32Array(axisDim);
+                for (let j = 0; j < axisDim; j++) zeros[j] = zp.at(j);
+              }
+              writeInnerAxisF16(rawByteView, scales, zeros, outer, axisDim, inner, needFround, view, offset);
+              return;
+            }
+          }
+        }
+      }
+
       // Keep the old f64 -> f32 -> f16 rounding, not direct f64 -> f16.
       // Native half IO is exact for finite values; NaNs retain the legacy encoding.
       const half = view as DataView & { setFloat16?: (offset: number, value: number, littleEndian?: boolean) => void };
@@ -521,7 +728,14 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
   if (!graphField) return unchanged(0);
   const graphFields = parseProtoFields(model, graphField.valueStart, graphField.valueEnd);
 
-  const nodes: NodeInfo[] = [];
+  const dql: NodeInfo[] = [];
+  for (const f of graphFields) {
+    if (f.wire !== WIRE_LEN || f.field !== 1) continue;
+    const node = parseNode(model, f);
+    if (node.opType === 'DequantizeLinear' && (node.domain === '' || node.domain === 'ai.onnx')) dql.push(node);
+  }
+  if (dql.length === 0) return unchanged(0);
+
   const initializers = new Map<string, { field: Field; info: TensorInfo | null }>();
   const graphInputs = new Set<string>();
   const graphOutputs = new Set<string>();
@@ -529,7 +743,6 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
   for (const f of graphFields) {
     if (f.wire !== WIRE_LEN) continue;
     if (f.field === 1) {
-      nodes.push(parseNode(model, f));
       countNodeConsumers(model, f, consumers);
     } else if (f.field === 5) {
       const nameField = parseProtoFields(model, f.valueStart, f.valueEnd).find((t) => t.field === 8);
@@ -539,8 +752,6 @@ export function foldOnnxDequantizeLinear(model: Uint8Array): OnnxDequantFoldResu
       for (const t of parseProtoFields(model, f.valueStart, f.valueEnd)) if (t.field === 1) target.add(fieldString(model, t));
     }
   }
-  const dql = nodes.filter((n) => n.opType === 'DequantizeLinear' && (n.domain === '' || n.domain === 'ai.onnx'));
-  if (dql.length === 0) return unchanged(0);
 
   const tensor = (name: string): TensorInfo | null => {
     const entry = initializers.get(name);
