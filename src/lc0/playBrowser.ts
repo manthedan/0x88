@@ -29,6 +29,7 @@ import { createRootDom, htmlEscape, type RootDom } from './browserDom.ts';
 import {
   BIG_NETS,
   bigNetAssetStatusSync,
+  bigNetBackendUsesWasm,
   bigNetCpuWarning,
   bigNetMemoryCaution,
   bigNetOptionState,
@@ -328,12 +329,12 @@ function ctxPersistPlayPreferences(ctx: PlayContext): void {
   savePlayPreferences(playPreferenceStorage(), ctx.opponent.active);
 }
 
-function ctxStrengthFor(option: PlayEngineOption, level: number): number {
+function ctxStrengthFor(option: PlayEngineOption, level: number, backend?: string): number {
   if (option.family === 'maia3') return 1;
   if (option.family === 'sf') return SF_LEVELS[level].depth;
   if (option.family === 'lc0' && option.variant !== 'small') {
-    if (!bt4SupportedSync()) return BIG_NETS[option.variant as BigNetKey].wasmLevels[level];
-    return BIG_NET_LEVELS[level];
+    const usesWasm = backend === undefined ? !bt4SupportedSync() : bigNetBackendUsesWasm(backend);
+    return (usesWasm ? BIG_NETS[option.variant as BigNetKey].wasmLevels : BIG_NET_LEVELS)[level];
   }
   return enginePlayLevels(option.family)[level];
 }
@@ -527,7 +528,6 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
   if (signal.aborted || ctx.disposed) return null;
   const preferences = ctx.opponent.active;
   const level = preferences.level;
-  const visitsOrDepth = ctxStrengthFor(option, level);
   if (option.family === 'lc0' && option.variant === 'lqo') {
     const historyUcis = ctx.moves.map(moveToUci);
     if (ctx.humanColor === 'w') {
@@ -588,13 +588,14 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
   if (option.family === 'centipawn') {
     const evaluator = await engines.ensureCentipawn(ctx.engineUi, ctx.centipawnAssets);
     if (signal.aborted) return null;
+    const visits = ctxStrengthFor(option, level);
     try {
       const result = await chooseMove(ctx.board, evaluator, {
-        visits: visitsOrDepth,
+        visits,
         // Same visit-argmax move as the full budget once the leader cannot be caught.
         // docs/play_early_stop_2026-10.md. Big-net Play searches stay fixed-visit.
         earlyStop: 'root-dominance',
-        batchSize: Math.max(1, Math.min(32, visitsOrDepth)),
+        batchSize: Math.max(1, Math.min(32, visits)),
         signal,
         historyFens: searchHistoryFens(ctx.positions, ctx.positions.length),
         ...centipawnSearchOptions,
@@ -621,7 +622,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
       const result = await searcher.search(
         { positions: ctx.positions },
         {
-          visits: visitsOrDepth,
+          visits: ctxStrengthFor(option, level),
           // Same visit-argmax move as the full budget once the leader cannot be caught.
           // docs/play_early_stop_2026-10.md. Big-net Play searches stay fixed-visit.
           earlyStop: 'root-dominance',
@@ -654,7 +655,7 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
       const result = await searcher.search(
         { positions: ctx.positions },
         {
-          visits: visitsOrDepth,
+          visits: (backend) => ctxStrengthFor(option, level, backend),
           reuseTree: true,
           batchSize: searcher.config.recommendedBatchSize,
           batchPipelineDepth: searcher.config.recommendedPipelineDepth,
@@ -681,10 +682,11 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
     }
   }
   const engine = await engines.cpuEngineForMove(option, signal, ctx.engineUi);
+  const depth = ctxStrengthFor(option, level);
   if (option.family === 'sf') {
-    engine.setOptions({ depth: visitsOrDepth, movetimeMs: undefined, skillLevel: SF_LEVELS[level].skill });
+    engine.setOptions({ depth, movetimeMs: undefined, skillLevel: SF_LEVELS[level].skill });
   } else {
-    engine.setOptions({ depth: visitsOrDepth, movetimeMs: undefined });
+    engine.setOptions({ depth, movetimeMs: undefined });
   }
   // ctx.positions runs from the game's start to ctx.board; sending it as moves
   // lets the engine see repetitions and the 50-move clock.
