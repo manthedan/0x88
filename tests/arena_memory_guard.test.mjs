@@ -6,6 +6,7 @@ import { ARENA_BIG_NET_MEMORY_REASON, arenaBigNetPairingBlocked, arenaBigNetSeat
 import { arenaCpuOnlyPool } from '../src/lc0/arenaScheduleRunner.ts';
 import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
+import { DisposableVariantPool } from '../src/lc0/disposableVariantPool.ts';
 import { PHONE_LARGE_NET_REASON, phoneSafeEngineVariant } from '../src/lc0/phoneLargeNetPolicy.ts';
 
 const big = (variant) => ({ family: 'lc0', variant, strength: 100 });
@@ -154,6 +155,9 @@ test('safe gauntlet warmup uses only each game on phones; desktop still warms th
         ['1', { engine: { id: 'lc0:bt4:100' } }],
         ['2', { engine: { id: 'lc0:t3:100' } }],
       ]),
+      rowForEngineId: () => undefined,
+      disposeStockfish() {},
+      disposeUnusedUciEngines() {},
       async warmUpSelectedEngines(ids) {
         calls.push(ids);
         for (const id of ids) {
@@ -181,6 +185,75 @@ test('safe gauntlet warmup uses only each game on phones; desktop still warms th
     );
     pool.disposeAllNow();
   }
+});
+
+test('constrained Arena retires CPUs outside the next pairing and disposes the final pairing on exit', async () => {
+  const resident = new Set();
+  const families = ['stormphrax', 'plentychess', 'berserk', 'reckless', 'viridithas'];
+  const pools = Object.fromEntries(
+    families.map((family) => [
+      family,
+      new DisposableVariantPool(
+        (key) => key,
+        () => {
+          resident.add(family);
+          return { dispose: () => resident.delete(family) };
+        },
+      ),
+    ]),
+  );
+  const seatIds = families.slice(0, 3);
+  const schedule = [
+    { whiteId: 'stormphrax', blackId: 'plentychess' },
+    { whiteId: 'plentychess', blackId: 'berserk' },
+  ];
+  const matchAbort = new AbortController();
+  let warmups = 0;
+  const deps = {
+    matchAbort,
+    abort: matchAbort,
+    checkpointWrites: Promise.resolve(),
+    isMemoryConstrainedDevice: () => true,
+    isStaleMount: () => false,
+    mountSignal: matchAbort.signal,
+    schedule,
+    seatIds,
+    minimumWarmupVisibleMs: 0,
+    pendingIndices: [0, 1],
+    byPid: new Map(seatIds.map((id) => [id, { engine: { id } }])),
+    rowForEngineId: (id) => ({ family: id, variant: id }),
+    isolatedCpuEngines: new Set(),
+    isolatedCpuSeats: new Map(),
+    async warmUpSelectedEngines(ids) {
+      assert.deepEqual([...resident], warmups++ === 0 ? [] : ['plentychess'], 'evict before warming the next pair');
+      for (const id of ids) pools[id].getOrCreate(id);
+    },
+  };
+  for (const family of families) {
+    const prefix = family === 'plentychess' ? 'plentyChess' : family;
+    deps[`${prefix}Engines`] = pools[family];
+    deps[`${prefix}VariantForKey`] = (key) => key;
+  }
+  const warmup = extract(
+    '      const constrained = isMemoryConstrainedDevice();\n      if (!constrained) {',
+    '        resetLc0SearchTrees(seatIds);\n        for (const key of ARENA_BIG_NET_KEYS)',
+    (text) => `async function warmup() { let enginesReady = false;\n${text}\n} }`,
+  );
+  const match = source.slice(source.indexOf('  let enginesReady = false;'), source.indexOf('\nasync function startMatch('));
+  const cleanup = match.slice(match.lastIndexOf('  } finally {'), match.indexOf('    const ownsMatchState = abort === matchAbort;'));
+  const run = new Function(
+    'deps',
+    `const { ${Object.keys(deps).join(', ')} } = deps;
+    let stockfishLite = null, stockfishFull = null;
+    ${extract('function disposeStockfish(', 'function availableRecklessVariants(')}
+    ${extract('function disposeUnusedUciEngines(', 'function reconcileArenaNeuralSessions(')}
+    ${extract('function disposeArenaCpuEngines(', 'function disposeRuntimeResources(')}
+    ${warmup}
+    return async function() { try { await warmup(); ${cleanup} } };`,
+  )(deps);
+  await run();
+  assert.equal(warmups, 2);
+  assert.deepEqual([...resident], []);
 });
 
 test('Arena diagnostic rendering never acquires or replaces a resident net', () => {

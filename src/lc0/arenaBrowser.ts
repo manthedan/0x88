@@ -2636,11 +2636,15 @@ function stockfishEngineFor(kind: 'lite' | 'full'): StockfishEngine {
   return stockfishFull;
 }
 
-function disposeStockfish(): void {
-  stockfishLite?.dispose();
-  stockfishLite = null;
-  stockfishFull?.dispose();
-  stockfishFull = null;
+function disposeStockfish(keep: readonly EngineRow[] = []): void {
+  if (!keep.some((row) => row.family === 'sf' && row.variant !== 'full')) {
+    stockfishLite?.dispose();
+    stockfishLite = null;
+  }
+  if (!keep.some((row) => row.family === 'sf' && row.variant === 'full')) {
+    stockfishFull?.dispose();
+    stockfishFull = null;
+  }
 }
 
 function availableRecklessVariants(): RecklessVariant[] {
@@ -2963,8 +2967,7 @@ function pruneUnusedLc0Searchers(activeIds: Set<string>): void {
   }
 }
 
-function disposeUnusedUciEngines(): void {
-  const rows = activeSeatRows();
+function disposeUnusedUciEngines(rows = activeSeatRows()): void {
   recklessEngines.retain(rows.filter((row) => row.family === 'reckless').map((row) => recklessVariantForKey(row.variant)));
   viridithasEngines.retain(rows.filter((row) => row.family === 'viridithas').map((row) => viridithasVariantForKey(row.variant)));
   berserkEngines.retain(rows.filter((row) => row.family === 'berserk').map((row) => berserkVariantForKey(row.variant)));
@@ -4564,7 +4567,10 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
         const black = byPid.get(blackId)!;
         const whiteEngine = white.engine!;
         const blackEngine = black.engine!;
+        const pairRows = [rowForEngineId(whiteEngine.id), rowForEngineId(blackEngine.id)].filter((row) => row !== undefined);
         if (constrained) {
+          disposeStockfish(pairRows);
+          disposeUnusedUciEngines(pairRows);
           await warmUpSelectedEngines([whiteEngine.id, blackEngine.id], matchAbort.signal, enginesReady ? 0 : minimumWarmupVisibleMs);
           enginesReady = true;
         }
@@ -4574,7 +4580,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
           if (!searcher) continue;
           if (searcher.loaded) await searcher.resetTree();
         }
-        for (const engine of cpuEnginesToResetForGame([rowForEngineId(whiteEngine.id), rowForEngineId(blackEngine.id)])) {
+        for (const engine of cpuEnginesToResetForGame(pairRows)) {
           await engine.newGame(matchAbort.signal);
         }
         if (isStaleMount(mountSignal) || matchAbort.signal.aborted) break;
@@ -4608,6 +4614,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       }
     }
   } finally {
+    if (abort === matchAbort && isMemoryConstrainedDevice()) disposeArenaCpuEngines();
     await checkpointWrites;
     const ownsMatchState = abort === matchAbort;
     if (ownsMatchState) {
