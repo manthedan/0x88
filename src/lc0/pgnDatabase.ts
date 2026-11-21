@@ -406,19 +406,14 @@ export async function importPgnDatabaseBackup(
   return collections.length;
 }
 
-async function persistRebuiltIndexes(db: IDBDatabase, rebuilt: PgnCollectionRecord[]): Promise<void> {
+async function persistRebuiltIndex(db: IDBDatabase, rebuilt: PgnCollectionRecord): Promise<void> {
+  const { id, pgn, positionIndex, indexVersion, indexedPositionCount, gameCount } = rebuilt;
   const tx = db.transaction([STORE, META_STORE], 'readwrite');
-  const store = tx.objectStore(STORE);
-  await Promise.all([
-    transactionDone(tx),
-    (async () => {
-      for (const { id, pgn, positionIndex, indexVersion, indexedPositionCount, gameCount } of rebuilt) {
-        const current = await requestToPromise<PgnCollectionRecord | undefined>(store.get(id));
-        if (current?.pgn !== pgn || current.indexVersion === OPENING_INDEX_VERSION) continue;
-        writeCollection(tx, { ...current, positionIndex, indexVersion, indexedPositionCount, gameCount });
-      }
-    })(),
-  ]);
+  const current = await requestToPromise<PgnCollectionRecord | undefined>(tx.objectStore(STORE).get(id));
+  if (current?.pgn === pgn && current.indexVersion !== OPENING_INDEX_VERSION) {
+    writeCollection(tx, { ...current, positionIndex, indexVersion, indexedPositionCount, gameCount });
+  }
+  await transactionDone(tx);
 }
 
 export async function searchPgnCollectionsByPosition(fen: string): Promise<PgnPositionSearchResult[]> {
@@ -426,20 +421,19 @@ export async function searchPgnCollectionsByPosition(fen: string): Promise<PgnPo
   const db = await openDatabase();
   try {
     const records = await requestToPromise<PgnCollectionRecord[]>(db.transaction(STORE, 'readonly').objectStore(STORE).getAll());
-    const rebuilt: PgnCollectionRecord[] = [];
-    const results = records
-      .map((record) => {
-        if (record.indexVersion !== OPENING_INDEX_VERSION) {
-          record = rebuildPgnCollectionIndex(record);
-          rebuilt.push(record);
-        }
-        const stats = record.positionIndex?.[key] ?? [];
-        return { summary: collectionSummary(record), stats, total: openingSummary(stats).total };
-      })
-      .filter((result) => result.total > 0)
-      .sort((a, b) => b.total - a.total || b.summary.updatedAt - a.summary.updatedAt || a.summary.name.localeCompare(b.summary.name));
-    if (rebuilt.length) await persistRebuiltIndexes(db, rebuilt).catch(() => {});
-    return results;
+    const results: PgnPositionSearchResult[] = [];
+    records.reverse();
+    while (records.length) {
+      let record = records.pop()!;
+      if (record.indexVersion !== OPENING_INDEX_VERSION) {
+        record = rebuildPgnCollectionIndex(record);
+        await persistRebuiltIndex(db, record).catch(() => {});
+      }
+      const stats = record.positionIndex?.[key] ?? [];
+      const total = openingSummary(stats).total;
+      if (total > 0) results.push({ summary: collectionSummary(record), stats, total });
+    }
+    return results.sort((a, b) => b.total - a.total || b.summary.updatedAt - a.summary.updatedAt || a.summary.name.localeCompare(b.summary.name));
   } finally {
     db.close();
   }

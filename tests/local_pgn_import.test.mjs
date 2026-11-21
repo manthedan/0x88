@@ -283,6 +283,18 @@ for (const version of [1, 2]) {
   });
 }
 
+test('each stale collection index is committed before processing the next collection', async () => {
+  installMemoryIdb();
+  await savePgnCollection({ id: 'a', name: 'Playable', pgn, gameCount: 1 });
+  await savePgnCollection({ id: 'b', name: 'Invalid', pgn: '1. notamove *', gameCount: 1 });
+
+  await assert.rejects(searchPgnCollectionsByPosition(START_FEN), /Invalid PGN move/);
+  const first = await loadPgnCollection('a');
+  assert.equal(first.indexVersion, OPENING_INDEX_VERSION);
+  assert.deepEqual(first.positionIndex, (await importStoredPgn(pgn)).positionIndex);
+  assert.equal((await listPgnCollections()).find(({ id }) => id === 'a').indexVersion, OPENING_INDEX_VERSION);
+});
+
 test('IndexedDB denied, missing, and blocked failures settle without hanging', async () => {
   Object.defineProperty(globalThis, 'indexedDB', { value: undefined, configurable: true });
   await assert.rejects(listPgnCollections(), /unavailable/);
