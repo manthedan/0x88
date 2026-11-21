@@ -195,6 +195,32 @@ test('the shell page is precached with its build chunks and shell files', async 
   ]);
 });
 
+const ROOT_ERROR_STYLE = '/_app/immutable/assets/1.error.css';
+const SHELL_WITH_ROOT_ERROR_STYLE = `${SHELL_HTML}<meta name="0x88-shell-style" content="${ROOT_ERROR_STYLE}">`;
+
+test('the error-node stylesheet is available offline without a link on the Play page', async () => {
+  const worker = loadWorker({
+    fetch: async (input) =>
+      input === '/app/play/' ? basic(SHELL_WITH_ROOT_ERROR_STYLE, { contentType: 'text/html' }) : basic('root error style'),
+  });
+  await dispatchLifecycle(worker, 'install');
+  worker.state.fetch = () => assert.fail('must serve the required stylesheet from cache');
+  const event = fetchEvent(request(ROOT_ERROR_STYLE));
+  worker.listeners.fetch(event);
+  assert.equal(await (await event.response).text(), 'root error style');
+});
+
+test('an unavailable root error stylesheet prevents the worker from replacing the offline shell', async () => {
+  const worker = loadWorker({
+    fetch: async (input) => {
+      if (input === '/app/play/') return basic(SHELL_WITH_ROOT_ERROR_STYLE, { contentType: 'text/html' });
+      return new URL(input).pathname === ROOT_ERROR_STYLE ? basic('missing', { status: 404 }) : basic('x');
+    },
+  });
+  await assert.rejects(dispatchLifecycle(worker, 'install'), /404/);
+  assert.equal(worker.state.skipped, false);
+});
+
 const failedPrecaches = [
   {
     name: 'network failure',

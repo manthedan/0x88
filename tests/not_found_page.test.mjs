@@ -63,7 +63,7 @@ test('the static adapter writes its fallback shell to 404.html with static not-f
   assert.ok(html.startsWith(`<head>${link('nodes/1.e.js')}${link('chunks/shared.js')}${link('chunks/err.js')}${css}</head>`), html);
   assert.equal(
     await readFile(join(out, 'app/play/index.html'), 'utf8'),
-    `${playHead.replace('</head>', `${link('nodes/1.e.js')}${link('chunks/err.js')}</head>`)}<body></body>`,
+    `${playHead.replace('</head>', `${link('nodes/1.e.js')}${link('chunks/err.js')}<meta name="0x88-shell-style" content="/_app/immutable/assets/1.e.css"></head>`)}<body></body>`,
   );
   assert.equal(config.paths.relative, false, 'cached pages served at other depths need root-absolute build URLs');
   const errorPage = await readFile(join(repoRoot, 'src/routes/+error.svelte'), 'utf8');

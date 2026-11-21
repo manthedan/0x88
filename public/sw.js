@@ -98,10 +98,18 @@ async function precacheShell() {
   // replace the old worker and let activate delete its working offline shell.
   if (!cacheable(response) || !isHtml(response)) throw new Error('Offline navigation shell could not be precached');
   const html = await response.clone().text();
+  const page = new URL(APP_SHELL_FALLBACK, self.location.origin);
+  const requiredStyles = new Set(
+    Array.from(html.matchAll(/<meta name="0x88-shell-style" content="(\/_app\/immutable\/[^"\s]+\.css)">/g), ([, href]) => new URL(href, page).href),
+  );
+  // Other linked chunks/styles are best-effort.
+  await Promise.all([
+    ...Array.from(requiredStyles, (url) => cache.add(url)),
+    ...shellSubresourceUrls(html, page.href)
+      .filter((url) => !requiredStyles.has(url))
+      .map((url) => cache.add(url).catch(() => undefined)),
+  ]);
   await cache.put(APP_SHELL_FALLBACK, response);
-  // Linked chunks/styles are best-effort. They improve offline hydration, but
-  // a failed chunk fetch must not discard an otherwise usable HTML fallback.
-  await Promise.all(shellSubresourceUrls(html, new URL(APP_SHELL_FALLBACK, self.location.origin).href).map((url) => cache.add(url).catch(() => undefined)));
 }
 
 async function cacheFirst(request) {

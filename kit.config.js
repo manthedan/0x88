@@ -77,7 +77,7 @@ export function createAdapter(dir) {
       const html = await readFile(file, 'utf8');
       if (html.split(BODY_TARGET).length !== 2) throw new Error(`404.html: expected one ${BODY_TARGET} from src/app.html`);
       await writeFile(file, html.replace(BODY_TARGET, BODY_TARGET + STATIC_NOT_FOUND));
-      const pages = [...builder.prerendered.pages.values()].map((page) => join(dir, page.file));
+      const pages = [...builder.prerendered.pages].map(([route, page]) => ({ route, file: join(dir, page.file) }));
       await linkRootErrorNode(builder.getServerDirectory(), pages, file);
     },
   };
@@ -90,11 +90,13 @@ async function linkRootErrorNode(serverDir, pages, fallback) {
   const node = await import(pathToFileURL(join(serverDir, 'nodes', '1.js')).href);
   const scripts = node.imports.map((path) => ({ href: `/${path}`, tag: `<link href="/${path}" rel="modulepreload">` }));
   const styles = node.stylesheets.map((path) => ({ href: `/${path}`, tag: `<link href="/${path}" rel="stylesheet">` }));
-  for (const file of [...pages, fallback]) {
+  for (const { file, route } of [...pages, { file: fallback }]) {
     const links = file === fallback ? [...scripts, ...styles] : scripts;
     const html = await readFile(file, 'utf8');
     if (html.split('</head>').length !== 2) throw new Error(`${file}: expected one </head>`);
     const missing = links.filter((link) => !html.includes(`href="${link.href}"`)).map((link) => link.tag);
+    // Vite waits for these styles before resolving the root error node's import.
+    if (route === '/app/play/') missing.push(...styles.map(({ href }) => `<meta name="0x88-shell-style" content="${href}">`));
     if (missing.length) await writeFile(file, html.replace('</head>', `${missing.join('')}</head>`));
   }
 }
