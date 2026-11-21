@@ -61,6 +61,21 @@ test('desktop can select either hosted big net without WebGPU and only sees the 
   }
 });
 
+test('a cached big net running on WASM warns even without a successful asset probe', async (t) => {
+  const config = testConfig('/unit/big-net-cached.onnx');
+  t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 404 }));
+  assert.equal(await probeBt4Support(), false);
+  const assertWarnings = () => {
+    assert.equal(bigNetCpuWarning(config), '', 'do not predict CPU fallback for an unconfirmed asset');
+    assert.match(bigNetCpuWarning(config, 'auto->wasm'), /CPU fallback/);
+    assert.equal(bigNetCpuWarning(config, 'auto->webgpu'), '');
+  };
+  assert.equal(bigNetAssetStatusSync(config), 'unknown');
+  assertWarnings();
+  assert.equal(await checkBigNetAsset(config), 'missing');
+  assertWarnings();
+});
+
 test('production skips known-unhosted big-net asset probes', async () => {
   const originalFetch = globalThis.fetch;
   const originalLocation = Object.getOwnPropertyDescriptor(globalThis, 'location');

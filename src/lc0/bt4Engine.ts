@@ -281,7 +281,7 @@ export function bigNetSelectable(config: BigNetConfig): boolean {
 }
 
 export function bigNetCpuWarning(config: BigNetConfig, backend?: string): string {
-  if (!bigNetSelectable(config) || phoneBigNetBlocked(config.key)) return '';
+  if (phoneBigNetBlocked(config.key) || (!backend && !bigNetSelectable(config))) return '';
   const cpu = backend ? /^(?:[^>]+->)?wasm(?:\[|$)/.test(backend) : supportedCached === false;
   if (!cpu) return '';
   if (config.key === 'lqo') return 'Lc0 Queen Odds: CPU fallback — expect several seconds per move.';
