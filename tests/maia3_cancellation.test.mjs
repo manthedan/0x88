@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
 import { Maia3BrowserEvaluator } from '../src/lc0/maia3.ts';
+import { disposeOrtWorker } from '../src/lc0/disposeOrtWorker.ts';
 
 class WorkerStub extends EventTarget {
   terminated = false;
@@ -17,7 +18,7 @@ class WorkerStub extends EventTarget {
 test('Maia worker initialization can be aborted without waiting for ready', async () => {
   const worker = new WorkerStub();
   const controller = new AbortController();
-  const pending = Maia3BrowserEvaluator.postInit(worker, 'model', 'auto', controller.signal);
+  const pending = Maia3BrowserEvaluator.postInit(worker, async () => ({ model: 'model' }), { ep: 'auto', signal: controller.signal }, () => disposeOrtWorker(worker));
   controller.abort();
   await assert.rejects(pending, { name: 'AbortError' });
   assert.equal(worker.terminated, true);
@@ -25,7 +26,8 @@ test('Maia worker initialization can be aborted without waiting for ready', asyn
 
 test('Maia initialization forwards the report CPU-thread reservation to its worker', async () => {
   const worker = new WorkerStub();
-  const pending = Maia3BrowserEvaluator.postInit(worker, 'model', 'wasm', undefined, 1);
+  const pending = Maia3BrowserEvaluator.postInit(worker, async () => ({ model: 'model' }), { ep: 'wasm', wasmThreads: 1 });
+  await Promise.resolve();
   assert.equal(worker.lastMessage.wasmThreads, 1);
   worker.dispatchEvent(new MessageEvent('message', { data: { type: 'ready', id: 0, inputNames: [], outputNames: [], backend: 'wasm' } }));
   await pending;

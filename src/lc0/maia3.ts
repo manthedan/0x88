@@ -308,7 +308,7 @@ export class Maia3BrowserEvaluator {
   ): Promise<Maia3BrowserEvaluator> {
     const selfElo = clampElo(options.selfElo ?? MAIA3_DEFAULT_ELO);
     const oppoElo = clampElo(options.oppoElo ?? selfElo);
-    const load = (url: string, forceReload = false) =>
+    const load = (url: string, forceReload = false, signal = options.signal) =>
       modelDeps.load(url, {
         cache: true,
         forceReload,
@@ -316,23 +316,26 @@ export class Maia3BrowserEvaluator {
         manifestUrl: MAIA3_MODEL_MANIFEST_URL,
         cacheName: MAIA3_MODEL_CACHE_NAME,
         onProgress: options.onProgress,
-        signal: options.signal,
+        signal,
       });
     const urls = options.modelUrl ? [options.modelUrl] : (options.fallbackUrls ?? maia3ModelFallbackUrls());
-    let modelLoad: Lc0ModelLoadResult;
-    for (let i = 0; ; i++) {
-      const url = urls[i];
-      try {
-        modelLoad = await load(url);
-        break;
-      } catch (error) {
-        const next = urls[i + 1];
-        if (options.signal?.aborted || !next) throw error;
-        console.warn(`Maia3 model ${url} unavailable (${error instanceof Error ? error.message : String(error)}); falling back to ${next}`);
+    const loadFirstAvailable = async (signal: AbortSignal) => {
+      for (let i = 0; ; i++) {
+        const url = urls[i];
+        try {
+          return await load(url, false, signal);
+        } catch (error) {
+          const next = urls[i + 1];
+          if (signal.aborted || !next) throw error;
+          console.warn(`Maia3 model ${url} unavailable (${error instanceof Error ? error.message : String(error)}); falling back to ${next}`);
+        }
       }
-    }
-    const create = async (loaded: Lc0ModelLoadResult) => {
+    };
+    let modelLoad: Lc0ModelLoadResult | undefined;
+    const create = async (loadModel: (signal: AbortSignal) => Promise<Lc0ModelLoadResult>) => {
       options.signal?.throwIfAborted();
+      const loading = new AbortController();
+      const loadSignal = options.signal ? AbortSignal.any([options.signal, loading.signal]) : loading.signal;
       const worker = new Worker(new URL('./maia3Worker.ts', import.meta.url), { type: 'module', name: 'maia3-evaluator' });
       // Publish the close once, synchronously when an abort starts it: an owner's
       // retirement snapshot taken right after abort() must already include it.
@@ -344,15 +347,7 @@ export class Maia3BrowserEvaluator {
         return closing;
       };
       try {
-        const names = await Maia3BrowserEvaluator.postInit(
-          worker,
-          loaded.model,
-          options.ep,
-          options.signal,
-          options.wasmThreads,
-          loaded.sha256Valid === true ? { url: loaded.logicalUrl ?? loaded.url, metadataTrusted: isMetadataTrustedModel(loaded) } : undefined,
-          close,
-        );
+        const { names, loaded } = await Maia3BrowserEvaluator.postInit(worker, async () => (modelLoad = await loadModel(loadSignal)), options, close);
         options.signal?.throwIfAborted();
         const evaluator = new Maia3BrowserEvaluator(worker, loaded, selfElo, oppoElo, names, options.onFailure);
         const abort = () => evaluator.terminate();
@@ -360,6 +355,7 @@ export class Maia3BrowserEvaluator {
         evaluator.abortCleanup = () => options.signal?.removeEventListener('abort', abort);
         return evaluator;
       } catch (error) {
+        loading.abort(error);
         const closed = close();
         if (options.signal?.aborted) void closed.catch(() => undefined);
         else await closed;
@@ -367,31 +363,33 @@ export class Maia3BrowserEvaluator {
       }
     };
     try {
-      return await create(modelLoad);
+      return await create(loadFirstAvailable);
     } catch (error) {
       options.signal?.throwIfAborted();
+      if (!modelLoad) throw error;
       const workerFailure = error as { modelLoad?: Lc0ModelLoadInfo; modelParseError?: boolean } | null;
       const failed = workerFailure?.modelLoad ?? modelLoad;
       if (!(workerFailure?.modelParseError ?? isOnnxModelParseError(error)) || !isMetadataTrustedModel(failed)) throw error;
       await modelDeps.clear(failed.url, MAIA3_MODEL_CACHE_NAME);
       options.signal?.throwIfAborted();
-      const reloaded = { ...(await load(failed.logicalUrl ?? modelLoad.logicalUrl ?? failed.url, true)), revalidated: true };
+      const retryUrl = failed.logicalUrl ?? modelLoad.logicalUrl ?? failed.url;
+      const reloaded = { ...(await load(retryUrl, true)), revalidated: true };
       if (reloaded.verification !== 'hashed' || reloaded.sha256Valid !== true) throw new Error('Maia3 model recovery requires freshly SHA-256-verified bytes');
-      return create(reloaded); // One retry, in a fresh worker; no recursion or artifact fallback.
+      return create(async () => reloaded);
     }
   }
 
   private static postInit(
     worker: Worker,
-    model: string | ArrayBuffer,
-    ep?: Maia3BrowserEvaluatorOptions['ep'],
-    signal?: AbortSignal,
-    wasmThreads?: number,
-    reloadModel?: { url: string; metadataTrusted: boolean },
-    close: () => Promise<void> = () => disposeOrtWorker(worker),
-  ): Promise<{ inputNames: string[]; outputNames: string[]; backend: string; ortRuntime?: OrtSessionDiagnostics }> {
+    load: () => Promise<Lc0ModelLoadResult>,
+    { ep, signal, wasmThreads }: Maia3BrowserEvaluatorOptions,
+    close: () => Promise<void>,
+  ): Promise<{ loaded: Lc0ModelLoadResult; names: { inputNames: string[]; outputNames: string[]; backend: string; ortRuntime?: OrtSessionDiagnostics } }> {
     return new Promise((resolve, reject) => {
+      let loaded: Lc0ModelLoadResult;
+      let initializing = true;
       const cleanup = () => {
+        initializing = false;
         worker.removeEventListener('message', onMessage);
         worker.removeEventListener('error', onError);
         worker.removeEventListener('messageerror', onMessageError);
@@ -425,7 +423,10 @@ export class Maia3BrowserEvaluator {
         if (data.type === 'deviceLost' || data.id !== 0) return;
         if (data.type === 'ready') {
           cleanup();
-          resolve({ inputNames: data.inputNames ?? [], outputNames: data.outputNames ?? [], backend: data.backend ?? 'unknown', ortRuntime: data.ortRuntime });
+          resolve({
+            loaded,
+            names: { inputNames: data.inputNames ?? [], outputNames: data.outputNames ?? [], backend: data.backend ?? 'unknown', ortRuntime: data.ortRuntime },
+          });
         } else if (data.type === 'error') {
           cleanup();
           reject(
@@ -444,18 +445,28 @@ export class Maia3BrowserEvaluator {
         onAbort();
         return;
       }
-      const message = {
-        type: 'init',
-        id: 0,
-        model,
-        ep,
-        wasmThreads,
-        ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(),
-        dequantFold: ortDequantFoldEnabled(MAIA3_ORT_DEFAULTS.dequantFold),
-        ...(reloadModel ? { modelUrl: reloadModel.url, metadataTrustedModel: reloadModel.metadataTrusted } : {}),
-      };
-      if (typeof model === 'string') worker.postMessage(message);
-      else worker.postMessage(message, [model]);
+      void load()
+        .then((result) => {
+          if (!initializing) return;
+          loaded = result;
+          const { model } = loaded;
+          const message = {
+            type: 'init',
+            id: 0,
+            model,
+            ep,
+            wasmThreads,
+            ortDiagnostics: requestedOrtRuntimeDiagnosticOptions(),
+            dequantFold: ortDequantFoldEnabled(MAIA3_ORT_DEFAULTS.dequantFold),
+            ...(loaded.sha256Valid === true ? { modelUrl: loaded.logicalUrl ?? loaded.url, metadataTrustedModel: isMetadataTrustedModel(loaded) } : {}),
+          };
+          if (typeof model === 'string') worker.postMessage(message);
+          else worker.postMessage(message, [model]);
+        })
+        .catch((error: unknown) => {
+          cleanup();
+          reject(error);
+        });
     });
   }
 
