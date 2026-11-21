@@ -5,6 +5,8 @@ import test from 'node:test';
 import ts from 'typescript';
 import { parseFen, START_FEN } from '../src/chess/board.ts';
 import { hasEngineRetirements } from '../src/lc0/engineRetirement.ts';
+import { Lc0WebHybridEvaluator } from '../src/lc0/hybridEvaluator.ts';
+import * as lazyOrtEvaluators from '../src/lc0/lazyOrtEvaluators.ts';
 import { CachedLc0Evaluator, prepareLc0EvaluatorInput } from '../src/lc0/lc0EvaluatorBase.ts';
 import { LC0_SMALL_BATCH1_QDQ8_PATH, lc0SmallModelRequest, lc0SplitKUrl, selectLc0OrtModelUrl } from '../src/lc0/lc0ModelUrls.ts';
 import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
@@ -87,6 +89,47 @@ test('retiring Play Small does not wait for its ORT import or start the factory'
   }
 });
 
+test('a failed evaluator import asks for a reload and preserves its cause, but cancellation stays an abort', async (t) => {
+  const cause = new TypeError('Failed to fetch dynamically imported module');
+  const hook = registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (specifier.endsWith('/lc0SmallModelSelection.ts')) throw cause;
+      return nextResolve(specifier, context);
+    },
+  });
+  t.after(() => hook.deregister());
+  const controller = new AbortController();
+  const reason = new Error('Switched engines');
+  const pending = lazyOrtEvaluators.createLc0OnnxEvaluatorFromUrl('/small.onnx', { load: { signal: controller.signal } });
+  controller.abort(reason);
+  await assert.rejects(pending, (error) => error === reason);
+  await assert.rejects(lazyOrtEvaluators.createLc0OnnxEvaluatorFromUrl('/small.onnx'), {
+    message: 'The app was updated. Reload this page to load this engine.',
+    cause,
+  });
+});
+
+test('Play tells users to reload instead of letting Retry loop on a failed evaluator import', (t) => {
+  const source = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
+  const failures = source.slice(source.indexOf('function ctxActionableEngineError('), source.indexOf('type SearchProgress ='));
+  class EvaluatorImportError extends Error {}
+  const button = { hidden: true, disabled: false, textContent: '' };
+  const note = t.mock.fn();
+  const ctx = { dom: { buttonEl: () => button } };
+  const setFailure = new Function('ctx', 'EvaluatorImportError', 'ctxSetEngineNote', `
+    ${stripTypeScriptTypes(failures)}
+    const ctxSelectedEngine = () => ({ label: 'Lc0 Small' });
+    return (error) => ctxSetEngineFailure(ctx, error);
+  `)(ctx, EvaluatorImportError, note);
+  const error = new EvaluatorImportError('The app was updated. Reload this page to load this engine.');
+  setFailure(error);
+  assert.deepEqual(note.mock.calls[0].arguments, [ctx, error.message, true]);
+  assert.deepEqual(button, { textContent: 'Reload required', hidden: false, disabled: true });
+
+  setFailure(new Error('Engine stopped'));
+  assert.deepEqual(button, { textContent: 'Retry engine', hidden: false, disabled: false });
+});
+
 test('Arena mount renders basic runtime status without importing ORT', async () => {
   const source = readFileSync(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8');
   const badgeSource = source.slice(source.indexOf('async function renderRuntimeBadge('), source.indexOf('function selectedSeatsNeedLc0Evaluator('));
@@ -115,6 +158,32 @@ test('Arena mount renders basic runtime status without importing ORT', async () 
   await render();
   assert.equal(ortImports, 1);
   assert.match(badge.textContent, /auto->wasm · ORT wasm threads 1 · ORT sessions 0 active/);
+});
+
+test('Arena benchmark diagnostics include a used hybrid ORT head with the Runtime panel closed', async (t) => {
+  const source = readFileSync(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8');
+  const diagnosticsSource = source.slice(source.indexOf('async function safeOrtRuntimeDiagnostics('), source.indexOf('function fixedSuiteFensFromParams('));
+  const diagnostics = { sessions: { active: 1 } };
+  const collect = t.mock.fn(async () => diagnostics);
+  const collectFor = new Function('Lc0WebHybridEvaluator', 'collectOrtRuntimeDiagnostics', `
+    const ortRuntime = undefined, centipawnUsedOrt = false;
+    return async (lc0Cache) => {
+      ${stripTypeScriptTypes(diagnosticsSource)}
+      return safeOrtRuntimeDiagnostics();
+    };
+  `)(Lc0WebHybridEvaluator, collect);
+  const createRuntime = async () => ({ evaluate: async () => {}, executionFootprint: () => ({}) });
+  const wgsl = new Lc0WebHybridEvaluator({ packUrl: '/pack', headBackend: 'wgsl' }, { createRuntime });
+  const ort = new Lc0WebHybridEvaluator({ packUrl: '/pack', headBackend: 'ort' }, { createRuntime });
+  await wgsl.evaluate(START_FEN);
+  assert.equal(await collectFor(null), undefined);
+  assert.equal(await collectFor({ inner: wgsl }), undefined);
+  assert.equal(await collectFor({ inner: ort }), undefined);
+  assert.equal(collect.mock.callCount(), 0);
+
+  await ort.evaluate(START_FEN);
+  assert.equal(await collectFor({ inner: ort }), diagnostics);
+  assert.deepEqual(collect.mock.calls[0].arguments, [{ probeAdapter: false }]);
 });
 
 test('zero-ORT config helpers update thread state and probe WebGPU safely without onnxruntime-web', async (t) => {

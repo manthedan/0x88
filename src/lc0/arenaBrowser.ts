@@ -505,7 +505,12 @@ const plentyChessEngines = new DisposableVariantPool(plentyChessCacheKey, (varia
 const stormphraxEngines = new DisposableVariantPool(stormphraxCacheKey, (variant: StormphraxVariant) =>
   createStormphraxEngine(variant, ARENA_CPU_ENGINE_OPTIONS),
 );
-const centipawnCache = createCentipawnEvaluatorCache(createBrowserSquareformerRuntimeEvaluator);
+let centipawnUsedOrt = false;
+const centipawnCache = createCentipawnEvaluatorCache(async (spec, options) => {
+  const loaded = await createBrowserSquareformerRuntimeEvaluator(spec, options);
+  centipawnUsedOrt ||= loaded.resolvedRuntime.endsWith('ort');
+  return loaded;
+});
 let centipawnHybridManifestStatus: 'unknown' | 'present' | 'missing' = 'unknown';
 const ARENA_BIG_NET_KEYS: readonly BigNetKey[] = ['bt4', 't3'];
 const arenaDownloadApprovals = new Set<BigNetKey>();
@@ -4859,7 +4864,9 @@ function mapValues<T>(map: Map<string, T>): Record<string, T> {
 }
 
 async function safeOrtRuntimeDiagnostics(): Promise<unknown> {
-  if (!ortRuntime) return undefined;
+  const evaluator = lc0Cache?.inner;
+  const hybridUsedOrt = evaluator instanceof Lc0WebHybridEvaluator && evaluator.headBackend === 'ort' && !!evaluator.executionFootprint();
+  if (!ortRuntime && !hybridUsedOrt && !centipawnUsedOrt) return undefined;
   try {
     return await collectOrtRuntimeDiagnostics({ probeAdapter: false });
   } catch (error) {

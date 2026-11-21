@@ -43,7 +43,7 @@ import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryC
 import { type GameResultCode, gameOutcome } from './engineBattle.ts';
 import { enginePlayLevels, enginePlayOptions, isV0DeployProfile } from './engineCatalog.ts';
 import { requestLargeNetConsent, showPhoneLargeNetFallback } from './largeNetConsent.ts';
-import { createBrowserSquareformerRuntimeEvaluator } from './lazyOrtEvaluators.ts';
+import { createBrowserSquareformerRuntimeEvaluator, EvaluatorImportError } from './lazyOrtEvaluators.ts';
 import { LC0_SMALL_BATCH1_QDQ8_PATH, lc0SmallModelRequest } from './lc0ModelUrls.ts';
 import { lqoBlackBookMove, lqoWhiteBookMove, lqoWhiteFirstPolicyBookMove } from './lqoOpeningBook.ts';
 import { LQO_BLACK_MISSING_QUEEN_FEN, LQO_WHITE_MISSING_QUEEN_FEN } from './lqoStartingPositions.ts';
@@ -430,9 +430,17 @@ function ctxActionableEngineError(ctx: PlayContext, error: unknown): string {
   return `${option.label} stopped before making a move. Retry the engine or choose another opponent. Details: ${detail}`;
 }
 
+function ctxShowEngineRetry(ctx: PlayContext, action: 'retry' | 'reload'): void {
+  const button = ctx.dom.buttonEl('retryEngine');
+  button.disabled = action === 'reload';
+  button.textContent = action === 'reload' ? 'Reload required' : 'Retry engine';
+  button.hidden = false;
+}
+
 function ctxSetEngineFailure(ctx: PlayContext, error: unknown): void {
-  ctxSetEngineNote(ctx, ctxActionableEngineError(ctx, error), true);
-  ctx.dom.buttonEl('retryEngine').hidden = false;
+  const reload = error instanceof EvaluatorImportError;
+  ctxSetEngineNote(ctx, reload ? error.message : ctxActionableEngineError(ctx, error), true);
+  ctxShowEngineRetry(ctx, reload ? 'reload' : 'retry');
 }
 
 type SearchProgress = { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number };
@@ -1389,9 +1397,10 @@ function ctxRenderStrip(ctx: PlayContext, id: string, color: Color, shownPly: nu
   else if (!isHuman && ctx.engineThinking) [text, kind] = ['', ''];
   else if (!isHuman && ctx.preparingEngine) [text, kind] = ['Loading…', 'thinking'];
   else if (!isHuman && ctx.practicePosition && !ctx.started && !ctx.engineReady) [text, kind] = ['Loads on Play', 'ready'];
-  else if (!isHuman && !ctx.engineReady && !ctx.gameOver)
-    [text, kind] = ctx.dom.buttonEl('retryEngine').hidden ? ['Loading…', 'thinking'] : ['Error · retry', 'error'];
-  else if (!isHuman && phase === 'setup') [text, kind] = ['Ready', 'ready'];
+  else if (!isHuman && !ctx.engineReady && !ctx.gameOver) {
+    const retry = ctx.dom.buttonEl('retryEngine');
+    [text, kind] = retry.hidden ? ['Loading…', 'thinking'] : [`Error · ${retry.disabled ? 'reload' : 'retry'}`, 'error'];
+  } else if (!isHuman && phase === 'setup') [text, kind] = ['Ready', 'ready'];
   else if (isHuman && phase === 'playing' && ctx.viewPly === null && ctx.board.turn === color && ctx.engineReady && !ctx.pendingPromotion)
     [text, kind] = ['Your move', 'turn'];
   state.textContent = text;
@@ -1690,7 +1699,7 @@ async function ctxCheckRestoredDownloadConsent(ctx: PlayContext): Promise<boolea
       else {
         ctx.engineReady = false;
         ctxSetEngineNote(ctx, 'Download cancelled. Use Retry when you want to load this opponent.');
-        ctx.dom.buttonEl('retryEngine').hidden = false;
+        ctxShowEngineRetry(ctx, 'retry');
         ctxRender(ctx);
       }
       return accepted;
