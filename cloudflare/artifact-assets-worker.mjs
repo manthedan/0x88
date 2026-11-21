@@ -348,9 +348,11 @@ function objectHeaders(descriptor, object, env, range, cacheControlOverride) {
   });
   if (metadata.encoding !== 'identity') headers.set('Content-Encoding', metadata.encoding);
   headers.set('Accept-Ranges', 'bytes');
+  if (isImmutableKey(descriptor.key) && !range && Number.isFinite(metadata.encodedBytes)) {
+    headers.set('X-Artifact-Encoded-Length', String(metadata.encodedBytes));
+  }
   if (isImmutableArtifactKey(descriptor.key)) {
     if (Number.isFinite(metadata.decodedBytes)) headers.set('X-Artifact-Content-Length', String(metadata.decodedBytes));
-    if (!range && Number.isFinite(metadata.encodedBytes)) headers.set('X-Artifact-Encoded-Length', String(metadata.encodedBytes));
     if (metadata.decodedSha256) headers.set('X-Artifact-Decoded-SHA256', metadata.decodedSha256);
     if (metadata.encodedSha256) headers.set('X-Artifact-Encoded-SHA256', metadata.encodedSha256);
   }

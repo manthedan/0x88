@@ -167,6 +167,27 @@ test('artifact assets worker preserves encoded length through normalized cached 
   }
 });
 
+test('cached release HEAD restores the length when the cache normalizes it to zero', async (t) => {
+  await withFakeEdgeCache(async () => {
+    const cache = caches.default;
+    const put = cache.put.bind(cache);
+    t.mock.method(cache, 'put', async (request, response) => {
+      const headers = new Headers(response.headers);
+      headers.set('Content-Length', '0');
+      await put(request, new Response(null, { headers }));
+    });
+    const env = fakeEnv();
+    const head = t.mock.method(env.ARTIFACTS, 'head');
+    const request = new Request(`https://assets.example/${RELEASE_KEY}`, { method: 'HEAD' });
+    await handleArtifactRequest(request, env);
+    const hit = await handleArtifactRequest(request, env);
+    assert.equal(hit.headers.get('Cache-Status'), 'lc0-artifact-worker; hit');
+    assert.equal(hit.headers.get('Content-Length'), String(RELEASE_BODY.byteLength));
+    assert.equal(hit.body, null);
+    assert.equal(head.mock.callCount(), 1);
+  });
+});
+
 test('artifact assets worker ignores legacy v3 HEAD cache entries without encoded length metadata', async () => {
   const previous = globalThis.caches;
   const oldCacheUrl = `https://assets.example/${KEY}?__lc0_artifact_head=v3`;
