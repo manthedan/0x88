@@ -159,8 +159,10 @@ test('Arena retries a transient large-net probe without another picker interacti
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
   const api = arenaAvailability('retry');
   const urls = [];
-  t.mock.method(globalThis, 'fetch', async (url) => {
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
     urls.push(url);
+    if (url === '/models/lc0/manifest.json') return new Response(null, { status: 404 });
+    assert.equal(options.method, 'HEAD');
     return new Response(null, { status: urls.length === 1 ? 503 : 200 });
   });
   await api.refresh();
@@ -168,7 +170,7 @@ test('Arena retries a transient large-net probe without another picker interacti
   assert.equal(bigNetAssetStatusSync(api.BIG_NETS.bt4), 'unknown');
   t.mock.timers.tick(1_000);
   await new Promise(setImmediate);
-  assert.deepEqual(urls, [api.BIG_NETS.bt4.modelUrl, api.BIG_NETS.t3.modelUrl, api.BIG_NETS.bt4.modelUrl]);
+  assert.deepEqual(urls, [api.BIG_NETS.bt4.modelUrl, api.BIG_NETS.t3.modelUrl, '/models/lc0/manifest.json', api.BIG_NETS.bt4.modelUrl]);
   assert.equal(api.resolved(), true);
   assert.equal(bigNetAssetStatusSync(api.BIG_NETS.bt4), 'present');
 });
@@ -176,7 +178,11 @@ test('Arena retries a transient large-net probe without another picker interacti
 test('an Arena retry can finish during a match without replacing the active selectors', async (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
   let hits = 0;
-  t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: ++hits === 1 ? 503 : 200 }));
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (url === '/models/lc0/manifest.json') return new Response(null, { status: 404 });
+    assert.equal(options.method, 'HEAD');
+    return new Response(null, { status: ++hits === 1 ? 503 : 200 });
+  });
   const renderSeatSelectors = t.mock.fn();
   const api = arenaAvailability('retry-during-match', { renderSeatSelectors });
   await api.refresh();
