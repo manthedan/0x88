@@ -8,6 +8,7 @@ import { resolvePublicAssetUrl } from '../assetUrls.ts';
 import { acquireBigNetSearcherAsync, type BigNetKey, peekBigNetSearcher, preparePhoneBigNet, releaseUnusedBigNetSearchers } from '../bigNetSessionPool.ts';
 import { createCentipawnEvaluatorCache } from '../centipawnEvaluatorCache.ts';
 import { inactiveCpuEnginesToEvict, PendingCpuNewGames } from '../cpuEngineResidency.ts';
+import { isMemoryConstrainedDevice } from '../deviceMemoryClass.ts';
 import type { EngineFamily } from '../engineCatalog.ts';
 import { cpuEngineHashMbForSurface, createDefaultBrowserUciEngine, isDefaultBrowserUciFamily } from '../engineProvision.ts';
 import { awaitEngineRetirements, trackEngineRetirement } from '../engineRetirement.ts';
@@ -112,8 +113,8 @@ export function createPlayEngines(deps: PlayEngineDeps) {
   const cpuEnginePromises = new Map<string, Promise<CpuEngine>>();
   const pendingCpuNewGames = new PendingCpuNewGames();
 
-  /** Retire every neural engine except `keep`'s; resolves once their workers are gone. */
   function retireUnusedEngines(keep?: PlayEngineSpec): Promise<void> {
+    if (keep && isMemoryConstrainedDevice()) evictInactiveCpuEngines(keep.id, true);
     if (keep?.family !== 'centipawn') centipawn.clear();
     if (keep?.family !== 'maia3') retireMaia3();
     if (!(keep?.family === 'lc0' && keep.variant === 'small')) retireLc0Small();
@@ -351,8 +352,10 @@ export function createPlayEngines(deps: PlayEngineDeps) {
     evictInactiveCpuEngines(id);
   }
 
-  function evictInactiveCpuEngines(activeId: string): void {
-    for (const evictId of inactiveCpuEnginesToEvict([...cpuEnginePromises.keys()], activeId)) disposeCpuEngine(evictId);
+  function evictInactiveCpuEngines(activeId: string, constrained = isMemoryConstrainedDevice()): void {
+    for (const id of inactiveCpuEnginesToEvict([...cpuEnginePromises.keys()], activeId, constrained ? 0 : 1)) {
+      disposeCpuEngine(id, constrained);
+    }
   }
 
   function disposeCpuEngine(id: string, track = false): void {
@@ -396,7 +399,10 @@ export function createPlayEngines(deps: PlayEngineDeps) {
     /** The committed opponent changed. A pending restart still belongs to the current game, so call this only on commit. */
     opponentCommitted(previousEngineId: string, nextEngineId: string): void {
       // Stormphrax's large WASM heap must not share residency with the next model.
-      if (previousEngineId === 'stormphrax' && nextEngineId !== previousEngineId) disposeCpuEngine(previousEngineId);
+      if (previousEngineId !== nextEngineId) {
+        if (isMemoryConstrainedDevice()) evictInactiveCpuEngines(nextEngineId, true);
+        else if (previousEngineId === 'stormphrax') disposeCpuEngine(previousEngineId);
+      }
     },
 
     /** The Play page unmounted. `retireAllCpu` is decided at mount time (the URL may already show the next route). */
