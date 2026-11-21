@@ -61,27 +61,43 @@ function patchRecklessForWasmSimdNnue(root) {
 
 function patchRecklessForWasi(root) {
   cpSync(engineSource('wasi_stop.rs'), `${root}/src/wasi_stop.rs`);
-  replace(`${root}/src/time.rs`, `use crate::thread::ThreadData;`, `use crate::thread::ThreadData;
+  replace(
+    `${root}/src/time.rs`,
+    `use crate::thread::ThreadData;`,
+    `use crate::thread::ThreadData;
 
 #[cfg(target_os = "wasi")]
 #[path = "wasi_stop.rs"]
-mod wasi_stop;`);
-  replace(`${root}/src/time.rs`, `    hard_bound: Duration,`, `    hard_bound: Duration,
+mod wasi_stop;`,
+  );
+  replace(
+    `${root}/src/time.rs`,
+    `    hard_bound: Duration,`,
+    `    hard_bound: Duration,
     #[cfg(target_os = "wasi")]
-    browser_stop: bool,`);
-  replace(`${root}/src/time.rs`, `            limits,`, `            limits,
+    browser_stop: bool,`,
+  );
+  replace(
+    `${root}/src/time.rs`,
+    `            limits,`,
+    `            limits,
             #[cfg(target_os = "wasi")]
-            browser_stop: std::env::var_os("LEELAWEB_WASI_STOP").is_some(),`);
-  replace(`${root}/src/time.rs`, `        if td.completed_depth == 0 {
+            browser_stop: std::env::var_os("LEELAWEB_WASI_STOP").is_some(),`,
+  );
+  replace(
+    `${root}/src/time.rs`,
+    `        if td.completed_depth == 0 {
             return false;
-        }`, `        if td.completed_depth == 0 {
+        }`,
+    `        if td.completed_depth == 0 {
             return false;
         }
 
         #[cfg(target_os = "wasi")]
         if self.browser_stop && td.nodes() & 2047 == 2047 && wasi_stop::requested() {
             return true;
-        }`);
+        }`,
+  );
 
   if (l1Size) {
     replace(`${root}/src/nnue.rs`, `const L1_SIZE: usize = 768;`, `const L1_SIZE: usize = ${Number.parseInt(l1Size, 10)};`);
