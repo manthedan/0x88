@@ -662,6 +662,9 @@ async function ctxRequestEngineMove(ctx: PlayContext, signal: AbortSignal): Prom
           drawScore: lqoOptions?.drawScore ?? PLAY_DRAW_SCORE,
           searchContemptLimit: lqoOptions?.searchContemptLimit ?? PLAY_SEARCH_CONTEMPT_LIMIT,
           signal,
+          onSessionReady: () => {
+            if (!ctxIsDisposed(ctx)) ctxRender(ctx);
+          },
           onProgress: (progress) => {
             if (!signal.aborted) ctxShowSearchProgress(ctx, `Lc0 ${searcher.config.name} search`, progress);
           },

@@ -149,6 +149,7 @@ export interface Bt4SearchOptions {
   searchContemptLimit?: number;
   /** LC0 SwapColors parity for odds nets that were trained from one color's perspective. */
   swapColors?: boolean;
+  onSessionReady?: () => void;
   /** Throttled partial snapshots while deep searches run. */
   onProgress?: (progress: Bt4SearchProgress) => void;
   progressEveryMs?: number;
@@ -550,6 +551,7 @@ export class Bt4WorkerSearcher {
       throw error;
     }
     if (signal?.aborted) return cancelled;
+    options.onSessionReady?.();
     let searchId: number | null = null;
     const onAbort = () => {
       if (searchId !== null) this.cancelSearch(searchId);
