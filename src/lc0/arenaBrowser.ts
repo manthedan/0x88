@@ -67,6 +67,7 @@ import { loadRetirableResource } from './arenaResourceLoad.ts';
 import { arenaOpeningPairs, arenaUciChartSample, formatArenaPoints } from './arenaResults.ts';
 import { arenaCpuOnlyPool, arenaGameConcurrency, runArenaSchedule } from './arenaScheduleRunner.ts';
 import { arenaSideTimeMs } from './arenaTiming.ts';
+import { subscribeAssetProbeRetry } from './assetProbe.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { BerserkEngine } from './berserkEngine.ts';
 import {
@@ -647,6 +648,7 @@ const seatRows: EngineRow[] = [
   { family: 'sf', variant: 'lite', strength: 8 },
 ];
 let bt4AvailabilityResolved = false;
+let probingSeatOptions = false;
 
 function persistedVariantOrDefault(family: EngineFamily, value: unknown): string {
   const variant = String(value ?? '');
@@ -2877,20 +2879,31 @@ function refreshStockfishControls(): void {
 }
 
 async function refreshBigNetAvailability(mountSignal = mountAbort.signal): Promise<void> {
-  await Promise.all([
-    probeBt4Support(),
-    checkBigNetAsset(BIG_NETS.bt4, whileArenaMounted(renderSeatSelectors)),
-    checkBigNetAsset(BIG_NETS.t3, whileArenaMounted(renderSeatSelectors)),
-  ]);
-  if (isStaleMount(mountSignal)) return;
-  bt4AvailabilityResolved = true;
-  if (running || startPending) return;
-  for (const row of activeSeatRows()) {
-    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectable(BIG_NETS[row.variant])) row.variant = 'small';
+  if (bt4AvailabilityResolved || probingSeatOptions || running || startPending) return;
+  probingSeatOptions = true;
+  try {
+    const configs = [BIG_NETS.bt4, BIG_NETS.t3];
+    const [statuses] = await Promise.all([Promise.all(configs.map((config) => checkBigNetAsset(config))), probeBt4Support()]);
+    if (isStaleMount(mountSignal)) return;
+    bt4AvailabilityResolved = statuses.every((status) => status !== 'unknown');
+    const retry = () => void refreshBigNetAvailability(mountSignal);
+    for (const [index, status] of statuses.entries()) {
+      if (status === 'unknown') subscribeAssetProbeRetry([configs[index].modelUrl], retry, mountSignal);
+    }
+    if (running || startPending) return;
+    for (const row of activeSeatRows()) {
+      if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && bigNetAssetStatusSync(BIG_NETS[row.variant]) === 'missing') row.variant = 'small';
+    }
+    const host = el('arenaSeatList');
+    const focused = document.activeElement;
+    const label = focused && host.contains(focused) ? focused.getAttribute('aria-label') : null;
+    buildEngines();
+    renderSeatSelectors();
+    refreshSeatControls();
+    if (label) host.querySelector<HTMLElement>(`[aria-label="${CSS.escape(label)}"]`)?.focus({ preventScroll: true });
+  } finally {
+    if (!isStaleMount(mountSignal)) probingSeatOptions = false;
   }
-  buildEngines();
-  renderSeatSelectors();
-  refreshSeatControls();
 }
 
 async function renderRuntimeBadge(ortDiagnostics?: OrtRuntimeDiagnostics): Promise<void> {
@@ -5125,12 +5138,7 @@ function revokeArenaPhoneLargeNets(): void {
 }
 
 function wireEvents() {
-  let probingSeatOptions = false;
-  const probeSeatOptions = () => {
-    if (bt4AvailabilityResolved || probingSeatOptions || running || startPending) return;
-    probingSeatOptions = true;
-    void refreshBigNetAvailability();
-  };
+  const probeSeatOptions = () => void refreshBigNetAvailability();
   el('arenaSeatList').addEventListener('focusin', probeSeatOptions);
   el('arenaSeatList').addEventListener('pointerenter', probeSeatOptions);
   window.addEventListener(PHONE_LARGE_NET_CHANGE_EVENT, revokeArenaPhoneLargeNets, { signal: mountAbort.signal });
@@ -5550,6 +5558,8 @@ function resetArenaPageState(): void {
   running = false;
   startPending = false;
   startDisabled = true;
+  bt4AvailabilityResolved = false;
+  probingSeatOptions = false;
   gameChartSamples = [];
   games.length = 0;
   gameResultChips.length = 0;

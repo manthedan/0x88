@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 import { arenaMoveDelay, guardArenaUnload } from '../src/lc0/arenaNavigation.ts';
+import { subscribeAssetProbeRetry } from '../src/lc0/assetProbe.ts';
+import { bigNetAssetStatusSync, BT4_NET, checkBigNetAsset, T3_NET } from '../src/lc0/bt4Engine.ts';
 
 test('Arena leave confirmation reports checkpoint failure instead of promising saved results', () => {
   const route = readFileSync(new URL('../src/routes/app/arena/+page.svelte', import.meta.url), 'utf8');
@@ -108,6 +110,68 @@ test('hidden tournaments bypass pacing, and hiding cancels a pending visible del
   const aborted = arenaMoveDelay(60_000, controller.signal, visibility);
   controller.abort();
   await aborted;
+});
+
+function arenaAvailability(prefix, extra = {}) {
+  const source = readFileSync(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('async function refreshBigNetAvailability('), source.indexOf('async function renderRuntimeBadge('));
+  const BIG_NETS = {
+    bt4: { ...BT4_NET, modelUrl: `https://example.test/${prefix}-bt4.onnx` },
+    t3: { ...T3_NET, modelUrl: `https://example.test/${prefix}-t3.onnx` },
+  };
+  const deps = {
+    BIG_NETS, checkBigNetAsset, bigNetAssetStatusSync, subscribeAssetProbeRetry,
+    probeBt4Support: async () => true,
+    mountAbort: new AbortController(),
+    isStaleMount: (signal) => signal.aborted,
+    whileArenaMounted: (callback) => callback,
+    activeSeatRows: () => [],
+    el: () => ({}), document: { activeElement: null },
+    buildEngines() {}, renderSeatSelectors() {}, refreshSeatControls() {},
+    ...extra,
+  };
+  const load = new Function(...Object.keys(deps), stripTypeScriptTypes(`
+    let bt4AvailabilityResolved = false, probingSeatOptions = false, running = false, startPending = false;
+    ${body}
+    return { refresh: refreshBigNetAvailability, resolved: () => bt4AvailabilityResolved };
+  `))(...Object.values(deps));
+  return { ...load, BIG_NETS };
+}
+
+test('Arena retries a transient large-net probe without another picker interaction', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const api = arenaAvailability('retry');
+  const urls = [];
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    urls.push(url);
+    return new Response(null, { status: urls.length === 1 ? 503 : 200 });
+  });
+  await api.refresh();
+  assert.equal(api.resolved(), false, 'a transient failure is not a resolved probe');
+  assert.equal(bigNetAssetStatusSync(api.BIG_NETS.bt4), 'unknown');
+  t.mock.timers.tick(1_000);
+  await new Promise(setImmediate);
+  assert.deepEqual(urls, [api.BIG_NETS.bt4.modelUrl, api.BIG_NETS.t3.modelUrl, api.BIG_NETS.bt4.modelUrl]);
+  assert.equal(api.resolved(), true);
+  assert.equal(bigNetAssetStatusSync(api.BIG_NETS.bt4), 'present');
+});
+
+test('Arena restores focus to the same seat control after availability changes', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 200 }));
+  const label = 'Engine 1 version';
+  const original = { getAttribute: (name) => (name === 'aria-label' ? label : null) };
+  const document = { activeElement: original };
+  const replacement = { focus: () => { document.activeElement = replacement; } };
+  const host = {
+    contains: (element) => element === original,
+    querySelector: (selector) => selector === `[aria-label="${label}"]` ? replacement : null,
+  };
+  const api = arenaAvailability('focus', {
+    document, CSS: { escape: (value) => value }, el: () => host,
+    renderSeatSelectors: () => { document.activeElement = null; },
+  });
+  await api.refresh();
+  assert.equal(document.activeElement, replacement);
 });
 
 test('Arena unload confirmation is consumed once and resets after bfcache or aborted navigation', (t) => {
