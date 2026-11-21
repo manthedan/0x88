@@ -559,11 +559,14 @@ export class EmscriptenUciEngine<Options extends EmscriptenUciOptions = Emscript
         this.waitForLine((line) => line.startsWith('bestmove '), 'bestmove', startIndex, undefined, emscriptenSearchTimeoutMs(options)),
         this.sendCommand(emscriptenGoCommand(options)),
       ]);
+      if (signal?.aborted) throw this.abortError();
       return bestmove;
+    } catch (error) {
+      if (signal?.aborted) throw this.abortError();
+      throw error;
     } finally {
       clearTimeout(abortTimer);
       signal?.removeEventListener('abort', onAbort);
-      if (signal?.aborted) throw this.abortError();
     }
   }
 
