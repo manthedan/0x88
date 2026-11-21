@@ -58,19 +58,21 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      TEST_LFS_INCLUDE: public/stormphrax/stormphrax-emscripten.wasm,public/stormphrax/stormphrax-emscripten.data,public/plentychess/plentychess-emscripten.wasm,public/plentychess/plentychess-emscripten.data
     steps:
       - uses: actions/checkout@v7
         with:
           lfs: false
       - name: Key required LFS objects
         id: lfs
-        run: echo "key=$(git lfs ls-files --long --include="$LFS_INCLUDE" --exclude="" | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
+        run: echo "key=$(git lfs ls-files --long --include="$LFS_INCLUDE,$TEST_LFS_INCLUDE" --exclude="" | sha256sum | cut -c1-64)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v6
         with:
           path: .git/lfs
           key: lfs-${{ steps.lfs.outputs.key }}
       - name: Fetch required release fixtures
-        run: git lfs pull --include="$LFS_INCLUDE" --exclude=""
+        run: git lfs pull --include="$LFS_INCLUDE,$TEST_LFS_INCLUDE" --exclude=""
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc

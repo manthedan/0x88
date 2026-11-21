@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, webcrypto } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { workerScript as berserkWorkerScript } from '../src/lc0/berserkEngine.ts';
@@ -105,12 +105,36 @@ test('every Emscripten worker can resolve its pinned sidecars at runtime', async
   }
 });
 
-for (const [family, factoryName, script, netPath] of [
+const STARTUP_ENGINES = [
   ['stormphrax', 'Stormphrax', stormphraxWorkerScript(), '/undertown.nnue'],
   ['plentychess', 'PlentyChess', plentyChessWorkerScript(), '/processed.bin'],
-]) {
-  test(`${factoryName} releases the mounted NNUE after startup and still searches after ucinewgame`, { timeout: 15_000 }, async () => {
-    const asset = `/${family}/${family}-emscripten`;
+];
+
+const startupAsset = (family) => `/${family}/${family}-emscripten`;
+const startupFixtures = (family) => [`public${startupAsset(family)}.wasm`, `public${startupAsset(family)}.data`];
+
+function isLfsPointer(path) {
+  const file = new URL(`../${path}`, import.meta.url);
+  return statSync(file).size < 1024 && readFileSync(file, 'utf8').startsWith('version https://git-lfs.github.com/spec/v1\n');
+}
+
+test('the CI test job fetches the Emscripten startup fixtures', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const job = workflow.split('\n  test:\n')[1].split('\n  build:\n')[0];
+  const fixtures = /TEST_LFS_INCLUDE: (.+)/.exec(job)?.[1].split(',') ?? [];
+  for (const [family] of STARTUP_ENGINES) {
+    for (const path of startupFixtures(family)) assert.ok(fixtures.includes(path), `${path} must be hydrated in CI`);
+  }
+  assert.ok(job.includes('git lfs pull --include="$LFS_INCLUDE,$TEST_LFS_INCLUDE"'));
+});
+
+for (const [family, factoryName, script, netPath] of STARTUP_ENGINES) {
+  const pointer = startupFixtures(family).find(isLfsPointer);
+  test(`${factoryName} releases the mounted NNUE after startup and still searches after ucinewgame`, {
+    timeout: 15_000,
+    skip: pointer ? `unhydrated LFS fixture: ${pointer}` : false,
+  }, async () => {
+    const asset = startupAsset(family);
     const workerUrl = new URL('https://app.example/worker.js');
     const lines = [];
     let reply;
