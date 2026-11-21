@@ -89,13 +89,17 @@ test('constrained worker releases the old evaluator before allocating a differen
   const releasing = Promise.withResolvers();
   const finishRelease = Promise.withResolvers();
   let creations = 0;
-  startSearchWorker({ createHybridEvaluator: () => {
-    creations++;
-    return { dispose: () => {
-      releasing.resolve();
-      return finishRelease.promise;
-    } };
-  } });
+  startSearchWorker({
+    createHybridEvaluator: () => {
+      creations++;
+      return {
+        dispose: () => {
+          releasing.resolve();
+          return finishRelease.promise;
+        },
+      };
+    },
+  });
   let reply;
   let id = 0;
   worker.postMessage = (message) => reply.resolve(message);

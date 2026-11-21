@@ -414,9 +414,10 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       mlhRaw = LC0_ONNX_OUTPUT_MLH in gpuOutputs ? gpuIoOutput(gpuOutputs, this.gpuIo, LC0_ONNX_OUTPUT_MLH) : undefined;
       allGetDataMs = ort.tinyLeelaNowMs() - allGetDataStarted;
     } else {
-      const inputTensor = encodedPlanes instanceof Uint16Array
-        ? new ort.Tensor('float16', encodedPlanes, [physicalBatchSize, 112, 8, 8])
-        : new ort.Tensor('float32', encodedPlanes, [physicalBatchSize, 112, 8, 8]);
+      const inputTensor =
+        encodedPlanes instanceof Uint16Array
+          ? new ort.Tensor('float16', encodedPlanes, [physicalBatchSize, 112, 8, 8])
+          : new ort.Tensor('float32', encodedPlanes, [physicalBatchSize, 112, 8, 8]);
       const outputs = await this.session.run({ [LC0_ONNX_INPUT_PLANES]: inputTensor });
       ortRunMs = ort.tinyLeelaNowMs() - ortRunStarted;
       const allGetDataStarted = ort.tinyLeelaNowMs();
@@ -470,7 +471,14 @@ export class Lc0OnnxEvaluator implements Lc0EvaluationProvider {
       const legalPriorsStarted = ort.tinyLeelaNowMs();
       const wdlOffset = i * LC0_WDL_SIZE;
       const wdl: [number, number, number] = [outputValue(wdlRaw, wdlOffset), outputValue(wdlRaw, wdlOffset + 1), outputValue(wdlRaw, wdlOffset + 2)];
-      const legalPriors = legalPolicyPriors(current.board, policy.data, this.policyTemperature, current.preparedLegalMoves, i * LC0_POLICY_SIZE, policy.f16Bits);
+      const legalPriors = legalPolicyPriors(
+        current.board,
+        policy.data,
+        this.policyTemperature,
+        current.preparedLegalMoves,
+        i * LC0_POLICY_SIZE,
+        policy.f16Bits,
+      );
       const legalPriorsMs = ort.tinyLeelaNowMs() - legalPriorsStarted;
       return {
         fen: current.fen,

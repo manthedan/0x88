@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { START_FEN } from '../src/chess/board.ts';
 import { encodeLc0Classical112 } from '../src/lc0/encoder112.ts';
 import { buildBoardHistoryFromMoves } from '../src/lc0/history.ts';
-import { Lc0OnnxEvaluator, legalPolicyPriors, currentBoardAndFen } from '../src/lc0/onnxEvaluator.ts';
+import { currentBoardAndFen, Lc0OnnxEvaluator, legalPolicyPriors } from '../src/lc0/onnxEvaluator.ts';
 import { f16BitsToF32, f32ToF16Bits } from '../src/nn/float16.ts';
 import { skipUnlessAssets } from './lib/required_assets.mjs';
 
@@ -36,15 +36,18 @@ test('f16 batches preserve exact input bits and legal outputs, lease distinct co
     '/output/wdl': { type: 'float16', data: Uint16Array.of(0x3800, 0x8000, 0x3800, 0x3400, 0x3800, 0x3400) },
     '/output/mlh': { type: 'float16', data: new Float16Array([36.5, 22.5]) },
   };
-  const evaluator = new Lc0OnnxEvaluator({
-    inputMetadata: [{ name: '/input/planes', type: 'float16', shape: [2, 112, 8, 8] }],
-    async run(feeds) {
-      const { data } = feeds['/input/planes'];
-      seen.push(new Uint16Array(data.buffer, data.byteOffset, data.length));
-      await release.promise;
-      return output;
+  const evaluator = new Lc0OnnxEvaluator(
+    {
+      inputMetadata: [{ name: '/input/planes', type: 'float16', shape: [2, 112, 8, 8] }],
+      async run(feeds) {
+        const { data } = feeds['/input/planes'];
+        seen.push(new Uint16Array(data.buffer, data.byteOffset, data.length));
+        await release.promise;
+        return output;
+      },
     },
-  }, { policyTemperature: 1 });
+    { policyTemperature: 1 },
+  );
 
   const first = evaluator.evaluateBatch(inputs.slice(0, 2));
   const second = evaluator.evaluate(inputs[2]);
@@ -53,7 +56,10 @@ test('f16 batches preserve exact input bits and legal outputs, lease distinct co
     assert.equal(seen.length, 2);
     assert.notEqual(seen[0].buffer, seen[1].buffer);
     const expected = (input) => Uint16Array.from(encodeLc0Classical112(input).planes, f32ToF16Bits);
-    for (const [actual, positions] of [[seen[0], inputs.slice(0, 2)], [seen[1], [inputs[2], inputs[2]]]]) {
+    for (const [actual, positions] of [
+      [seen[0], inputs.slice(0, 2)],
+      [seen[1], [inputs[2], inputs[2]]],
+    ]) {
       for (let slot = 0; slot < 2; slot++) assert.deepEqual(actual.subarray(slot * 7168, (slot + 1) * 7168), expected(positions[slot]));
     }
   } finally {
@@ -61,7 +67,10 @@ test('f16 batches preserve exact input bits and legal outputs, lease distinct co
   }
   const results = (await first).concat(await second);
   const again = await evaluator.evaluate(START_FEN);
-  assert.ok(seen.slice(0, 2).some(({ buffer }) => buffer === seen[2].buffer), 'next batch reuses an idle f16 allocation');
+  assert.ok(
+    seen.slice(0, 2).some(({ buffer }) => buffer === seen[2].buffer),
+    'next batch reuses an idle f16 allocation',
+  );
   const startBits = Uint16Array.from(encodeLc0Classical112(START_FEN).planes, f32ToF16Bits);
   assert.deepEqual(seen[2].subarray(0, 7168), startBits, 'reuse clears planes written only by the previous position');
   assert.deepEqual(seen[2].subarray(7168), startBits, 'the padded slot copies the new input');
@@ -79,15 +88,18 @@ test('uint16 ONNX outputs remain integers rather than being decoded as float16 b
   const board = currentBoardAndFen(START_FEN).board;
   const policy = new Uint16Array(1858).fill(36);
   policy[legalPolicyPriors(board, policy, 1)[0].index] = 37;
-  const evaluator = new Lc0OnnxEvaluator({
-    async run() {
-      return {
-        '/output/policy': { type: 'uint16', data: policy },
-        '/output/wdl': { type: 'uint16', data: Uint16Array.of(1, 0, 0) },
-        '/output/mlh': { type: 'uint16', data: Uint16Array.of(36) },
-      };
+  const evaluator = new Lc0OnnxEvaluator(
+    {
+      async run() {
+        return {
+          '/output/policy': { type: 'uint16', data: policy },
+          '/output/wdl': { type: 'uint16', data: Uint16Array.of(1, 0, 0) },
+          '/output/mlh': { type: 'uint16', data: Uint16Array.of(36) },
+        };
+      },
     },
-  }, { policyTemperature: 1 });
+    { policyTemperature: 1 },
+  );
   const result = await evaluator.evaluate(START_FEN);
   assert.deepEqual(result.legalPriors, legalPolicyPriors(board, Float32Array.from(policy), 1));
   assert.deepEqual(result.wdl, [1, 0, 0]);

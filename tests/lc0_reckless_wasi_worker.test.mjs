@@ -53,7 +53,9 @@ function resetPreopenState(worker, byteBudget) {
 
 test('persistent Reckless serves the verified NNUE once and releases the file bytes on close', async (t) => {
   const previousSelf = globalThis.self;
-  t.after(() => { globalThis.self = previousSelf; });
+  t.after(() => {
+    globalThis.self = previousSelf;
+  });
   const worker = await loadWorkerModule([]);
   resetPreopenState(worker);
   const { buildPreopenDirectory, preopenByteCacheState } = worker.recklessWasiWorkerInternalsForTests;

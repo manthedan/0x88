@@ -200,7 +200,14 @@ import {
 } from './recklessVariants.ts';
 import { EngineResourceBroker, loadPerformanceDial, type PerformanceDial } from './resourceBroker.ts';
 import { Lc0PuctSearcher, type Lc0SearchProgress, type Lc0SearchResult } from './search.ts';
-import { StockfishEngine, type StockfishFlavor, type StockfishInfoLine, stockfishFlavorLabel, stockfishFlavorUrl, threadedStockfishAvailable } from './stockfishEngine.ts';
+import {
+  StockfishEngine,
+  type StockfishFlavor,
+  type StockfishInfoLine,
+  stockfishFlavorLabel,
+  stockfishFlavorUrl,
+  threadedStockfishAvailable,
+} from './stockfishEngine.ts';
 import { StormphraxEngine } from './stormphraxEngine.ts';
 import {
   checkStormphraxVariantAsset,

@@ -118,7 +118,13 @@ for (const [family, factoryName, script, netPath] of [
     const context = {
       location: workerUrl,
       WorkerGlobalScope: class {},
-      URL, Blob, TextDecoder, Uint8Array, setTimeout, clearTimeout, performance,
+      URL,
+      Blob,
+      TextDecoder,
+      Uint8Array,
+      setTimeout,
+      clearTimeout,
+      performance,
       crypto: webcrypto,
       fetch: async (url) => new Response(readFileSync(new URL(`../public${new URL(url).pathname}`, import.meta.url))),
       importScripts() {
@@ -144,7 +150,10 @@ for (const [family, factoryName, script, netPath] of [
     assert.throws(() => mod.FS_unlink(netPath), { errno: 44 }, 'the preload is already unlinked');
     for (const command of ['ucinewgame', 'isready', 'position startpos', 'go depth 1']) await send({ type: 'command', command }, 'commandDone');
     assert.ok(lines.includes('readyok'));
-    assert.ok(lines.some((line) => /^bestmove [a-h][1-8][a-h][1-8]/.test(line)), lines.join('\n'));
+    assert.ok(
+      lines.some((line) => /^bestmove [a-h][1-8][a-h][1-8]/.test(line)),
+      lines.join('\n'),
+    );
   });
 }
 
