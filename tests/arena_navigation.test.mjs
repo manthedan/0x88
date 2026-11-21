@@ -167,6 +167,25 @@ test('Arena retries a transient large-net probe without another picker interacti
   assert.equal(bigNetAssetStatusSync(api.BIG_NETS.bt4), 'present');
 });
 
+test('an Arena retry can finish during a match without replacing the active selectors', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  let hits = 0;
+  t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: ++hits === 1 ? 503 : 200 }));
+  const renderSeatSelectors = t.mock.fn();
+  const api = arenaAvailability('retry-during-match', { renderSeatSelectors });
+  await api.refresh();
+  assert.equal(api.resolved(), false);
+  renderSeatSelectors.mock.resetCalls();
+  api.start();
+  t.mock.timers.tick(1_000);
+  await new Promise(setImmediate);
+  assert.equal(api.resolved(), true);
+  assert.equal(hits, 3);
+  assert.equal(renderSeatSelectors.mock.callCount(), 0);
+  api.finish();
+  assert.equal(renderSeatSelectors.mock.callCount(), 1);
+});
+
 test('Arena applies availability that finished during a match when the match ends', async (t) => {
   const response = Promise.withResolvers();
   const head = t.mock.method(globalThis, 'fetch', () => response.promise.then(() => new Response(null, { status: 200 })));

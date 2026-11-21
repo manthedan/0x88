@@ -2881,7 +2881,7 @@ function refreshStockfishControls(): void {
 }
 
 async function refreshBigNetAvailability(mountSignal = mountAbort.signal): Promise<void> {
-  if (bt4AvailabilityResolved || probingSeatOptions || running || startPending) return;
+  if (bt4AvailabilityResolved || probingSeatOptions) return;
   probingSeatOptions = true;
   try {
     const configs = [BIG_NETS.bt4, BIG_NETS.t3];
@@ -5146,7 +5146,9 @@ function revokeArenaPhoneLargeNets(): void {
 }
 
 function wireEvents() {
-  const probeSeatOptions = () => void refreshBigNetAvailability();
+  const probeSeatOptions = () => {
+    if (!running && !startPending) void refreshBigNetAvailability();
+  };
   el('arenaSeatList').addEventListener('focusin', probeSeatOptions);
   el('arenaSeatList').addEventListener('pointerenter', probeSeatOptions);
   window.addEventListener(PHONE_LARGE_NET_CHANGE_EVENT, revokeArenaPhoneLargeNets, { signal: mountAbort.signal });
