@@ -63,6 +63,7 @@ test('lc0AnalysisLines builds MultiPV lines with SAN and root-mover score', () =
   assert.ok(lines[0].scoreCp > 0, 'white is slightly better on the d4 line');
   assert.match(lines[0].pvSan, /^d4 d5 c4/);
   assert.equal(lines[0].detail, '21 visits');
+  assert.equal(lines[0].engineSummary, '40 total visits');
   assert.match(lines[1].pvSan, /^Nf3 Nf6/);
 });
 

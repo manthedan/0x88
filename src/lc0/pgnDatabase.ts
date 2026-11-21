@@ -61,8 +61,9 @@ export interface PgnDatabaseBackup {
 }
 
 const DB_NAME = 'lc0-analysis-pgn-database';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = 'collections';
+const META_STORE = 'collectionMeta';
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -93,16 +94,25 @@ function openDatabase(): Promise<IDBDatabase> {
       clearTimeout(timer);
       reject(new Error('Local storage is blocked by another tab. Close other tabs and retry.'));
     };
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
+      const tx = request.transaction!;
       if (abandoned) {
-        request.transaction?.abort();
+        tx.abort();
         return;
       }
+      clearTimeout(timer);
       const db = request.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        const store = db.createObjectStore(STORE, { keyPath: 'id' });
-        store.createIndex('updatedAt', 'updatedAt');
-        store.createIndex('name', 'name');
+      const meta = db.createObjectStore(META_STORE, { keyPath: 'id' });
+      if (event.oldVersion === 0) {
+        db.createObjectStore(STORE, { keyPath: 'id' });
+      } else {
+        const records = tx.objectStore(STORE).openCursor();
+        records.onsuccess = () => {
+          const cursor = records.result;
+          if (!cursor) return;
+          meta.put(collectionSummary(cursor.value as PgnCollectionRecord));
+          cursor.continue();
+        };
       }
     };
     request.onsuccess = () => {
@@ -196,11 +206,16 @@ function collectionSummary(record: PgnCollectionRecord): PgnCollectionSummary {
   return summary;
 }
 
+function writeCollection(tx: IDBTransaction, record: PgnCollectionRecord): void {
+  tx.objectStore(STORE).put(record);
+  tx.objectStore(META_STORE).put(collectionSummary(record));
+}
+
 export async function listPgnCollections(): Promise<PgnCollectionSummary[]> {
   const db = await openDatabase();
   try {
-    const records = await requestToPromise<PgnCollectionRecord[]>(db.transaction(STORE, 'readonly').objectStore(STORE).getAll());
-    return records.map(collectionSummary).sort((a, b) => b.updatedAt - a.updatedAt || a.name.localeCompare(b.name));
+    const summaries = await requestToPromise<PgnCollectionSummary[]>(db.transaction(META_STORE).objectStore(META_STORE).getAll());
+    return summaries.sort((a, b) => b.updatedAt - a.updatedAt || a.name.localeCompare(b.name));
   } finally {
     db.close();
   }
@@ -218,9 +233,8 @@ export async function loadPgnCollection(id: string): Promise<PgnCollectionRecord
 export async function savePgnCollection(input: SavePgnCollectionInput): Promise<PgnCollectionRecord> {
   const db = await openDatabase();
   try {
-    const existing = input.id
-      ? await requestToPromise<PgnCollectionRecord | undefined>(db.transaction(STORE, 'readonly').objectStore(STORE).get(input.id))
-      : undefined;
+    const tx = db.transaction([STORE, META_STORE], 'readwrite');
+    const existing = input.id ? await requestToPromise<PgnCollectionSummary | undefined>(tx.objectStore(META_STORE).get(input.id)) : undefined;
     const now = Date.now();
     const record: PgnCollectionRecord = {
       id: existing?.id ?? input.id ?? newId(),
@@ -236,8 +250,7 @@ export async function savePgnCollection(input: SavePgnCollectionInput): Promise<
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(record);
+    writeCollection(tx, record);
     await transactionDone(tx);
     return record;
   } finally {
@@ -248,11 +261,11 @@ export async function savePgnCollection(input: SavePgnCollectionInput): Promise<
 export async function renamePgnCollection(id: string, name: string): Promise<PgnCollectionRecord> {
   const db = await openDatabase();
   try {
-    const existing = await requestToPromise<PgnCollectionRecord | undefined>(db.transaction(STORE, 'readonly').objectStore(STORE).get(id));
+    const tx = db.transaction([STORE, META_STORE], 'readwrite');
+    const existing = await requestToPromise<PgnCollectionRecord | undefined>(tx.objectStore(STORE).get(id));
     if (!existing) throw new Error('Saved PGN collection not found');
     const record: PgnCollectionRecord = { ...existing, name: sanitizePgnCollectionName(name, existing.name), updatedAt: Date.now() };
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(record);
+    writeCollection(tx, record);
     await transactionDone(tx);
     return record;
   } finally {
@@ -273,8 +286,8 @@ export async function duplicatePgnCollection(id: string, name?: string): Promise
       createdAt: now,
       updatedAt: now,
     };
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(record);
+    const tx = db.transaction([STORE, META_STORE], 'readwrite');
+    writeCollection(tx, record);
     await transactionDone(tx);
     return record;
   } finally {
@@ -285,14 +298,13 @@ export async function duplicatePgnCollection(id: string, name?: string): Promise
 export async function updatePgnCollectionPositionIndex(id: string, positionIndex: OpeningPositionIndex): Promise<void> {
   const db = await openDatabase();
   try {
-    const tx = db.transaction(STORE, 'readwrite');
-    const store = tx.objectStore(STORE);
-    const record = await requestToPromise<PgnCollectionRecord | undefined>(store.get(id));
+    const tx = db.transaction([STORE, META_STORE], 'readwrite');
+    const record = await requestToPromise<PgnCollectionRecord | undefined>(tx.objectStore(STORE).get(id));
     if (record) {
       record.positionIndex = positionIndex;
       record.indexVersion = OPENING_INDEX_VERSION;
       record.indexedPositionCount = Object.keys(positionIndex).length;
-      store.put(record);
+      writeCollection(tx, record);
     }
     await transactionDone(tx);
   } finally {
@@ -303,8 +315,9 @@ export async function updatePgnCollectionPositionIndex(id: string, positionIndex
 export async function deletePgnCollection(id: string): Promise<void> {
   const db = await openDatabase();
   try {
-    const tx = db.transaction(STORE, 'readwrite');
+    const tx = db.transaction([STORE, META_STORE], 'readwrite');
     tx.objectStore(STORE).delete(id);
+    tx.objectStore(META_STORE).delete(id);
     await transactionDone(tx);
   } finally {
     db.close();
@@ -339,7 +352,7 @@ export async function exportPgnDatabaseBackup(now = new Date(), collectionId?: s
   }
 }
 
-export function rebuildPgnCollectionIndex(collection: SavePgnCollectionInput): SavePgnCollectionInput {
+export function rebuildPgnCollectionIndex<T extends SavePgnCollectionInput>(collection: T) {
   const games = storedPgnChunks(collection.pgn).flatMap((chunk, i) => parseLocalPgnGame(chunk, i + 1) ?? []);
   if (!games.length) throw new Error('No playable moves in this collection.');
   const positionIndex = buildOpeningPositionIndex(games);
@@ -347,6 +360,7 @@ export function rebuildPgnCollectionIndex(collection: SavePgnCollectionInput): S
     ...collection,
     gameCount: games.length,
     positionIndex,
+    indexVersion: OPENING_INDEX_VERSION,
     indexedPositionCount: Object.keys(positionIndex).length,
   };
 }
@@ -379,9 +393,9 @@ export async function importPgnDatabaseBackup(
   signal?.throwIfAborted();
   const db = await openDatabase();
   try {
-    const tx = db.transaction(STORE, 'readwrite');
+    const tx = db.transaction([STORE, META_STORE], 'readwrite');
     const done = transactionDone(tx);
-    for (const collection of collections) tx.objectStore(STORE).put(collection);
+    for (const collection of collections) writeCollection(tx, collection);
     await done;
   } finally {
     db.close();
@@ -390,19 +404,34 @@ export async function importPgnDatabaseBackup(
   return collections.length;
 }
 
+async function persistRebuiltIndex(db: IDBDatabase, rebuilt: PgnCollectionRecord): Promise<void> {
+  const { id, pgn, positionIndex, indexVersion, indexedPositionCount, gameCount } = rebuilt;
+  const tx = db.transaction([STORE, META_STORE], 'readwrite');
+  const current = await requestToPromise<PgnCollectionRecord | undefined>(tx.objectStore(STORE).get(id));
+  if (current?.pgn === pgn && current.indexVersion !== OPENING_INDEX_VERSION) {
+    writeCollection(tx, { ...current, positionIndex, indexVersion, indexedPositionCount, gameCount });
+  }
+  await transactionDone(tx);
+}
+
 export async function searchPgnCollectionsByPosition(fen: string): Promise<PgnPositionSearchResult[]> {
   const key = positionKey(fen);
   const db = await openDatabase();
   try {
     const records = await requestToPromise<PgnCollectionRecord[]>(db.transaction(STORE, 'readonly').objectStore(STORE).getAll());
-    return records
-      .map((record) => {
-        const index = record.indexVersion === OPENING_INDEX_VERSION ? record.positionIndex : rebuildPgnCollectionIndex(record).positionIndex;
-        const stats = index?.[key] ?? [];
-        return { summary: collectionSummary(record), stats, total: openingSummary(stats).total };
-      })
-      .filter((result) => result.total > 0)
-      .sort((a, b) => b.total - a.total || b.summary.updatedAt - a.summary.updatedAt || a.summary.name.localeCompare(b.summary.name));
+    const results: PgnPositionSearchResult[] = [];
+    records.reverse();
+    while (records.length) {
+      let record = records.pop()!;
+      if (record.indexVersion !== OPENING_INDEX_VERSION) {
+        record = rebuildPgnCollectionIndex(record);
+        await persistRebuiltIndex(db, record).catch(() => {});
+      }
+      const stats = record.positionIndex?.[key] ?? [];
+      const total = openingSummary(stats).total;
+      if (total > 0) results.push({ summary: collectionSummary(record), stats, total });
+    }
+    return results.sort((a, b) => b.total - a.total || b.summary.updatedAt - a.summary.updatedAt || a.summary.name.localeCompare(b.summary.name));
   } finally {
     db.close();
   }

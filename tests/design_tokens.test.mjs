@@ -7,6 +7,13 @@ import { fileURLToPath } from 'node:url';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SHELL_PATH = join(ROOT, 'src', 'styles', 'app-shell.css');
 
+test('engine selectors retain the shared select chevron and leave room for it', async () => {
+  const css = await readFile(SHELL_PATH, 'utf8');
+  const rule = /\.engine-row select\{([^}]+)\}/.exec(css)[1];
+  assert.doesNotMatch(rule, /\bbackground\s*:/);
+  assert.match(rule, /padding:\s*6px 30px 6px 8px/);
+});
+
 /* ---------- file collection ---------- */
 
 async function collectFiles(dir, exts, out = []) {

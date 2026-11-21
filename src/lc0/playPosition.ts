@@ -1,4 +1,4 @@
-import { type BoardState, boardToFen, parseFen, START_FEN } from '../chess/board.ts';
+import type { BoardState } from '../chess/board.ts';
 import { type Move, moveToUci } from '../chess/moveCodec.ts';
 import { gameTreeToPgn } from '../chess/pgn.ts';
 import { gameOutcome } from './engineBattle.ts';
@@ -88,10 +88,8 @@ export function playTakebackPly(positions: BoardState[], human: 'w' | 'b', bound
   return ply;
 }
 
-/** Shared by Copy, Download and Analyze; header choice follows the game's root, not its current FEN. */
 export function playGameToPgn(startFen: string, moves: Move[], tags: Record<string, string> = {}, result = '*'): string {
   const tree = new GameTree(startFen);
   for (const move of moves) tree.addMove(move);
-  const root = boardToFen(parseFen(startFen));
-  return gameTreeToPgn(tree, { ...tags, ...(root === START_FEN ? {} : { SetUp: '1', FEN: root }) }, result);
+  return gameTreeToPgn(tree, tags, result);
 }

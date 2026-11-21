@@ -430,7 +430,7 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
   .play-workspace:global([data-phase=setup]) .play-hint{display:block}
   .play-workspace:global([data-phase=setup]) .game-actions{gap:8px}
   .play-workspace:global(:not([data-phase=setup]):not([data-config=open])) :is(.setup-pane, .settings-disclosure){display:none}
-  .play-workspace:global(:not([data-phase=setup])[data-config=open]) .setup-pane{flex:0 1 auto; max-height:58%; border-bottom:1px solid var(--rule)}
+  .play-workspace:global(:not([data-phase=setup])[data-config=open]) .setup-pane{flex:none; border-bottom:1px solid var(--rule)}
   .play-workspace:global([data-phase=over]) #resign{display:none}
   .play-workspace:global([data-phase=over]) .game-actions{grid-template-columns:1fr 1fr}
 
@@ -450,7 +450,6 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
     .play-workspace .play-sidebar{max-height:none; overflow:visible}
     .board-panel{scroll-margin-top:74px}
     :global(#moveList.move-list){max-height:180px}
-    .play-workspace:global(:not([data-phase=setup])[data-config=open]) .setup-pane{max-height:none}
     .move-nav button, .move-form input, .game-actions button, .record-actions :is(button,a){min-height:44px}
     :global(#moveList.move-list){--row-h:44px}
   }

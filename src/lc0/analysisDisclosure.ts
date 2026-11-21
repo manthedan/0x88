@@ -1,3 +1,22 @@
+export function mountPositionTools(panel: HTMLDetailsElement, input: HTMLInputElement, triggers: HTMLElement[], signal: AbortSignal): void {
+  const sync = () => {
+    for (const trigger of triggers) trigger.setAttribute('aria-expanded', String(panel.open));
+  };
+  for (const trigger of triggers) {
+    trigger.addEventListener(
+      'click',
+      () => {
+        panel.open = !panel.open;
+        sync();
+        if (panel.open) input.focus();
+      },
+      { signal },
+    );
+  }
+  panel.addEventListener('toggle', sync, { signal });
+  sync();
+}
+
 /** Button disclosure shared by Copy and the mobile board tools. Native Tab order, no menu trap. */
 export function mountAnalysisDisclosure(options: {
   root: HTMLElement;

@@ -62,6 +62,40 @@ test('live strength changes keep their existing policy and cannot change opponen
   assert.equal(state.active.level, 1);
 });
 
+test('the setup disclosure describes the selected draft while the live opponent stays unchanged', () => {
+  const source = readFileSync(new URL('../src/lc0/playBrowser.ts', import.meta.url), 'utf8');
+  const controls = source.slice(source.indexOf('function ctxRenderMaia3Controls('), source.indexOf('function ctxSetRuntimeWarning('));
+  const render = new Function(
+    'ctxDraftEngine',
+    'ctxSelectedMaia3Elo',
+    'maiaRatingBand',
+    'ctxSelectedMaia3Style',
+    `${stripTypeScriptTypes(controls)}; return ctxRenderMaia3Controls;`,
+  )(
+    (ctx) => ({ family: (ctx.opponent.pending ?? ctx.opponent.active).engineId === 'maia3' ? 'maia3' : 'lc0' }),
+    () => 1700,
+    () => 'Club',
+    () => 'sample',
+  );
+  const nodes = new Map();
+  const ctx = {
+    opponent: committedPlayOpponent(preferences),
+    dom: {
+      el(id) {
+        if (!nodes.has(id)) nodes.set(id, { style: {}, setAttribute() {} });
+        return nodes.get(id);
+      },
+    },
+  };
+  render(ctx);
+  assert.equal(nodes.get('detailsLabel').textContent, 'Exact rating & opponent details');
+  ctx.opponent = edit(ctx.opponent, { engineId: 'lc0-small' });
+  render(ctx);
+  assert.equal(ctx.opponent.active.engineId, 'maia3');
+  assert.equal(nodes.get('maia3Advanced').hidden, true);
+  assert.equal(nodes.get('detailsLabel').textContent, 'Opponent details');
+});
+
 test('Stormphrax residency is retired at commit, never while restart consent is pending', async () => {
   const disposed = [];
   const engines = createPlayEngines({

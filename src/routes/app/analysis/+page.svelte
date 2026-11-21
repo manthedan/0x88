@@ -88,7 +88,7 @@ onMount(() => {
       <button id="navForward" type="button" title="Forward (Right)" aria-label="Go forward one move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 8 7-8 7" /></svg></button>
       <button id="navEnd" type="button" title="End (Down)" aria-label="Go to last move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M6 5l8 7-8 7" /></svg></button>
     </div>
-    <button id="emptyLoadGame" class="tool-button empty-load-game" type="button" title="Load a game (PGN or FEN)" aria-label="Load a game (PGN or FEN)">Load</button>
+    <button id="emptyLoadGame" class="tool-button empty-load-game" type="button" aria-controls="positionTools" aria-expanded="false" title="Load a game (PGN or FEN)" aria-label="Load a game (PGN or FEN)">Load</button>
     <div id="boardToolDisclosure" class="board-tool-disclosure">
     <button id="boardToolsButton" class="tool-button board-tools-trigger" type="button" aria-label="Board tools" title="Board tools" aria-controls="boardTools" aria-expanded="false">•••</button>
     <div id="boardTools" class="board-tools" role="group" aria-label="Board tools">
@@ -1060,15 +1060,19 @@ onMount(() => {
     .analysis-workspace :global(.analysis-content[data-view=engines] > .engine-strip){display:flex}
     .analysis-status{grid-column:1; grid-row:1}
     .analysis-overview button{grid-row:1; height:44px}
+    .eval-chip, :global(.compare-move){min-height:44px}
+    :global(.engine-summary .compare-move){height:44px}
+    :global(.engine-lines .pv){height:44px}
+    :global(.engine-lines .pv-move), :global(.line-preview){min-width:44px; min-height:44px}
     .manage-engines{grid-column:2}
     .manage-label, .manage-engines .engine-count{display:none}
     .run-action{grid-column:4; justify-self:end}
     .add-engine-inline{grid-column:3}
     /* Budget about 316px for the controls and spacing, plus 101px for the spinner and status. */
     @container (max-width:420px){
-      .analysis-overview{grid-template-columns:minmax(0,1fr) auto auto}
-      .run-action{grid-column:2 / -1}
-      .analysis-overview :is(.manage-engines, .add-engine-inline){grid-row:2}
+      .analysis-overview:has(#stop:not(:disabled)){grid-template-columns:minmax(0,1fr) auto auto}
+      .analysis-overview:has(#stop:not(:disabled)) .run-action{grid-column:2 / -1}
+      .analysis-overview:has(#stop:not(:disabled)) :is(.manage-engines, .add-engine-inline){grid-row:2}
     }
     .workbench-tabs{grid-column:1 / -1; grid-row:calc(2 + var(--restore-row)); position:sticky; top:var(--analysis-header-height); z-index:10}
     #enginesTab{display:inline-flex}
@@ -1100,7 +1104,7 @@ onMount(() => {
     .board-panel{padding:0; border:0; background:transparent}
     .board-readout{min-height:44px; padding:0; gap:4px}
     .eval-turn{display:none}
-    .eval-chip{min-width:0; max-width:200px; gap:5px; padding:0 5px; min-height:28px}
+    .eval-chip{min-width:0; max-width:200px; gap:5px; padding:0 5px}
     .eval-score, .eval-caret{flex-shrink:0}
     .eval-source{font-size:0}
     .eval-source:global([data-short]:not([data-short='']))::before{margin-right:0}
@@ -1189,9 +1193,7 @@ onMount(() => {
     :global(.line-play){min-height:26px; padding-left:8px}
     :global(.result-line){min-height:26px}
     :global(.line-toggle){min-height:44px; min-width:68px; font-size:11.5px}
-    :global(.line-preview){width:36px}
-    :global(.engine-lines .pv){height:26px}
-    :global(.line-preview), :global(.engine-lines .pv-move){min-height:26px; padding-block:1px}
+    :global(.line-preview), :global(.engine-lines .pv-move){padding-block:1px}
     :global(.engine-lines .line-error), :global(.engine-lines .pending-line){padding-left:36px}
     .position-tools :is(button, input), .pgn-actions button{min-height:44px}
     .analysis-workspace .section-block{padding:8px 10px}

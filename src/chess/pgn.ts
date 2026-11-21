@@ -558,9 +558,20 @@ export function serializeMovetext(tree: GameTree): string {
   return [...intro, serializeLine(tree.root, true)].filter(Boolean).join(' ');
 }
 
+export function setPgnStartTags(tags: Record<string, string>, fen: string): void {
+  if (fen === START_FEN) {
+    delete tags.SetUp;
+    delete tags.FEN;
+  } else {
+    tags.SetUp = '1';
+    tags.FEN = fen;
+  }
+}
+
 /** Serialize a full PGN (tags + movetext + result). */
 export function gameTreeToPgn(tree: GameTree, tags: Record<string, string> = {}, result = '*'): string {
   const tagPairs = { Event: '?', Site: '?', Date: '????.??.??', Round: '?', White: '?', Black: '?', Result: result, ...tags };
+  setPgnStartTags(tagPairs, tree.root.fen);
   const header = Object.entries(tagPairs)
     .map(
       ([k, v]) =>

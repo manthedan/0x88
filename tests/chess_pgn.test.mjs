@@ -9,6 +9,25 @@ import { GameTree } from '../src/lc0/gameTree.ts';
 
 const mainline = (game) => game.tree.mainlineFrom().map((node) => node.san);
 
+test('PGN exports round-trip with the tree root as the authoritative starting position', () => {
+  const fen = '4k3/8/8/8/8/8/4P3/4K3 b - - 0 17';
+  const tree = new GameTree(fen);
+  assert.ok(tree.addUci('e8d7'));
+  assert.ok(tree.addUci('e2e4'));
+  for (const tags of [{}, { SetUp: '0', FEN: START_FEN }]) {
+    const pgn = gameTreeToPgn(tree, tags);
+    const parsed = parsePgnGame(pgn, { strict: true });
+    assert.equal(parsed.tags.SetUp, '1');
+    assert.equal(parsed.tags.FEN, fen);
+    assert.match(pgn, /17\.\.\. Kd7 18\. e4/);
+    assert.equal(parsed.tree.root.fen, fen);
+    assert.equal(parsed.tree.mainlineFrom().at(-1).fen, tree.current.fen);
+  }
+  const standard = gameTreeToPgn(new GameTree(START_FEN), { SetUp: '1', FEN: fen, White: 'Alice' });
+  assert.doesNotMatch(standard, /\[(SetUp|FEN) /);
+  assert.match(standard, /\[White "Alice"\]/);
+});
+
 test('tolerant PGN parsing stops the mainline at an unresolvable move instead of skipping it', () => {
   const pgn = '1. e4 e5 2. Qh5 Nc6x 3. Bc4 Nf6 4. Qxf7# 1-0';
   const game = parsePgnGame(pgn);

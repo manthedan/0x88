@@ -1,7 +1,15 @@
+import { parseFen } from '../chess/board.ts';
+import { uciToSan } from '../chess/san.ts';
 import { evalBarWhitePercent } from './analysisFormat.ts';
 import type { ArenaChartSample } from './arenaCheckpoint.ts';
 import type { StockfishInfoLine } from './stockfishEngine.ts';
 import type { GameResultText, ScheduledGame } from './tournament.ts';
+
+export function arenaPreviousMoveLabel(fen: string, uci?: string): string {
+  if (!uci) return 'Previous search';
+  const board = parseFen(fen);
+  return `Previous move ${board.fullmove}${board.turn === 'b' ? '…' : '.'} ${uciToSan(board, uci)}`;
+}
 
 export function formatArenaPoints(value: number): string {
   return value % 1 ? `${Math.floor(value) || ''}½` : String(value);

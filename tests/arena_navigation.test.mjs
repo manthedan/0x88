@@ -40,6 +40,12 @@ test('Arena leave confirmation reports checkpoint failure instead of promising s
   }
 });
 
+test('mobile Arena settings and runtime disclosures get full-height touch targets', () => {
+  const route = readFileSync(new URL('../src/routes/app/arena/+page.svelte', import.meta.url), 'utf8');
+  const mobile = route.slice(route.indexOf('@media (max-width:900px){'));
+  assert.match(mobile, /\.arena-workspace \.section-block>summary, \.eng-more>summary, \.more-options>summary\{min-height:44px\}/);
+});
+
 test('unload is guarded only for an active run', () => {
   for (const active of [false, true]) {
     const event = {

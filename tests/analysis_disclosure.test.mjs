@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mountAnalysisDisclosure } from '../src/lc0/analysisDisclosure.ts';
+import { mountAnalysisDisclosure, mountPositionTools } from '../src/lc0/analysisDisclosure.ts';
 
 class Element extends EventTarget {
   hidden = false;
@@ -60,6 +60,35 @@ test('board tools and Copy use a disclosure with Escape focus restoration and ou
   trigger.dispatchEvent(new Event('click'));
   assert.equal(panel.hidden, true, 'unmount removes listeners');
 });
+test('both Load triggers open the FEN tools and reflect their actual expanded state', () => {
+  const { doc, trigger, panel, controller } = fixture();
+  const mobile = new Element(doc);
+  const fenInput = new Element(doc);
+  panel.open = false;
+  mountPositionTools(panel, fenInput, [trigger, mobile], controller.signal);
+  for (const button of [trigger, mobile]) {
+    button.dispatchEvent(new Event('click'));
+    assert.equal(panel.open, true);
+    assert.equal(doc.activeElement, fenInput);
+    assert.deepEqual(
+      [trigger, mobile].map((el) => el.attrs['aria-expanded']),
+      ['true', 'true'],
+    );
+    button.dispatchEvent(new Event('click'));
+    assert.equal(panel.open, false);
+    assert.deepEqual(
+      [trigger, mobile].map((el) => el.attrs['aria-expanded']),
+      ['false', 'false'],
+    );
+  }
+  panel.open = true;
+  panel.dispatchEvent(new Event('toggle'));
+  assert.deepEqual(
+    [trigger, mobile].map((el) => el.attrs['aria-expanded']),
+    ['true', 'true'],
+  );
+});
+
 test('desktop keeps existing tools visible; resizing to mobile closes them', () => {
   let mobile = false;
   const { trigger, panel, disclosure } = fixture(() => mobile);

@@ -140,7 +140,7 @@ export const ENGINE_FAMILY_DEFINITIONS = {
     shortLabel: 'SF',
     status: 'stable',
     docHref: 'docs/engine_catalog.md#stockfish-family',
-    note: 'NPM Stockfish 18 JS/WASM UCI baseline.',
+    note: 'Stockfish JS/WASM UCI baseline from npm.',
     runtime: 'uci',
     resource: { resourceClass: 'cpu', maxThreads: 32 },
     strength: {

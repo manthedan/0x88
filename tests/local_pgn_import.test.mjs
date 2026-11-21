@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 
 const originalIdb = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB');
 afterEach(() => {
@@ -233,78 +234,80 @@ test('local import cancellation prevents publication', async () => {
   );
 });
 
-// Minimal asynchronous IDB contract for storage tests. Browser verification also exercises real IndexedDB.
-function memoryDatabase() {
-  const records = new Map();
-  const db = {
-    close() {},
-    transaction() {
-      const tx = {
-        objectStore() {
-          return {
-            get(id) {
-              return request(records.get(id));
-            },
-            getAll() {
-              return request([...records.values()]);
-            },
-            put(record) {
-              records.set(record.id, structuredClone(record));
-              return request(record.id);
-            },
-            delete(id) {
-              records.delete(id);
-              return request(undefined);
-            },
-          };
-        },
-      };
-      setTimeout(() => tx.oncomplete?.(), 0);
-      return tx;
-    },
-  };
-  function request(value) {
-    const req = {};
-    queueMicrotask(() => {
-      req.result = structuredClone(value);
-      req.onsuccess?.();
-    });
-    return req;
-  }
-  return {
-    records,
-    open() {
-      const req = {};
-      queueMicrotask(() => {
-        req.result = db;
-        req.onsuccess?.();
-      });
-      return req;
-    },
-  };
+function installMemoryIdb() {
+  const factory = new IDBFactory();
+  Object.defineProperty(globalThis, 'indexedDB', { value: factory, configurable: true });
+  return factory;
 }
 
-// The database itself contains functions, so its open request must not structuredClone it.
-function installMemoryIdb() {
-  const database = memoryDatabase();
-  Object.defineProperty(globalThis, 'indexedDB', {
-    value: {
-      open() {
-        const req = {};
-        queueMicrotask(() => {
-          const connection = database.open();
-          connection.onsuccess = () => {
-            req.result = connection.result;
-            req.onsuccess?.();
-          };
-        });
-        return req;
-      },
-    },
-    configurable: true,
+for (const version of [1, 2]) {
+  test(`v${version} collections migrate without reading payloads for the list, and stale indexes persist`, async (t) => {
+    const indexedDB = installMemoryIdb();
+    const legacy = {
+      id: 'legacy',
+      name: 'Legacy',
+      pgn,
+      source: 'manual',
+      gameCount: 2,
+      createdAt: 1,
+      updatedAt: 2,
+      indexVersion: OPENING_INDEX_VERSION - 1,
+      positionIndex: { bogus: [] },
+      indexedPositionCount: 1,
+    };
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('lc0-analysis-pgn-database', version);
+      request.onupgradeneeded = () => {
+        const store = request.result.createObjectStore('collections', { keyPath: 'id' });
+        store.createIndex('updatedAt', 'updatedAt');
+        store.createIndex('name', 'name');
+        store.put(legacy);
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+
+    const { pgn: _text, positionIndex: _index, ...summary } = legacy;
+    const getAll = IDBObjectStore.prototype.getAll;
+    const listReads = t.mock.method(IDBObjectStore.prototype, 'getAll', function (...args) {
+      assert.notEqual(this.name, 'collections', 'list must not deserialize the payload store');
+      return getAll.apply(this, args);
+    });
+    assert.deepEqual(await listPgnCollections(), [summary]);
+    listReads.mock.restore();
+    assert.deepEqual(await loadPgnCollection(legacy.id), legacy);
+
+    const [hit] = await searchPgnCollectionsByPosition(START_FEN);
+    const stored = await loadPgnCollection(legacy.id);
+    const { positionIndex } = await importStoredPgn(pgn);
+    assert.equal(hit.total, 1);
+    assert.deepEqual(stored, {
+      ...legacy,
+      gameCount: 1,
+      indexVersion: OPENING_INDEX_VERSION,
+      positionIndex,
+      indexedPositionCount: Object.keys(positionIndex).length,
+    });
+    assert.deepEqual(await listPgnCollections(), [hit.summary]);
+
+    const writes = t.mock.method(IDBObjectStore.prototype, 'put');
+    assert.deepEqual(await searchPgnCollectionsByPosition(START_FEN), [hit]);
+    assert.equal(writes.mock.callCount(), 0);
   });
-  return database;
 }
+
+test('each stale collection index is committed before processing the next collection', async () => {
+  installMemoryIdb();
+  await savePgnCollection({ id: 'a', name: 'Playable', pgn, gameCount: 1 });
+  await savePgnCollection({ id: 'b', name: 'Invalid', pgn: '1. notamove *', gameCount: 1 });
+
+  await assert.rejects(searchPgnCollectionsByPosition(START_FEN), /Invalid PGN move/);
+  const first = await loadPgnCollection('a');
+  assert.equal(first.indexVersion, OPENING_INDEX_VERSION);
+  assert.deepEqual(first.positionIndex, (await importStoredPgn(pgn)).positionIndex);
+  assert.equal((await listPgnCollections()).find(({ id }) => id === 'a').indexVersion, OPENING_INDEX_VERSION);
+});
 
 test('IndexedDB denied, missing, and blocked failures settle without hanging', async () => {
   Object.defineProperty(globalThis, 'indexedDB', { value: undefined, configurable: true });
@@ -350,7 +353,12 @@ test('backup round trip rebuilds poisoned indexes and collection CRUD stays loca
   const copy = await duplicatePgnCollection(record.id);
   await renamePgnCollection(copy.id, 'Renamed');
   assert.equal((await loadPgnCollection(copy.id)).name, 'Renamed');
+  assert.equal((await listPgnCollections()).find(({ id }) => id === copy.id).name, 'Renamed');
   await deletePgnCollection(copy.id);
+  assert.deepEqual(
+    (await listPgnCollections()).map(({ id }) => id),
+    [record.id],
+  );
   assert.equal((await exportPgnDatabaseBackup(new Date(), record.id)).collections.length, 1);
   const backup = JSON.parse(JSON.stringify(await exportPgnDatabaseBackup()));
   assert.equal(backup.collections.length, 1);

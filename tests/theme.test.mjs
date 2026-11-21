@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { runInNewContext } from 'node:vm';
 
 let instance = 0;
 async function fixture(saved) {
@@ -99,4 +100,18 @@ test('stored choices, including choices pinned by the old bug, remain respected'
   }
   const shell = readFileSync(new URL('../src/app.html', import.meta.url), 'utf8');
   assert.match(shell, /localStorage.getItem\('0x88-theme'\)/);
+});
+
+test('app bootstrap leaves the console available for ORT’s own filter', () => {
+  const shell = readFileSync(new URL('../src/app.html', import.meta.url), 'utf8');
+  const log = () => {};
+  const context = {
+    console: { log, warn: log, error: log },
+    localStorage: { getItem: () => null },
+    location: { search: '' },
+  };
+  context.window = context;
+  for (const [, script] of shell.matchAll(/<script>([\s\S]*?)<\/script>/g)) runInNewContext(script, context);
+  assert.equal(context.__lc0OrtConsoleNoiseFilterInstalled, undefined);
+  assert.equal(context.console.log, log);
 });
