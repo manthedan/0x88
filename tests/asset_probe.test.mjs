@@ -5,10 +5,79 @@ import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscri
 import { berserkVariantAssetStatus, checkBerserkVariantAsset } from '../src/lc0/berserkVariants.ts';
 import { browserVariantOption } from '../src/lc0/browserVariantOption.ts';
 import { bigNetAssetStatusSync, bigNetOptionState, checkBigNetAsset } from '../src/lc0/bt4Engine.ts';
+import { createEngineArtifactLoader } from '../src/lc0/engineArtifacts.ts';
 import { checkPlentyChessVariantAsset, plentyChessVariantAssetStatus } from '../src/lc0/plentychessVariants.ts';
 import { checkRecklessVariantAsset, recklessVariantAssetStatus } from '../src/lc0/recklessVariants.ts';
 import { checkStormphraxVariantAsset, stormphraxVariantAssetStatus } from '../src/lc0/stormphraxVariants.ts';
 import { checkViridithasVariantAsset, viridithasVariantAssetStatus } from '../src/lc0/viridithasVariants.ts';
+
+test('an offline CPU picker and verified loader use cached GETs, not network HEADs', async (t) => {
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+  t.after(() => delete navigator.onLine);
+  const variant = { key: 'custom', jsUrl: '/berserk/offline.js', wasmUrl: '/berserk/offline.wasm', dataUrl: '/berserk/offline.data' };
+  const cancelled = t.mock.fn();
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    assert.notEqual(options.method, 'HEAD');
+    assert.equal(options.cache, 'force-cache');
+    return new Response(new ReadableStream({ cancel: cancelled }));
+  });
+  assert.equal(await checkBerserkVariantAsset(variant), 'present');
+  assert.equal(cancelled.mock.callCount(), 3);
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url, variant.wasmUrl);
+    assert.equal(options.cache, 'force-cache');
+    return new Response('abc');
+  });
+  const loader = createEngineArtifactLoader({
+    [variant.wasmUrl]: { bytes: 3, sha256: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad' },
+  });
+  assert.equal(new TextDecoder().decode(await loader.bytes(variant.wasmUrl)), 'abc');
+});
+
+test('transient HEAD failures probe the cache even when the browser reports online', async (t) => {
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+  t.after(() => delete navigator.onLine);
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (options.method === 'HEAD') {
+      if (url === '/offline-wifi') throw new TypeError('network unreachable');
+      return new Response(null, { status: Number(url.slice(1)) });
+    }
+    assert.equal(options.cache, 'force-cache');
+    return new Response('abc');
+  });
+  for (const [url, expected] of [
+    ['/offline-wifi', 'present'],
+    ['/503', 'present'],
+    ['/404', 'missing'],
+    ['/410', 'missing'],
+  ]) {
+    assert.equal(await probeAssetUrls([url]), expected);
+  }
+});
+
+test('a stalled HEAD is aborted in time to probe the cache within the overall deadline', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let headSignal;
+  const fetch = t.mock.method(globalThis, 'fetch', (_url, options) => {
+    assert.equal(options.method, 'HEAD');
+    headSignal = options.signal;
+    return new Promise(() => {});
+  });
+  const probeCached = t.mock.fn((_url, signal) => {
+    assert.equal(headSignal.aborted, true);
+    assert.equal(signal.aborted, false);
+    return new Promise((resolve) => setTimeout(() => resolve(!signal.aborted), 100));
+  });
+  const result = probeAssetUrls(['/stalled-head'], { probeCached });
+  assert.equal(fetch.mock.callCount(), 1);
+  t.mock.timers.tick(6_000);
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  t.mock.timers.tick(1_000);
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  t.mock.timers.tick(1_000);
+  assert.equal(await result, 'present');
+  assert.equal(probeCached.mock.callCount(), 1);
+});
 
 for (const code of [404, 410]) {
   test(`confirmed ${code} resolves missing even when another required HEAD hangs`, async (t) => {
@@ -42,7 +111,7 @@ test('shared probe classifies HTTP status, network errors and bounded aborts', a
     [500, 'unknown'],
     [503, 'unknown'],
   ]) {
-    t.mock.method(globalThis, 'fetch', async () => new Response(null, { status }));
+    t.mock.method(globalThis, 'fetch', async (_url, options) => new Response(null, { status: options.method === 'HEAD' ? status : 503 }));
     assert.equal(await probeAssetUrls([`/engine-${status}`]), expected, String(status));
   }
   t.mock.method(globalThis, 'fetch', async () => {
@@ -74,8 +143,8 @@ for (const [name, check, ok] of [
     };
     let calls = 0;
     let status = 503;
-    t.mock.method(globalThis, 'fetch', async () => {
-      calls++;
+    t.mock.method(globalThis, 'fetch', async (_url, options) => {
+      if (options.method === 'HEAD') calls++;
       return new Response(null, { status });
     });
     assert.equal(await check(variant), 'unknown');
@@ -119,8 +188,8 @@ for (const [name, check] of [
         dataUrl: `/${name}/persistent-${immediate}.data`,
         modelUrl: `/${name}/persistent-${immediate}.onnx`,
       };
-      t.mock.method(globalThis, 'fetch', async () => {
-        calls++;
+      t.mock.method(globalThis, 'fetch', async (_url, options) => {
+        if (options.method === 'HEAD') calls++;
         if (immediate) throw new TypeError('malformed custom URL');
         return new Response(null, { status: 503 });
       });
@@ -179,8 +248,8 @@ for (const [name, check, read, ok] of [
       let calls = 0;
       let notifications = 0;
       let status = 503;
-      t.mock.method(globalThis, 'fetch', async () => {
-        calls++;
+      t.mock.method(globalThis, 'fetch', async (_url, options) => {
+        if (options.method === 'HEAD') calls++;
         return new Response(null, { status });
       });
       // The pickers render synchronously on each notification and immediately
@@ -261,7 +330,7 @@ test('the shared helper keeps exhausted probes missing without more requests', a
   assert.equal(await probeAssetUrls(urls), 'missing');
   t.mock.timers.tick(120_000);
   assert.equal(await probeAssetUrls(urls), 'missing');
-  assert.equal(fetch.mock.callCount(), 3);
+  assert.equal(fetch.mock.callCount(), 6, 'three HEADs plus three cache attempts');
 });
 
 // Match Analysis/Arena: every callback is a fresh closure, and each render
@@ -289,8 +358,7 @@ for (const [name, check, read, ok, headsPerVariant] of [
         let renders = 1;
         let status = 503;
         t.mock.method(globalThis, 'fetch', async (_url, options) => {
-          assert.equal(options.method, 'HEAD');
-          requests++;
+          if (options.method === 'HEAD') requests++;
           return new Response(null, { status });
         });
         const render = () => {
@@ -429,14 +497,12 @@ for (const exit of ['unsubscribe', 'abort', 'never called again']) {
     const controller = new AbortController();
     let notifications = 0;
     let finish;
-    t.mock.method(
-      globalThis,
-      'fetch',
-      () =>
-        new Promise((resolve) => {
-          finish = resolve;
-        }),
-    );
+    t.mock.method(globalThis, 'fetch', (_url, options) => {
+      if (options.method !== 'HEAD') return Promise.resolve(new Response(null, { status: 503 }));
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    });
     const unsubscribe = subscribeAssetProbeChange(urls, () => notifications++, controller.signal);
     const probe = probeAssetUrls(urls);
     if (exit === 'unsubscribe') unsubscribe();

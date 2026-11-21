@@ -108,12 +108,34 @@ export function assetProbeRetryAllowed(urls: readonly string[], onRetry?: () => 
   return false;
 }
 
+async function probeHttpCache(url: string, signal: AbortSignal): Promise<boolean> {
+  const response = await fetch(url, { cache: 'force-cache', mode: 'cors', credentials: 'same-origin', signal });
+  void response.body?.cancel().catch(() => undefined);
+  return response.ok;
+}
+
+function headAbortSignal(group: AbortSignal, head: AbortController): { signal: AbortSignal; cleanup?: () => void } {
+  if (typeof AbortSignal.any === 'function') return { signal: AbortSignal.any([group, head.signal]) };
+  const forwardAbort = () => head.abort(group.reason);
+  if (group.aborted) forwardAbort();
+  else group.addEventListener('abort', forwardAbort, { once: true });
+  return { signal: head.signal, cleanup: () => group.removeEventListener('abort', forwardAbort) };
+}
+
 /** Only HTTP success and 404/410 are definitive. A bounded transient failure
  * leaves availability unknown until the third attempt, then settles missing for
  * the session so existing pickers stop displaying checking indefinitely. */
 export async function probeAssetUrls(
   urls: readonly string[],
-  { timeoutMs = 8_000, signal }: { timeoutMs?: number; signal?: AbortSignal } = {},
+  {
+    timeoutMs = 8_000,
+    signal,
+    probeCached = probeHttpCache,
+  }: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    probeCached?: (url: string, signal: AbortSignal) => Promise<boolean>;
+  } = {},
 ): Promise<AssetProbeStatus> {
   const key = JSON.stringify(urls);
   if ((failures.get(key)?.attempts ?? 0) >= maxAttempts) {
@@ -134,21 +156,37 @@ export async function probeAssetUrls(
   const timer = setTimeout(abort, Math.max(1, timeoutMs));
   (timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
   if (signal?.aborted) abort();
+  const head = globalThis.navigator?.onLine === false ? undefined : new AbortController();
+  const headAbort = head && headAbortSignal(controller.signal, head);
+  const headSignal = headAbort?.signal;
+  let headTimer: ReturnType<typeof setTimeout> | undefined;
+  const headDeadline =
+    head &&
+    new Promise<undefined>((resolve) => {
+      headTimer = setTimeout(
+        () => {
+          resolve(undefined);
+          head.abort();
+        },
+        Math.max(1, Math.floor(timeoutMs * 0.75)),
+      );
+      (headTimer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
+    });
   try {
     const statuses = Promise.all(
       urls.map(async (url): Promise<AssetProbeStatus> => {
-        try {
-          const response = await fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal });
-          if (response.ok) return 'present';
-          if (response.status === 404 || response.status === 410) {
+        if (headSignal) {
+          const response = await Promise.race([fetch(url, { method: 'HEAD', cache: 'no-store', signal: headSignal }).catch(() => undefined), headDeadline]);
+          if (response?.ok) return 'present';
+          if (response?.status === 404 || response?.status === 410) {
             finish('missing');
             controller.abort();
             return 'missing';
           }
-          return 'unknown';
-        } catch {
-          return 'unknown';
+          if (response && response.status < 500 && response.status !== 408 && response.status !== 429) return 'unknown';
         }
+        if (controller.signal.aborted) return 'unknown';
+        return (await probeCached(url, controller.signal).catch(() => false)) ? 'present' : 'unknown';
       }),
     ).then((results): AssetProbeStatus => (results.includes('missing') ? 'missing' : results.every((status) => status === 'present') ? 'present' : 'unknown'));
     const status = await Promise.race([statuses, cancelled]);
@@ -167,6 +205,8 @@ export async function probeAssetUrls(
   } finally {
     notifyAssetProbeChange(urls);
     clearTimeout(timer);
+    clearTimeout(headTimer);
+    headAbort?.cleanup?.();
     signal?.removeEventListener('abort', abort);
   }
 }

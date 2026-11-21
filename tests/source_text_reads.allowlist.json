@@ -306,6 +306,7 @@
         "src/lc0/playBrowser.ts",
         "src/lib/browserCapabilities.ts",
         "src/lib/buildScope.ts",
+        "src/lib/chunkLoadError.ts",
         "src/lib/docsNavigation.ts",
         "src/lib/memprobe.ts",
         "src/lib/nav.ts",
@@ -365,6 +366,7 @@
         "src/lc0/play/playOverrides.ts",
         "src/lc0/playBrowser.ts",
         "src/lc0/policyOnlyBrowser.ts",
+        "src/lib/chunkLoadError.ts",
         "src/routes/app/analysis/+page.svelte",
         "src/routes/app/play/+page.svelte",
         "src/routes/single-engine/+page.svelte"

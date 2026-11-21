@@ -1,5 +1,6 @@
 <script lang="ts">
 import { onMount } from 'svelte';
+import { showRouteControllerFailure } from '#lib/chunkLoadError.ts';
 import BrowserCapabilities from '#lib/components/BrowserCapabilities.svelte';
 import PhoneLargeNetPreference from '#lib/components/PhoneLargeNetPreference.svelte';
 import SiteHeader from '#lib/components/SiteHeader.svelte';
@@ -39,8 +40,7 @@ onMount(() => {
     .catch((error) => {
       if (!mounted) return;
       console.error('[arena] failed to load page controller', error);
-      const node = document.getElementById('message');
-      if (node) node.textContent = `Page failed to initialize: ${error instanceof Error ? error.message : String(error)}`;
+      showRouteControllerFailure(document.getElementById('message'), error);
     });
   return () => {
     mounted = false;

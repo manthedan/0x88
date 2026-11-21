@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createLc0OnnxEvaluatorFromUrl } from '../src/lc0/lc0SmallModelSelection.ts';
-import { clearLc0ModelCache, clearLc0ModelCacheEntry, loadLc0ModelForOrt, modelFileName, sha256Hex, verifyLc0ModelBytes } from '../src/lc0/modelCache.ts';
+import {
+  clearLc0ModelCache,
+  clearLc0ModelCacheEntry,
+  inspectLc0ModelDownload,
+  loadLc0ModelForOrt,
+  modelFileName,
+  sha256Hex,
+  verifyLc0ModelBytes,
+} from '../src/lc0/modelCache.ts';
 
 // Known SHA-256 test vector: the empty input hashes to this digest.
 const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
@@ -52,7 +60,7 @@ class FakeCache {
     this.store = new Map();
   }
   async match(req) {
-    return this.store.get(req.url ?? req);
+    return this.store.get(req.url ?? req)?.clone();
   }
   async put(req, res) {
     this.store.set(req.url ?? req, res);
@@ -60,8 +68,8 @@ class FakeCache {
   async delete(req) {
     return this.store.delete(req.url ?? req);
   }
-  async keys() {
-    return [...this.store.keys()];
+  async keys(request) {
+    return [...this.store.keys()].filter((url) => !request || url === request.url).map((url) => new Request(url));
   }
 }
 
@@ -105,8 +113,9 @@ class MemoryMetadataStore {
 const MODEL_URL = 'http://localhost/models/lc0/test.onnx';
 const MODEL_ARTIFACT_URL = 'http://localhost/artifacts/sha256/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad/test.onnx';
 const MANIFEST_URL = 'http://localhost/models/lc0/manifest.json';
-const CHANNEL_URL = 'http://localhost/channels/stable.json';
-const RELEASE_URL = 'http://localhost/releases/test-release.json';
+let fixtureNumber = 0;
+let CHANNEL_URL;
+let RELEASE_URL;
 const MODEL_V2_BR_URL = `http://localhost/artifacts/sha256/${ABC_SHA256}/br/${'b'.repeat(64)}`;
 
 async function withMockedEnv(
@@ -114,6 +123,8 @@ async function withMockedEnv(
   { serveBytes, manifestSha256, manifestBytes, manifestArtifactUrl, channelArtifacts, channelManifest, releaseManifest, artifactUrls = [] },
 ) {
   const prev = { caches: globalThis.caches, fetch: globalThis.fetch, location: globalThis.location };
+  CHANNEL_URL = `http://localhost/channels/stable.json?fixture=${++fixtureNumber}`;
+  RELEASE_URL = `http://localhost/releases/test-release-${fixtureNumber}.json`;
   globalThis.caches = new FakeCacheStorage();
   globalThis.location = { href: 'http://localhost/' };
   const fetchLog = { manifest: 0, model: 0, modelRequestCaches: [], modelCacheModes: [], urls: [] };
@@ -127,7 +138,11 @@ async function withMockedEnv(
     }
     if (url === CHANNEL_URL) {
       return new Response(
-        JSON.stringify(channelManifest ?? { schema: 'lc0_browser.artifact_channel_manifest.v1', releaseManifestUrl: '/releases/test-release.json' }),
+        JSON.stringify(
+          channelManifest
+            ? { ...channelManifest, releaseUrl: new URL(RELEASE_URL).pathname }
+            : { schema: 'lc0_browser.artifact_channel_manifest.v1', releaseManifestUrl: new URL(RELEASE_URL).pathname },
+        ),
         { headers: { 'content-type': 'application/json' } },
       );
     }
@@ -154,6 +169,71 @@ async function withMockedEnv(
     globalThis.location = prev.location;
   }
 }
+
+test('offline lookup restores a verified immutable model, but never trusts replaced bodies or downloads with a stale pin', async () => {
+  const options = { cache: true, manifestUrl: MANIFEST_URL, channelUrl: null, metadataStore: new MemoryMetadataStore(), requireManifestEntry: true };
+  await withMockedEnv(
+    async () => {
+      const onlineFetch = globalThis.fetch;
+      assert.equal((await loadLc0ModelForOrt(MODEL_URL, options)).cacheStatus, 'miss');
+      const cache = await caches.open('lc0-browser-models-v1');
+      globalThis.fetch = async (url) => {
+        assert.equal(url, MANIFEST_URL, 'offline pins must never authorize a binary fetch');
+        throw new TypeError('offline');
+      };
+      assert.equal((await inspectLc0ModelDownload(MODEL_URL, options)).cached, true);
+      const offline = await loadLc0ModelForOrt(MODEL_URL, options);
+      assert.equal(offline.url, MODEL_ARTIFACT_URL);
+      assert.equal(offline.verification, 'hashed');
+      assert.equal(new TextDecoder().decode(offline.model), 'abc');
+
+      globalThis.fetch = async (url) => (url === MANIFEST_URL ? Response.json({ models: [] }) : onlineFetch(url));
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /App-origin model integrity metadata is unavailable/);
+      globalThis.fetch = async (url) => {
+        assert.equal(url, MANIFEST_URL);
+        throw new TypeError('offline');
+      };
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, { ...options, forceReload: true }), /App-origin model integrity metadata is unavailable/);
+      await cache.put(MODEL_ARTIFACT_URL, new Response('bad'));
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /No verified cached model available offline/);
+      assert.equal(await cache.match(MODEL_ARTIFACT_URL), undefined);
+      await cache.put(MODEL_ARTIFACT_URL, new Response('abc'));
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /App-origin model integrity metadata is unavailable/);
+    },
+    { serveBytes: () => bytesOf('abc'), manifestArtifactUrl: MODEL_ARTIFACT_URL, manifestBytes: 3, manifestSha256: ABC_SHA256 },
+  );
+});
+
+test('shipped pins recover old content-addressed records offline without trusting unrelated models or corrupt cached bytes', async (t) => {
+  globalThis.__SHIPPED_MODEL_PINS__ = {
+    '/models/lc0/manifest.json': { '/models/lc0/test.onnx': { expectedSha256: ABC_SHA256, expectedBytes: 3 } },
+  };
+  t.after(() => delete globalThis.__SHIPPED_MODEL_PINS__);
+  const metadataStore = new MemoryMetadataStore();
+  const options = { cache: true, manifestUrl: MANIFEST_URL, channelUrl: null, metadataStore, requireManifestEntry: true };
+  await withMockedEnv(
+    async () => {
+      await loadLc0ModelForOrt(MODEL_URL, options);
+      const legacy = [...metadataStore.entries.values()][0];
+      delete legacy.provenance;
+      assert.equal(legacy.url, MODEL_ARTIFACT_URL);
+      const requests = [];
+      globalThis.fetch = async (input) => {
+        requests.push(input);
+        throw new TypeError('offline');
+      };
+      assert.equal((await inspectLc0ModelDownload(MODEL_URL, options)).cached, true);
+      const restored = await loadLc0ModelForOrt(MODEL_URL, options);
+      assert.equal(restored.verification, 'hashed');
+      assert.equal(restored.url, MODEL_ARTIFACT_URL);
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL.replace('test.onnx', 'unknown.onnx'), options), /App-origin model integrity metadata is unavailable/);
+      await (await caches.open('lc0-browser-models-v1')).put(MODEL_ARTIFACT_URL, new Response('bad'));
+      await assert.rejects(loadLc0ModelForOrt(MODEL_URL, options), /No verified cached model available offline/);
+      assert.ok(requests.every((input) => input === MANIFEST_URL));
+    },
+    { serveBytes: () => bytesOf('abc'), manifestArtifactUrl: MODEL_ARTIFACT_URL, manifestBytes: 3, manifestSha256: ABC_SHA256 },
+  );
+});
 
 test('exact manifest URL pins precede filename fallback and tolerate non-UTF-8 URL octets', async () => {
   const url = MODEL_URL.replace('test.onnx', '%E9.onnx');
@@ -244,7 +324,7 @@ test('loadLc0ModelForOrt keeps default model manifest lookups on the app shell o
   await withMockedEnv(
     async (fetchLog) => {
       const assetModelUrl = 'https://assets.0x88.app/models/lc0/test.onnx';
-      const direct = await loadLc0ModelForOrt(assetModelUrl, { cache: false, channelUrl: '/channels/stable.json' });
+      const direct = await loadLc0ModelForOrt(assetModelUrl, { cache: false, channelUrl: CHANNEL_URL.replace('http://localhost', '') });
       assert.equal(direct.url, MODEL_ARTIFACT_URL);
       assert.equal(direct.sha256Valid, true);
       assert(fetchLog.urls.includes('/models/lc0/manifest.json'));
@@ -269,7 +349,7 @@ test('loadLc0ModelForOrt keeps default model manifest lookups on the app shell o
 test('loadLc0ModelForOrt resolves stable model URLs through channel release manifests when configured', async () => {
   await withMockedEnv(
     async (fetchLog) => {
-      const direct = await loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: MANIFEST_URL, channelUrl: '/channels/stable.json' });
+      const direct = await loadLc0ModelForOrt(MODEL_URL, { cache: false, manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL.replace('http://localhost', '') });
       assert.equal(direct.url, MODEL_ARTIFACT_URL);
       assert.equal(direct.sha256Valid, true);
       assert.equal(direct.logicalUrl, MODEL_URL);
@@ -292,6 +372,31 @@ test('loadLc0ModelForOrt resolves stable model URLs through channel release mani
         },
       ],
     },
+  );
+});
+
+test('concurrent and subsequent lookups share channel and release fetches; channels expire independently', async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  await withMockedEnv(
+    async (fetchLog) => {
+      const options = { manifestUrl: MANIFEST_URL, channelUrl: CHANNEL_URL };
+      const inspect = () => inspectLc0ModelDownload(MODEL_URL, options);
+      await Promise.all([inspect(), inspect(), inspect()]);
+      await inspect();
+      const count = (url) => fetchLog.urls.filter((requested) => requested === url).length;
+      assert.equal(count(CHANNEL_URL), 1);
+      assert.equal(count(RELEASE_URL), 1);
+      now += 31_000;
+      await inspect();
+      assert.equal(count(CHANNEL_URL), 2);
+      assert.equal(count(RELEASE_URL), 1);
+      now += 31_000;
+      await inspect();
+      assert.equal(count(CHANNEL_URL), 3);
+      assert.equal(count(RELEASE_URL), 2);
+    },
+    { manifestSha256: ABC_SHA256, manifestBytes: 3 },
   );
 });
 

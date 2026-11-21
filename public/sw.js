@@ -15,10 +15,9 @@
 //   - /_app/immutable/*: content-hashed build output (JS and CSS), cache first;
 //   - the favicon and web manifest the HTML links: network first.
 //
-// Everything lives in one cache per build. src/lib/pwa/register.ts registers
-// /sw.js?v=<SvelteKit build version>; a new version is a new script URL, so
-// each deploy installs a fresh worker whose activate step deletes every older
-// build's cache instead of letting hashed chunks accumulate forever.
+// src/lib/pwa/register.ts registers /sw.js?v=<SvelteKit build version>.
+// The browser keeps the update waiting until the active worker controls no
+// clients. Activation retains that worker's cache for offline fallback.
 //
 // The prefix changes whenever cached pages from earlier builds would break
 // under this script. A worker registered at an old ?v= URL can reinstall
@@ -30,6 +29,9 @@
 const CACHE_PREFIX = '0x88-app2-';
 const LEGACY_CACHE_PREFIXES = ['0x88-app-', 'lc0-app-shell-'];
 const APP_SHELL_FALLBACK = '/app/play/';
+const ACTIVATION_RECORD = '/__sw/previous-cache';
+const STATE_CACHE = '0x88-sw-state';
+const LAST_ACTIVE_RECORD = '/__sw/active-cache';
 const NAVIGATION_TIMEOUT_MS = 3500;
 // Stylesheets are not here: they are Vite build output under /_app/immutable/.
 const SHELL_ASSETS = new Set(['/favicon.svg', '/manifest.webmanifest']);
@@ -59,9 +61,38 @@ function routeFor(request, url, origin = self.location.origin) {
   return null;
 }
 
-/** Caches this worker owns or inherited that are not the current build's. */
-function staleCacheNames(names, current = CACHE_NAME) {
-  return names.filter((name) => name !== current && (name.startsWith(CACHE_PREFIX) || LEGACY_CACHE_PREFIXES.some((prefix) => name.startsWith(prefix))));
+async function activateCache() {
+  const current = await caches.open(CACHE_NAME);
+  const names = await caches.keys();
+  // CacheStorage.keys() is in creation order. A later installer may already
+  // have opened its own cache and must be left alone.
+  const older = names.slice(0, names.indexOf(CACHE_NAME));
+  const state = await caches.open(STATE_CACHE);
+  let previous = await (await state.match(LAST_ACTIVE_RECORD))?.text();
+  if (previous === CACHE_NAME) {
+    previous = await (await current.match(ACTIVATION_RECORD))?.text();
+  } else if (!previous) {
+    const builds = older.filter((name) => name.startsWith(CACHE_PREFIX));
+    previous = builds[0];
+    for (const name of builds.reverse()) {
+      if (await (await caches.open(name)).match(ACTIVATION_RECORD)) {
+        previous = name;
+        break;
+      }
+    }
+  }
+  await current.put(ACTIVATION_RECORD, new Response(previous ?? ''));
+  await state.put(LAST_ACTIVE_RECORD, new Response(CACHE_NAME));
+  await Promise.all(older.filter((name) => name !== previous && (name.startsWith(CACHE_PREFIX) || LEGACY_CACHE_PREFIXES.some((prefix) => name.startsWith(prefix))))
+    .map((name) => caches.delete(name)));
+}
+
+let previousCachePromise;
+function previousCache(cache) {
+  return previousCachePromise ??= cache.match(ACTIVATION_RECORD).then(async (response) => {
+    const name = await response?.text();
+    if (name) return caches.open(name);
+  });
 }
 
 /** Same-origin subresources of a page worth precaching with it: its build chunks and shell files. */
@@ -112,17 +143,30 @@ async function precacheShell() {
   await cache.put(APP_SHELL_FALLBACK, response);
 }
 
-async function cacheFirst(request) {
+async function cacheFirst(request, waitUntil) {
   const cache = await caches.open(CACHE_NAME);
   const cached = await cache.match(request);
   if (cached) return cached;
+  const previous = await (await previousCache(cache))?.match(request);
+  if (previous) {
+    waitUntil(cache.put(request, previous.clone()).catch(() => undefined));
+    return previous;
+  }
   const response = await fetch(request);
-  if (cacheable(response)) cache.put(request, response.clone()).catch(() => undefined);
+  if (cacheable(response)) waitUntil(cache.put(request, response.clone()).catch(() => undefined));
   return response;
 }
 
 async function cachedNavigation(request, cache) {
-  return (await cache.match(request)) ?? (request.mode === 'navigate' ? await cache.match(APP_SHELL_FALLBACK) : undefined);
+  const exact = await cache.match(request);
+  if (exact || request.mode !== 'navigate') return exact;
+  const options = { ignoreSearch: true };
+  const samePath = await cache.match(request, options);
+  if (samePath) return samePath;
+  const previous = await previousCache(cache);
+  return (await previous?.match(request)) ??
+    (await previous?.match(request, options)) ??
+    (await cache.match(APP_SHELL_FALLBACK));
 }
 
 /**
@@ -164,20 +208,17 @@ async function networkFirst(request, { timeoutMs = NAVIGATION_TIMEOUT_MS, waitUn
 }
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(precacheShell().then(() => self.skipWaiting()));
+  event.waitUntil(precacheShell());
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(caches.keys().then((names) => Promise.all(staleCacheNames(names).map((name) => caches.delete(name)))));
+  event.waitUntil(activateCache());
 });
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   const route = routeFor(event.request, url);
   if (!route) return;
-  if (route === 'immutable') {
-    event.respondWith(cacheFirst(event.request));
-    return;
-  }
-  event.respondWith(networkFirst(event.request, { waitUntil: (promise) => event.waitUntil(promise) }));
+  const waitUntil = (promise) => event.waitUntil(promise);
+  event.respondWith(route === 'immutable' ? cacheFirst(event.request, waitUntil) : networkFirst(event.request, { waitUntil }));
 });

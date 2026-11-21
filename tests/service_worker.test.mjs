@@ -14,8 +14,10 @@ class FakeCache {
   key(request) {
     return new URL(typeof request === 'string' ? request : request.url, `${ORIGIN}/sw.js`).href;
   }
-  async match(request) {
-    return this.entries.get(this.key(request))?.clone();
+  async match(request, { ignoreSearch } = {}) {
+    const key = this.key(request);
+    if (!ignoreSearch) return this.entries.get(key)?.clone();
+    return [...this.entries].find(([url]) => url.split('?')[0] === key.split('?')[0])?.[1].clone();
   }
   async put(request, response) {
     this.entries.set(this.key(request), response);
@@ -146,15 +148,19 @@ test('the cache is named after the build version from the script URL', () => {
 
 // '0x88-app-200' is what a worker registered at ?v=200 before the prefix bump left behind: its
 // pages link stylesheets this script no longer serves, so reinstalling under ?v=200 must drop it.
-test('activate deletes earlier builds and the legacy shell caches, never the model cache', async () => {
+test('an update waits for old clients; activation keeps the previous build and removes legacy caches', async () => {
   const worker = loadWorker({ version: '200', fetch: async () => basic(SHELL_HTML, { contentType: 'text/html' }) });
   for (const name of ['0x88-app-shell-v2', 'lc0-app-shell-v1', '0x88-app-100', '0x88-app-200', '0x88-app2-100', 'lc0-browser-models-v1', 'other-cache']) {
     await worker.caches.open(name);
   }
+  const oldCache = await worker.caches.open('0x88-app2-100');
+  const oldChunk = '/_app/immutable/chunks/old.js';
+  await oldCache.put(oldChunk, basic('old build'));
   await dispatchLifecycle(worker, 'install');
-  assert.equal(worker.state.skipped, true);
+  assert.equal(worker.state.skipped, false);
+  assert.equal(await (await oldCache.match(oldChunk)).text(), 'old build');
   await dispatchLifecycle(worker, 'activate');
-  assert.deepEqual(await worker.caches.keys(), ['lc0-browser-models-v1', 'other-cache', '0x88-app2-200']);
+  assert.deepEqual(await worker.caches.keys(), ['0x88-app2-100', 'lc0-browser-models-v1', 'other-cache', '0x88-app2-200', '0x88-sw-state']);
 });
 
 const SHELL_HTML = [
@@ -167,6 +173,138 @@ const SHELL_HTML = [
   '<link href="https://assets.0x88.app/_app/immutable/x.js" rel="modulepreload">',
   '<link href="/ort/ort.mjs" rel="modulepreload">',
 ].join('\n');
+
+test('offline navigation and lazy imports survive a visit while the update was waiting', async () => {
+  const html = (body) => basic(body, { contentType: 'text/html' });
+  const a = loadWorker({ version: 'a', fetch: async () => html('A home') });
+  await dispatchLifecycle(a, 'install');
+  await dispatchLifecycle(a, 'activate');
+  const b = loadWorker({ version: 'b', fetch: async () => html('B home'), caches: a.caches });
+  await dispatchLifecycle(b, 'install');
+  const chunk = '/_app/immutable/chunks/analysis-b.js';
+  a.state.fetch = async ({ url }) => (url.endsWith(chunk) ? basic('B chunk') : html('B analysis'));
+  for (const req of [request('/app/analysis/', { mode: 'navigate' }), request(chunk)]) {
+    const event = fetchEvent(req);
+    a.listeners.fetch(event);
+    await event.response;
+    await Promise.all(event.pending);
+  }
+  await dispatchLifecycle(b, 'activate');
+  b.state.fetch = async () => {
+    throw new TypeError('offline');
+  };
+  for (const [req, expected] of [
+    [request('/app/analysis/?fen=offline', { mode: 'navigate' }), 'B analysis'],
+    [request(chunk), 'B chunk'],
+  ]) {
+    const event = fetchEvent(req);
+    b.listeners.fetch(event);
+    assert.equal(await (await event.response).text(), expected);
+  }
+  const c = loadWorker({ version: 'c', fetch: async () => html('C home'), caches: a.caches });
+  await dispatchLifecycle(c, 'install');
+  await dispatchLifecycle(c, 'activate');
+  assert.deepEqual(await a.caches.keys(), ['0x88-sw-state', b.context.CACHE_NAME, c.context.CACHE_NAME]);
+});
+
+test('chunks reused from the previous cache survive another activation', async () => {
+  const html = (body) => basic(body, { contentType: 'text/html' });
+  const a = loadWorker({ version: 'a', fetch: async () => html('A home') });
+  await dispatchLifecycle(a, 'install');
+  await dispatchLifecycle(a, 'activate');
+  const chunk = request('/_app/immutable/chunks/shared.js');
+  const page = request('/app/analysis/', { mode: 'navigate' });
+  await (await a.caches.open(a.context.CACHE_NAME)).put(chunk, basic('shared chunk'));
+  const b = loadWorker({ version: 'b', fetch: async () => html('B analysis'), caches: a.caches });
+  await dispatchLifecycle(b, 'install');
+  await dispatchLifecycle(b, 'activate');
+  for (const [req, expected] of [
+    [page, 'B analysis'],
+    [chunk, 'shared chunk'],
+  ]) {
+    const event = fetchEvent(req);
+    b.listeners.fetch(event);
+    assert.equal(await (await event.response).text(), expected);
+    assert.equal(event.pending.length, 1, 'cache writes keep the fetch event alive');
+    await Promise.all(event.pending);
+  }
+  assert.ok(!b.state.fetches.includes(chunk.url));
+  const c = loadWorker({ version: 'c', fetch: async () => html('C home'), caches: a.caches });
+  await dispatchLifecycle(c, 'install');
+  await dispatchLifecycle(c, 'activate');
+  assert.ok(!(await a.caches.keys()).includes(a.context.CACHE_NAME));
+  c.state.fetch = async () => {
+    throw new TypeError('offline');
+  };
+  for (const [req, expected] of [
+    [page, 'B analysis'],
+    [chunk, 'shared chunk'],
+  ]) {
+    const event = fetchEvent(req);
+    c.listeners.fetch(event);
+    assert.equal(await (await event.response).text(), expected);
+    await Promise.all(event.pending);
+  }
+});
+
+test('rollback retains the active worker’s offline pages and chunks despite cache creation order', async () => {
+  const html = (body) => basic(body, { contentType: 'text/html' });
+  const a = loadWorker({ version: 'a', fetch: async () => html('A home') });
+  await dispatchLifecycle(a, 'install');
+  await dispatchLifecycle(a, 'activate');
+  const b = loadWorker({ version: 'b', fetch: async () => html('B home'), caches: a.caches });
+  await dispatchLifecycle(b, 'install');
+  await dispatchLifecycle(b, 'activate');
+  const rollback = loadWorker({ version: 'a', fetch: async () => html('A home'), caches: a.caches });
+  await dispatchLifecycle(rollback, 'install');
+  const chunk = '/_app/immutable/chunks/analysis-a.js';
+  const page = request('/app/analysis/', { mode: 'navigate' });
+  b.state.fetch = async ({ url }) => (url.endsWith(chunk) ? basic('A chunk') : html('A analysis'));
+  for (const req of [page, request(chunk)]) {
+    const event = fetchEvent(req);
+    b.listeners.fetch(event);
+    await event.response;
+    await Promise.all(event.pending);
+  }
+  await dispatchLifecycle(rollback, 'activate');
+  const restarted = loadWorker({
+    version: 'a',
+    fetch: async () => {
+      throw new TypeError('offline');
+    },
+    caches: a.caches,
+  });
+  for (const [req, expected] of [
+    [page, 'A analysis'],
+    [request(chunk), 'A chunk'],
+  ]) {
+    const event = fetchEvent(req);
+    restarted.listeners.fetch(event);
+    assert.equal(await (await event.response).text(), expected);
+  }
+});
+
+test('activation cannot remove a later installer’s cache', async () => {
+  const html = () => basic(SHELL_HTML, { contentType: 'text/html' });
+  const b = loadWorker({ version: 'b', fetch: async () => html() });
+  await dispatchLifecycle(b, 'install');
+  let finishInstall;
+  const c = loadWorker({
+    version: 'c',
+    fetch: () =>
+      new Promise((resolve) => {
+        finishInstall = () => resolve(html());
+      }),
+    caches: b.caches,
+  });
+  const installing = dispatchLifecycle(c, 'install');
+  await Promise.resolve();
+  await dispatchLifecycle(b, 'activate');
+  finishInstall();
+  await installing;
+  await dispatchLifecycle(c, 'activate');
+  assert.ok(await (await b.caches.open(c.context.CACHE_NAME)).match('/app/play/'));
+});
 
 test('the shell page is precached with its build chunks and shell files', async () => {
   assert.deepEqual(Array.from(loadWorker().context.shellSubresourceUrls(SHELL_HTML, `${ORIGIN}/app/play/`)), [
@@ -183,7 +321,6 @@ test('the shell page is precached with its build chunks and shell files', async 
       new URL(input, `${ORIGIN}/sw.js`).pathname === '/app/play/' ? basic(SHELL_HTML, { contentType: 'text/html; charset=UTF-8' }) : basic('x'),
   });
   await dispatchLifecycle(worker, 'install');
-  assert.equal(worker.state.skipped, true);
   const cache = worker.caches.stores.get('0x88-app2-300');
   assert.deepEqual([...cache.entries.keys()].sort(), [
     `${ORIGIN}/_app/immutable/assets/2.Cd.css`,
@@ -281,7 +418,6 @@ test('linked chunk precaching is best-effort once the essential navigation shell
     },
   });
   await dispatchLifecycle(worker, 'install');
-  assert.equal(worker.state.skipped, true);
   const cache = await worker.caches.open(worker.context.CACHE_NAME);
   assert.equal(await (await cache.match('/app/play/')).text(), SHELL_HTML);
 });
@@ -301,6 +437,8 @@ test('hashed build output is served cache first', async () => {
     const event = fetchEvent(request('/_app/immutable/chunks/a.js'));
     worker.listeners.fetch(event);
     assert.equal(await (await event.response).text(), 'chunk');
+    assert.equal(event.pending.length, i === 0 ? 1 : 0);
+    await Promise.all(event.pending);
   }
   assert.deepEqual(worker.state.fetches, [`${ORIGIN}/_app/immutable/chunks/a.js`]);
 });
@@ -383,6 +521,20 @@ test('a slow navigation with nothing cached keeps waiting for the network', asyn
   assert.equal(await response.text(), 'late');
 });
 
+test('offline navigation prefers an exact query match to an earlier page at the same path', async () => {
+  const worker = loadWorker({
+    fetch: async () => {
+      throw new TypeError('offline');
+    },
+  });
+  const cache = await worker.caches.open(worker.context.CACHE_NAME);
+  await cache.put('/app/analysis/?fen=first', basic('older page', { contentType: 'text/html' }));
+  await cache.put('/app/analysis/?fen=second', basic('exact page', { contentType: 'text/html' }));
+  const event = fetchEvent(request('/app/analysis/?fen=second', { mode: 'navigate' }));
+  worker.listeners.fetch(event);
+  assert.equal(await (await event.response).text(), 'exact page');
+});
+
 test('an offline navigation falls back to the page, then to the app shell', async () => {
   const worker = loadWorker({
     fetch: async () => {
@@ -391,6 +543,9 @@ test('an offline navigation falls back to the page, then to the app shell', asyn
   });
   const cache = await worker.caches.open(worker.context.CACHE_NAME);
   await cache.put(`${ORIGIN}/app/play/`, basic('shell', { contentType: 'text/html' }));
+  await cache.put(`${ORIGIN}/app/analysis/?fen=old`, basic('analysis', { contentType: 'text/html' }));
+  const analysis = await worker.context.networkFirst(request('/app/analysis/?fen=new', { mode: 'navigate' }));
+  assert.equal(await analysis.text(), 'analysis');
   const response = await worker.context.networkFirst(request('/app/arena/', { mode: 'navigate' }));
   assert.equal(await response.text(), 'shell');
   await assert.rejects(worker.context.networkFirst(request('/favicon.svg')), /offline/);

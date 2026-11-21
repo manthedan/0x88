@@ -1,4 +1,4 @@
-import { lstatSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Plugin } from 'vite';
 import kitConfig from './kit.config.js';
@@ -34,12 +34,28 @@ function chessgroundArrows(): Plugin {
   };
 }
 
+const shippedModelPins = Object.fromEntries(
+  ['/models/lc0/manifest.json', '/models/maia3/manifest.json', '/models/centipawn.manifest.json'].map((manifest) => {
+    const { models } = JSON.parse(readFileSync(new URL(`./public${manifest}`, import.meta.url), 'utf8')) as {
+      models: { url: string; sha256?: string; bytes?: number }[];
+    };
+    return [
+      manifest,
+      Object.fromEntries(
+        models
+          .filter(({ sha256 }) => /^[a-f0-9]{64}$/i.test(sha256 ?? ''))
+          .map(({ url, sha256, bytes }) => [url, { expectedSha256: sha256, expectedBytes: bytes }]),
+      ),
+    ];
+  }),
+);
+
 export default defineConfig({
   cacheDir: sharedNodeModules ? '.vite-cache' : undefined,
   plugins: labOnly ? [] : [chessgroundArrows(), sveltekit(kitConfig)],
   // Build-time constant: src/hooks.ts refuses lab routes in product builds. A bare
   // global, not import.meta.env.VITE_*, which Vite would also copy into every bundled env object.
-  define: { __BUILD_SCOPE__: JSON.stringify(process.env.BUILD_SCOPE ?? '') },
+  define: { __BUILD_SCOPE__: JSON.stringify(process.env.BUILD_SCOPE ?? ''), __SHIPPED_MODEL_PINS__: JSON.stringify(shippedModelPins) },
   optimizeDeps: labOnly ? { exclude: ['onnxruntime-web'] } : { exclude: ['chessground'] },
   resolve: {
     // ORT is configured to load its staged /ort/ glue and WASM at runtime.

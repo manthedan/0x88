@@ -1,6 +1,5 @@
 const DEFAULT_APP_ORIGIN = 'https://0x88.app';
 const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
-const RELEASE_CACHE_CONTROL = IMMUTABLE_CACHE_CONTROL;
 const CHANNEL_CACHE_CONTROL = 'no-cache';
 const LOGICAL_ALIAS_CACHE_CONTROL = 'public, max-age=300, stale-while-revalidate=86400';
 const CONTROL_CHANNEL_CACHE_CONTROL = 'public, max-age=60, stale-if-error=86400';
@@ -90,9 +89,12 @@ function isImmutableArtifactKey(key) {
   return key.startsWith('artifacts/sha256/');
 }
 
+function isImmutableKey(key) {
+  return isImmutableArtifactKey(key) || key.startsWith('releases/');
+}
+
 function cacheControlForKey(key) {
-  if (isImmutableArtifactKey(key)) return IMMUTABLE_CACHE_CONTROL;
-  if (key.startsWith('releases/')) return RELEASE_CACHE_CONTROL;
+  if (isImmutableKey(key)) return IMMUTABLE_CACHE_CONTROL;
   if (key.startsWith('channels/')) return CHANNEL_CACHE_CONTROL;
   return 'no-store';
 }
@@ -346,9 +348,11 @@ function objectHeaders(descriptor, object, env, range, cacheControlOverride) {
   });
   if (metadata.encoding !== 'identity') headers.set('Content-Encoding', metadata.encoding);
   headers.set('Accept-Ranges', 'bytes');
+  if (isImmutableKey(descriptor.key) && !range && Number.isFinite(metadata.encodedBytes)) {
+    headers.set('X-Artifact-Encoded-Length', String(metadata.encodedBytes));
+  }
   if (isImmutableArtifactKey(descriptor.key)) {
     if (Number.isFinite(metadata.decodedBytes)) headers.set('X-Artifact-Content-Length', String(metadata.decodedBytes));
-    if (!range && Number.isFinite(metadata.encodedBytes)) headers.set('X-Artifact-Encoded-Length', String(metadata.encodedBytes));
     if (metadata.decodedSha256) headers.set('X-Artifact-Decoded-SHA256', metadata.decodedSha256);
     if (metadata.encodedSha256) headers.set('X-Artifact-Encoded-SHA256', metadata.encodedSha256);
   }
@@ -391,10 +395,24 @@ function applyDescriptorHeaders(response, descriptor, env, range) {
   });
 }
 
+function channelNotModified(descriptor, request, headers) {
+  if (!descriptor.key.startsWith('channels/')) return false;
+  const condition = request.headers.get('If-None-Match');
+  if (!condition) return false;
+  if (condition.trim() === '*') return true;
+  const etag = headers.get('ETag')?.replace(/^W\//, '');
+  return !!etag && (condition.match(/(?:W\/)?"[^"]*"/g) ?? []).some((tag) => tag.replace(/^W\//, '') === etag);
+}
+
+function notModified(headers) {
+  headers.delete('Content-Length');
+  return withCacheStatus(new Response(null, { status: 304, headers }), 'fwd');
+}
+
 async function fullBodyResponse(descriptor, request, env, ctx) {
-  const cache = edgeCache();
+  const cache = isImmutableKey(descriptor.key) ? edgeCache() : undefined;
   const cacheRequest = canonicalCacheRequest(request, descriptor.key);
-  if (cache && isImmutableArtifactKey(descriptor.key)) {
+  if (cache) {
     const cached = await cache.match(cacheRequest);
     if (cached)
       return withCacheStatus(applyDescriptorHeaders(cached, descriptor, env), 'hit', {
@@ -405,9 +423,14 @@ async function fullBodyResponse(descriptor, request, env, ctx) {
 
   const object = await env.ARTIFACTS.get(descriptor.key);
   if (!object) return new Response('Not found', { status: 404, headers: artifactHeaders(env) });
-  const canonical = new Response(object.body, { status: 200, headers: objectHeaders(descriptor, object, env) });
-  if (cache && isImmutableArtifactKey(descriptor.key)) scheduleCachePut(cache, cacheRequest, canonical, ctx);
-  return withCacheStatus(canonical, cache && isImmutableArtifactKey(descriptor.key) ? 'miss' : 'fwd', {
+  const headers = objectHeaders(descriptor, object, env);
+  const canonical = new Response(object.body, { status: 200, headers });
+  if (channelNotModified(descriptor, request, headers)) {
+    await canonical.body.cancel();
+    return notModified(headers);
+  }
+  if (cache) scheduleCachePut(cache, cacheRequest, canonical, ctx);
+  return withCacheStatus(canonical, cache ? 'miss' : 'fwd', {
     cacheControl: descriptor.logicalAlias ? LOGICAL_ALIAS_CACHE_CONTROL : undefined,
     negotiated: descriptor.negotiated,
   });
@@ -419,9 +442,9 @@ async function headResponse(descriptor, request, env) {
     return new Response(null, { status: 416, headers: artifactHeaders(env, { 'Accept-Ranges': 'none' }) });
   }
   if (rangeHeader && descriptor.logicalAlias) descriptor = identityDescriptor(descriptor);
-  const cache = edgeCache();
+  const cache = !rangeHeader && isImmutableKey(descriptor.key) ? edgeCache() : undefined;
   const cacheRequest = canonicalCacheRequest(request, descriptor.key, 'head');
-  if (!rangeHeader && cache && isImmutableArtifactKey(descriptor.key)) {
+  if (cache) {
     const cached = await cache.match(cacheRequest);
     if (cached)
       return withCacheStatus(applyDescriptorHeaders(cached, descriptor, env), 'hit', {
@@ -433,6 +456,8 @@ async function headResponse(descriptor, request, env) {
   // Expected release metadata cannot prove that the immutable R2 object exists.
   const head = await env.ARTIFACTS.head(descriptor.key);
   if (!head) return new Response('Not found', { status: 404, headers: artifactHeaders(env) });
+  const headers = objectHeaders(descriptor, head, env);
+  if (channelNotModified(descriptor, request, headers)) return notModified(headers);
   const totalBytes = descriptor.raw?.bytes ?? head.size;
   const range = parseRange(rangeHeader, totalBytes);
   if (range === 'invalid') {
@@ -441,9 +466,9 @@ async function headResponse(descriptor, request, env) {
       headers: artifactHeaders(env, { 'Content-Range': `bytes */${totalBytes}` }),
     });
   }
-  const canonical = new Response(null, { status: range ? 206 : 200, headers: objectHeaders(descriptor, head, env, range) });
-  if (!range && cache && isImmutableArtifactKey(descriptor.key)) await cache.put(cacheRequest, canonical.clone()).catch(() => undefined);
-  return withCacheStatus(canonical, !range && cache && isImmutableArtifactKey(descriptor.key) ? 'miss' : 'fwd', {
+  const canonical = new Response(null, { status: range ? 206 : 200, headers: range ? objectHeaders(descriptor, head, env, range) : headers });
+  if (cache) await cache.put(cacheRequest, canonical.clone()).catch(() => undefined);
+  return withCacheStatus(canonical, cache ? 'miss' : 'fwd', {
     cacheControl: descriptor.logicalAlias ? LOGICAL_ALIAS_CACHE_CONTROL : undefined,
     negotiated: descriptor.negotiated && !range,
   });
@@ -470,6 +495,10 @@ async function rangeResponse(descriptor, request, env) {
       httpMetadata: descriptor.contentType ? { contentType: descriptor.contentType } : undefined,
     };
   }
+  if (descriptor.key.startsWith('channels/') && request.headers.has('If-None-Match')) {
+    const headers = objectHeaders(descriptor, head, env);
+    if (channelNotModified(descriptor, request, headers)) return notModified(headers);
+  }
   const range = parseRange(request.headers.get('Range'), size);
   if (range === 'invalid') {
     return new Response('Invalid range', {
@@ -490,7 +519,7 @@ export async function handleArtifactRequest(request, env, ctx) {
       status: 204,
       headers: artifactHeaders(env, {
         'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-        'Access-Control-Allow-Headers': 'Range, Content-Type',
+        'Access-Control-Allow-Headers': 'Range, Content-Type, If-None-Match',
         'Access-Control-Max-Age': '86400',
       }),
     });

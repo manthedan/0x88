@@ -4,6 +4,7 @@
 import { untrack } from 'svelte';
 import type { Attachment } from 'svelte/attachments';
 import { createMountScope, type MountScope } from '../lc0/mountScope.ts';
+import { showRouteControllerFailure } from './chunkLoadError.ts';
 
 export type RouteMount = (scope: MountScope) => void;
 
@@ -18,8 +19,7 @@ export function routeController(load: () => Promise<RouteMount>, failure: { labe
         .catch((error: unknown) => {
           if (!scope.live()) return;
           console.error(`[${failure.label}] failed to load page controller`, error);
-          const node = root.querySelector(`[id=${JSON.stringify(failure.statusId)}]`);
-          if (node) node.textContent = `Page failed to initialize: ${error instanceof Error ? error.message : String(error)}`;
+          showRouteControllerFailure(root.querySelector(`[id=${JSON.stringify(failure.statusId)}]`), error);
         });
       return () => scope.dispose();
     });
