@@ -148,7 +148,7 @@ test('the cache is named after the build version from the script URL', () => {
 
 // '0x88-app-200' is what a worker registered at ?v=200 before the prefix bump left behind: its
 // pages link stylesheets this script no longer serves, so reinstalling under ?v=200 must drop it.
-test('an update waits for old clients; only activation removes earlier build and legacy caches', async () => {
+test('an update waits for old clients; activation keeps the previous build and removes legacy caches', async () => {
   const worker = loadWorker({ version: '200', fetch: async () => basic(SHELL_HTML, { contentType: 'text/html' }) });
   for (const name of ['0x88-app-shell-v2', 'lc0-app-shell-v1', '0x88-app-100', '0x88-app-200', '0x88-app2-100', 'lc0-browser-models-v1', 'other-cache']) {
     await worker.caches.open(name);
@@ -160,7 +160,7 @@ test('an update waits for old clients; only activation removes earlier build and
   assert.equal(worker.state.skipped, false);
   assert.equal(await (await oldCache.match(oldChunk)).text(), 'old build');
   await dispatchLifecycle(worker, 'activate');
-  assert.deepEqual(await worker.caches.keys(), ['lc0-browser-models-v1', 'other-cache', '0x88-app2-200']);
+  assert.deepEqual(await worker.caches.keys(), ['0x88-app2-100', 'lc0-browser-models-v1', 'other-cache', '0x88-app2-200']);
 });
 
 const SHELL_HTML = [
@@ -173,6 +173,49 @@ const SHELL_HTML = [
   '<link href="https://assets.0x88.app/_app/immutable/x.js" rel="modulepreload">',
   '<link href="/ort/ort.mjs" rel="modulepreload">',
 ].join('\n');
+
+test('offline navigation and lazy imports survive a visit while the update was waiting', async () => {
+  const html = (body) => basic(body, { contentType: 'text/html' });
+  const a = loadWorker({ version: 'a', fetch: async () => html('A home') });
+  await dispatchLifecycle(a, 'install');
+  await dispatchLifecycle(a, 'activate');
+  const b = loadWorker({ version: 'b', fetch: async () => html('B home'), caches: a.caches });
+  await dispatchLifecycle(b, 'install');
+  const chunk = '/_app/immutable/chunks/analysis-b.js';
+  a.state.fetch = async ({ url }) => url.endsWith(chunk) ? basic('B chunk') : html('B analysis');
+  for (const req of [request('/app/analysis/', { mode: 'navigate' }), request(chunk)]) {
+    const event = fetchEvent(req);
+    a.listeners.fetch(event);
+    await event.response;
+    await Promise.all(event.pending);
+  }
+  await dispatchLifecycle(b, 'activate');
+  b.state.fetch = async () => { throw new TypeError('offline'); };
+  for (const [req, expected] of [[request('/app/analysis/?fen=offline', { mode: 'navigate' }), 'B analysis'], [request(chunk), 'B chunk']]) {
+    const event = fetchEvent(req);
+    b.listeners.fetch(event);
+    assert.equal(await (await event.response).text(), expected);
+  }
+  const c = loadWorker({ version: 'c', fetch: async () => html('C home'), caches: a.caches });
+  await dispatchLifecycle(c, 'install');
+  await dispatchLifecycle(c, 'activate');
+  assert.deepEqual(await a.caches.keys(), [b.context.CACHE_NAME, c.context.CACHE_NAME]);
+});
+
+test('activation cannot remove a later installer’s cache', async () => {
+  const html = () => basic(SHELL_HTML, { contentType: 'text/html' });
+  const b = loadWorker({ version: 'b', fetch: async () => html() });
+  await dispatchLifecycle(b, 'install');
+  let finishInstall;
+  const c = loadWorker({ version: 'c', fetch: () => new Promise((resolve) => { finishInstall = () => resolve(html()); }), caches: b.caches });
+  const installing = dispatchLifecycle(c, 'install');
+  await Promise.resolve();
+  await dispatchLifecycle(b, 'activate');
+  finishInstall();
+  await installing;
+  await dispatchLifecycle(c, 'activate');
+  assert.ok(await (await b.caches.open(c.context.CACHE_NAME)).match('/app/play/'));
+});
 
 test('the shell page is precached with its build chunks and shell files', async () => {
   assert.deepEqual(Array.from(loadWorker().context.shellSubresourceUrls(SHELL_HTML, `${ORIGIN}/app/play/`)), [

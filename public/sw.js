@@ -15,10 +15,9 @@
 //   - /_app/immutable/*: content-hashed build output (JS and CSS), cache first;
 //   - the favicon and web manifest the HTML links: network first.
 //
-// Everything lives in one cache per build. src/lib/pwa/register.ts registers
-// /sw.js?v=<SvelteKit build version>; a new version is a new script URL, so
-// each deploy installs a fresh worker. The browser keeps it waiting until
-// the previous worker controls no clients, then activate removes old caches.
+// src/lib/pwa/register.ts registers /sw.js?v=<SvelteKit build version>.
+// The browser keeps the update waiting until the active worker controls no
+// clients. Activation retains that worker's cache for offline fallback.
 //
 // The prefix changes whenever cached pages from earlier builds would break
 // under this script. A worker registered at an old ?v= URL can reinstall
@@ -30,6 +29,7 @@
 const CACHE_PREFIX = '0x88-app2-';
 const LEGACY_CACHE_PREFIXES = ['0x88-app-', 'lc0-app-shell-'];
 const APP_SHELL_FALLBACK = '/app/play/';
+const ACTIVATION_RECORD = '/__sw/previous-cache';
 const NAVIGATION_TIMEOUT_MS = 3500;
 // Stylesheets are not here: they are Vite build output under /_app/immutable/.
 const SHELL_ASSETS = new Set(['/favicon.svg', '/manifest.webmanifest']);
@@ -59,9 +59,31 @@ function routeFor(request, url, origin = self.location.origin) {
   return null;
 }
 
-/** Caches this worker owns or inherited that are not the current build's. */
-function staleCacheNames(names, current = CACHE_NAME) {
-  return names.filter((name) => name !== current && (name.startsWith(CACHE_PREFIX) || LEGACY_CACHE_PREFIXES.some((prefix) => name.startsWith(prefix))));
+async function activateCache() {
+  const current = await caches.open(CACHE_NAME);
+  const names = await caches.keys();
+  // CacheStorage.keys() is in creation order. A later installer may already
+  // have opened its own cache and must be left alone.
+  const older = names.slice(0, names.indexOf(CACHE_NAME));
+  const builds = older.filter((name) => name.startsWith(CACHE_PREFIX));
+  let previous = builds[0];
+  for (const name of builds.reverse()) {
+    if (await (await caches.open(name)).match(ACTIVATION_RECORD)) {
+      previous = name;
+      break;
+    }
+  }
+  await current.put(ACTIVATION_RECORD, new Response(previous ?? ''));
+  await Promise.all(older.filter((name) => name !== previous && (name.startsWith(CACHE_PREFIX) || LEGACY_CACHE_PREFIXES.some((prefix) => name.startsWith(prefix))))
+    .map((name) => caches.delete(name)));
+}
+
+let previousCachePromise;
+function previousCache(cache) {
+  return previousCachePromise ??= cache.match(ACTIVATION_RECORD).then(async (response) => {
+    const name = await response?.text();
+    if (name) return caches.open(name);
+  });
 }
 
 /** Same-origin subresources of a page worth precaching with it: its build chunks and shell files. */
@@ -106,7 +128,7 @@ async function precacheShell() {
 
 async function cacheFirst(request, waitUntil) {
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(request);
+  const cached = (await cache.match(request)) ?? (await (await previousCache(cache))?.match(request));
   if (cached) return cached;
   const response = await fetch(request);
   if (cacheable(response)) waitUntil(cache.put(request, response.clone()).catch(() => undefined));
@@ -115,7 +137,10 @@ async function cacheFirst(request, waitUntil) {
 
 async function cachedNavigation(request, cache) {
   if (request.mode !== 'navigate') return cache.match(request);
-  return (await cache.match(request, { ignoreSearch: true })) ?? (await cache.match(APP_SHELL_FALLBACK));
+  const options = { ignoreSearch: true };
+  return (await cache.match(request, options)) ??
+    (await (await previousCache(cache))?.match(request, options)) ??
+    (await cache.match(APP_SHELL_FALLBACK));
 }
 
 /**
@@ -161,7 +186,7 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(caches.keys().then((names) => Promise.all(staleCacheNames(names).map((name) => caches.delete(name)))));
+  event.waitUntil(activateCache());
 });
 
 self.addEventListener('fetch', (event) => {
