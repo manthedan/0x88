@@ -114,6 +114,7 @@ const result = { move: 'e2e4', visits: 10, value: 0, children: [], pv: ['e2e4'] 
 
 for (const cancel of [false, true]) {
   test(`big-net search invalidates and terminates its worker; ${cancel ? 'Stop prevents retry' : 'second loss retries on WASM'}`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
     const workers = fakeWorkers(t);
     const searcher = new Bt4WorkerSearcher(BT4_NET, () => undefined);
     const warnings = [];
@@ -124,7 +125,9 @@ for (const cancel of [false, true]) {
     const controller = new AbortController();
     const search = searcher.search(START_FEN, { signal: controller.signal, visits: (backend) => (backend === 'wasm' ? 10 : 100) });
     await tick();
-    workers[0].emit({ ...loss, id: workers[0].posted.at(-1).id });
+    const firstId = workers[0].posted.at(-1).id;
+    workers[0].emit({ ...loss, id: firstId });
+    workers[0].emit({ type: 'error', id: firstId, error: 'GPUBuffer.mapAsync failed' });
     assert.equal(searcher.loaded, false);
     assert.equal(workers[0].terminated, true);
     assert.match(warnings[0], /GPU context was reset/);
@@ -141,6 +144,14 @@ for (const cancel of [false, true]) {
     await tick();
     workers[0].emit(loss);
     assert.equal(warnings.length, 1);
+    const readback = { type: 'error', id: workers[1].posted.at(-1).id, error: 'GPUBuffer.mapAsync failed' };
+    let failedBeforeLoss = false;
+    void search.catch(() => {
+      failedBeforeLoss = true;
+    });
+    workers[1].emit(readback);
+    await tick();
+    assert.equal(failedBeforeLoss, false, 'the readback failure leaves time for the subsequent device loss');
     workers[1].emit(loss);
     await tick();
     assert.equal(workers[2].posted[0].ep, 'wasm');
@@ -156,6 +167,22 @@ for (const cancel of [false, true]) {
     await searcher.dispose();
   });
 }
+
+test('a big-net inference error without device loss is reported without starting another worker', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const workers = fakeWorkers(t);
+  const searcher = new Bt4WorkerSearcher(BT4_NET, () => undefined);
+  const search = searcher.search(START_FEN, { visits: 10 });
+  const failed = assert.rejects(search, /GPUBuffer.mapAsync failed/);
+  ready(workers[0], 'auto->webgpu');
+  await tick();
+  workers[0].emit({ type: 'error', id: workers[0].posted.at(-1).id, error: 'GPUBuffer.mapAsync failed' });
+  t.mock.timers.tick(1000);
+  await failed;
+  assert.equal(searcher.loaded, true);
+  assert.equal(workers.length, 1);
+  await searcher.dispose();
+});
 
 test('Play’s LQO policy-book evaluation is retried on a fresh worker', async (t) => {
   const workers = fakeWorkers(t);
