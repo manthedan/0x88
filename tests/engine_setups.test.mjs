@@ -118,7 +118,10 @@ test('refreshing Analysis availability preserves the focused version control', a
   const deps = {
     document,
     CSS: { escape: (value) => value },
-    el: () => ({ contains: (node) => node === original, querySelector: (selector) => (selector === `[aria-label="${label}"]` ? replacement : null) }),
+    el: (id) =>
+      id === 'engineManager'
+        ? { open: true }
+        : { contains: (node) => node === original, querySelector: (selector) => (selector === `[aria-label="${label}"]` ? replacement : null) },
     BIG_NETS: { bt4: {}, t3: {} },
     engineRows: [],
     probeBt4Support: async () => true,
@@ -133,6 +136,39 @@ test('refreshing Analysis availability preserves the focused version control', a
   const refresh = new Function(...Object.keys(deps), `${stripTypeScriptTypes(body)}; return refreshBigNetAvailability;`)(...Object.values(deps));
   await refresh(new AbortController().signal);
   assert.equal(document.activeElement, replacement);
+});
+
+test('an open Analysis picker updates after a bounded BT4 retry with diagnostics closed', async () => {
+  const source = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('async function refreshBigNetAvailability('), source.indexOf('function renderBigNetWarning('));
+  const retries = [];
+  const optionDisabled = [];
+  let bt4Status = 'unknown';
+  const deps = {
+    BIG_NETS: { bt4: { modelUrl: '/bt4.onnx' }, t3: { modelUrl: '/t3.onnx' } },
+    engineRows: [],
+    document: { activeElement: null },
+    el: () => ({ open: true }),
+    probeBt4Support: async () => true,
+    checkBigNetAsset: async ({ modelUrl }) => (modelUrl === '/bt4.onnx' ? bt4Status : 'present'),
+    subscribeAssetProbeRetry: (urls, retry) => retries.push({ urls, retry }),
+    isStaleMount: () => false,
+    whileAnalysisMounted: (callback) => callback,
+    renderRecklessRuntimeInfo() {},
+    renderEngineList: () => optionDisabled.push(bt4Status !== 'present'),
+  };
+  const refresh = new Function(...Object.keys(deps), `${stripTypeScriptTypes(body)}; return refreshBigNetAvailability;`)(...Object.values(deps));
+  await refresh(new AbortController().signal);
+  assert.deepEqual(optionDisabled, [true]);
+  assert.deepEqual(
+    retries.map(({ urls }) => urls),
+    [['/bt4.onnx']],
+  );
+  bt4Status = 'present';
+  retries[0].retry();
+  await new Promise(setImmediate);
+  assert.deepEqual(optionDisabled, [true, false]);
+  assert.equal(retries.length, 1);
 });
 
 for (const action of ['add', 'change']) {

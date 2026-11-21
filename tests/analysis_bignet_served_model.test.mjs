@@ -1302,6 +1302,33 @@ test('position changes reuse a mixed Analysis run’s pending Small load until S
   assert.deepEqual(page.smallSearchLog, []);
 });
 
+test('hiding mixed Analysis pauses searches without restarting the Small download on show', async () => {
+  const page = analysisPage({
+    rows: [
+      { family: 'lc0', variant: 'small', strength: 64 },
+      { family: 'sf', variant: 'lite', strength: 12 },
+    ],
+    searchers: new Map(),
+  });
+  const release = page.holdBackend();
+  const first = page.analyzeCurrent();
+  try {
+    await new Promise(setImmediate);
+    assert.equal(page.backendStarts.length, 1);
+    page.hide();
+    await first;
+    assert.equal(page.backendStarts[0].aborted, false);
+    assert.deepEqual(page.smallSearchLog, []);
+    page.show();
+    await new Promise(setImmediate);
+    assert.equal(page.backendStarts.length, 1);
+  } finally {
+    release();
+  }
+  await settled(page);
+  assert.deepEqual(page.smallSearchLog, ['onnx']);
+});
+
 test('hiding an automatic initial backend load retains its search on show', async () => {
   const small = { family: 'lc0', variant: 'small', strength: 64 };
   const page = analysisPage({ rows: [small], searchers: new Map() });

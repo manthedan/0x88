@@ -151,6 +151,7 @@ import {
 import { positionShareUrl } from './analysisShare.ts';
 import { analysisStatus } from './analysisStatus.ts';
 import { loadRetirableResource } from './arenaResourceLoad.ts';
+import { subscribeAssetProbeRetry } from './assetProbe.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import {
   BERSERK_VARIANTS,
@@ -1789,15 +1790,20 @@ async function requestAnalysisBigNetConsent(config: BigNetConfig, signal: AbortS
 }
 
 async function refreshBigNetAvailability(mountSignal = mountAbort.signal): Promise<void> {
-  await Promise.all([
-    probeBt4Support(),
-    checkBigNetAsset(BIG_NETS.bt4, whileAnalysisMounted(renderRecklessRuntimeInfo)),
-    checkBigNetAsset(BIG_NETS.t3, whileAnalysisMounted(renderRecklessRuntimeInfo)),
-  ]);
+  const configs = [BIG_NETS.bt4, BIG_NETS.t3];
+  const [statuses] = await Promise.all([Promise.all(configs.map((config) => checkBigNetAsset(config))), probeBt4Support()]);
   if (isStaleMount(mountSignal)) return;
+  const manager = el('engineManager') as HTMLDialogElement;
+  if (!manager.open) return;
+  const retry = () => {
+    if (manager.open) void refreshBigNetAvailability(mountSignal);
+  };
+  for (const [index, status] of statuses.entries()) {
+    if (status === 'unknown') subscribeAssetProbeRetry([configs[index].modelUrl], retry, mountSignal);
+  }
   const previousRows = JSON.stringify(engineRows);
   for (const row of engineRows) {
-    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && !bigNetSelectable(BIG_NETS[row.variant])) row.variant = 'small';
+    if (row.family === 'lc0' && isLc0BigNetVariant(row.variant) && bigNetAssetStatusSync(BIG_NETS[row.variant]) === 'missing') row.variant = 'small';
   }
   if (JSON.stringify(engineRows) !== previousRows) invalidateAnalysisSettings();
   const host = el('engineList');
@@ -3643,7 +3649,7 @@ function applyAnalysisEvent(event: AnalysisEventInput) {
 }
 
 function dispatchAnalysis(event: AnalysisEventInput): Promise<void> {
-  if (event.type === 'DISPOSE' || event.type === 'MODE_ENTER' || (event.type === 'VISIBILITY' && !event.visible)) cancelSmallLc0Load();
+  if (event.type === 'DISPOSE' || event.type === 'MODE_ENTER') cancelSmallLc0Load();
   return executeAnalysisEffects(applyAnalysisEvent(event));
 }
 
