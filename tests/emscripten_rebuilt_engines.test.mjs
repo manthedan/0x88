@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -13,17 +13,38 @@ const tiers = {
   stormphrax: ['', '-relaxed-simd128'],
 };
 const unlinked = { plentychess: 'processed.bin', stormphrax: 'undertown.nnue' };
+const lfsPointerHeader = 'version https://git-lfs.github.com/spec/v1\n';
+
+function fixtureAbsent(path) {
+  const stat = statSync(path, { throwIfNoEntry: false });
+  return !stat || (stat.size < 1024 && readFileSync(path, 'utf8').startsWith(lfsPointerHeader));
+}
+
+test('missing Emscripten fixtures include LFS pointers but not corrupt bodies', (t) => {
+  const tmp = mkdtempSync(join(tmpdir(), 'emscripten-lfs-'));
+  t.after(() => rmSync(tmp, { recursive: true, force: true }));
+  const path = join(tmp, 'fixture.wasm');
+  assert.equal(fixtureAbsent(path), true);
+  writeFileSync(path, `${lfsPointerHeader}oid sha256:${'0'.repeat(64)}\nsize 128000\n`);
+  assert.equal(fixtureAbsent(path), true);
+  writeFileSync(path, 'corrupt body');
+  assert.equal(fixtureAbsent(path), false);
+});
 
 for (const [engine, suffixes] of Object.entries(tiers)) {
   for (const suffix of suffixes) {
     test(`${engine}${suffix}: rebuilt WASM stops cooperatively, then searches again`, async (t) => {
       const base = `${engine}-emscripten${suffix}`;
       const dir = resolve('public', engine);
+      const wasm = join(dir, `${base}.wasm`);
+      const data = join(dir, `${engine}-emscripten.data`);
+      const missing = [wasm, data].find(fixtureAbsent);
+      if (missing) return t.skip(`Engine fixture not hydrated: ${missing}`);
       const tmp = mkdtempSync(join(tmpdir(), 'emscripten-uci-'));
       t.after(() => rmSync(tmp, { recursive: true, force: true }));
       const glue = join(tmp, `${base}.cjs`);
       copyFileSync(join(dir, `${base}.js`), glue);
-      const compiled = new WebAssembly.Module(readFileSync(join(dir, `${base}.wasm`)));
+      const compiled = new WebAssembly.Module(readFileSync(wasm));
       const stdout = [];
       const flag = new Int32Array(new SharedArrayBuffer(4));
       let stopReads = 0;
@@ -35,7 +56,7 @@ for (const [engine, suffixes] of Object.entries(tiers)) {
           assert.throws(() => memory.grow((512 - 64) * 16 + 1), RangeError);
           return receiveInstance(instance);
         },
-        locateFile: () => join(dir, `${engine}-emscripten.data`),
+        locateFile: () => data,
         print: (line) => stdout.push(line),
         shouldStop: () => {
           const value = Atomics.load(flag, 0);

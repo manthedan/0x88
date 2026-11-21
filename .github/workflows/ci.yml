@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      TEST_LFS_INCLUDE: public/stormphrax/stormphrax-emscripten.wasm,public/stormphrax/stormphrax-emscripten.data,public/plentychess/plentychess-emscripten.wasm,public/plentychess/plentychess-emscripten.data
+      TEST_LFS_INCLUDE: public/berserk/*.wasm,public/berserk/berserk-emscripten.data,public/plentychess/*.wasm,public/plentychess/plentychess-emscripten.data,public/stormphrax/*.wasm,public/stormphrax/stormphrax-emscripten.data
     steps:
       - uses: actions/checkout@v7
         with:
