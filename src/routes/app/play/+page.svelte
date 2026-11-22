@@ -421,7 +421,8 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
   .record-actions :global([data-copied=true]){color:var(--accent-soft-text)}
   .record-actions :global(a[aria-disabled=true]){opacity:.5; pointer-events:none}
 
-  .play-workspace:global([data-phase=setup]) :is(.opponent-summary, .moves-block, .nav-row, .record-actions, #takeback, #resign){display:none}
+  .play-workspace:global([data-phase=setup]) :is(.opponent-summary, .moves-block, .move-nav, .record-actions, #takeback, #resign){display:none}
+  .play-workspace:global([data-phase=setup]:not([data-human-can-move=true])) .nav-row{display:none}
   .play-workspace:global([data-phase=setup]) .setup-pane{flex:0 1 auto; min-height:0}
   .play-workspace:global([data-phase=setup]) .game-actions{grid-template-columns:1fr; padding:0 14px 14px; border-top:0}
   .play-workspace:global([data-phase=playing][data-quiet=true]) .status-block:not(:has(:global(#dlProgress:not([hidden]), :is(#runtimeWarning, #deviceLossWarning):not([hidden]), #bigNetCpuWarning:not([hidden]), #retryEngine:not([hidden]), #engineNote[data-routine=false]:not([hidden])))){display:none}
@@ -473,7 +474,7 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
     .settings-disclosure{padding-inline:12px}
     .play-workspace:global([data-phase=setup]) .setup-pane{gap:8px; padding-top:10px}
     .play-workspace:global([data-phase=setup]) .game-actions{padding:0 12px 10px}
-    .play-workspace:global([data-phase=setup]) .play-hint{display:none}
+    .play-workspace:global([data-phase=setup][data-human-can-move=true]) .play-hint{display:none}
     .move-nav button{width:auto; flex:1 1 0; height:40px}
     .move-nav{flex:1 1 60%}
     .move-form{flex:1 1 40%}
