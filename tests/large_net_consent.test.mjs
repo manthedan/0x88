@@ -137,7 +137,6 @@ test('large-net consent works without Promise.withResolvers and AbortSignal.any'
   }
   const f = browser(t);
   const pending = f.request(BIG_NETS.lqo);
-  // A rejection must surface immediately rather than fail later while waiting for the dialog.
   const dialog = await Promise.race([pending.then(() => assert.fail('consent returned before showing a dialog')), f.dialog()]);
   choose(dialog, true);
   assert.equal(await pending, true);
