@@ -37,10 +37,13 @@ test('parallel focus includes searches made in the background, independent of wo
 
 test('the real live strip uses its game trail, not stale counters or the reviewed chart', () => {
   const source = readFileSync(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8');
-  const render = source.slice(source.indexOf('function renderStrips()'), source.indexOf('function renderSideLabels()'));
+  const render = source.slice(source.indexOf('function arenaPreparingGame()'), source.indexOf('function renderSideLabels()'));
   const nodes = new Map();
   const dependencies = {
-    stripSides: () => ({ w: {}, b: {} }),
+    boardWhiteId: 'white',
+    boardWhiteName: 'Stockfish Lite',
+    boardBlackId: 'black',
+    boardBlackName: 'Reckless',
     board: parseFen(START_FEN),
     performance: { now: () => 0 },
     liveTrail: { charts: [], openingPlies: 0, entries: [{ fen: START_FEN }] },
@@ -63,8 +66,20 @@ test('the real live strip uses its game trail, not stale counters or the reviewe
     htmlEscape: String,
     formatSeconds: (ms) => `${ms}ms`,
   };
-  new Function(...Object.keys(dependencies), `${stripTypeScriptTypes(render)}\nrenderStrips();`)(...Object.values(dependencies));
-  for (const node of nodes.values()) assert.match(node.innerHTML, /strip-clock-value">0ms</);
+  const draw = new Function(...Object.keys(dependencies), `${stripTypeScriptTypes(render)}\nreturn (trail) => { liveTrail = trail; renderStrips(); };`)(
+    ...Object.values(dependencies),
+  );
+  draw(null);
+  for (const node of nodes.values()) {
+    assert.match(node.innerHTML, /Preparing engines…/);
+    assert.match(node.innerHTML, /arena-avatar placeholder/);
+    assert.match(node.innerHTML, /strip-clock-value">—</);
+  }
+  draw(dependencies.liveTrail);
+  for (const node of nodes.values()) {
+    assert.doesNotMatch(node.innerHTML, /Preparing engines…/);
+    assert.match(node.innerHTML, /strip-clock-value">0ms</);
+  }
 });
 
 test('search parity starts at the opening side, including black-to-move custom roots', () => {

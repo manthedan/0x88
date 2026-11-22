@@ -375,6 +375,7 @@ onMount(() => {
     background:var(--eng); color:#fff; font:700 11px/1 var(--mono); font-variant-numeric:slashed-zero; letter-spacing:0;
     box-shadow:inset 0 0 0 1px #ffffff2e;
   }
+  .arena-workspace :global(.arena-avatar.placeholder){background:var(--panel-inset)}
   .arena-workspace :global(.arena-avatar.sm){flex-basis:24px; width:24px; height:24px; border-radius:5px; font-size:10px}
   .player-strip :global(.strip-id){display:flex; flex:1 1 auto; flex-direction:column; min-width:0; line-height:1.25}
   .player-strip :global(.strip-id strong){color:var(--ink); font:650 15px var(--sans); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}

@@ -5,9 +5,6 @@ import { ARROW_GEOMETRY, arrowHeadPath, arrowLayout } from '../../lc0/arrowGeome
 type PieceRole = 'rook' | 'knight' | 'bishop' | 'queen' | 'king' | 'pawn';
 type Piece = { color: 'white' | 'black'; role: PieceRole; square: string };
 
-// Sicilian Najdorf, English Attack, after 12...b4. These results were recorded
-// on the built Analysis page with Lc0 Small (400 visits) and Stockfish Lite
-// (depth 12). Re-run before editing the scores, search metadata or variations.
 const FEN = 'r2q1rk1/3nbppp/p2pbn2/4p1P1/1p2P3/1NN1BP2/PPPQ3P/2KR1B1R w - - 0 13';
 const ROLE: Record<string, PieceRole> = { r: 'rook', n: 'knight', b: 'bishop', q: 'queen', k: 'king', p: 'pawn' };
 const FILES = 'abcdefgh';
@@ -55,7 +52,7 @@ const engines = [
     id: 'lc0',
     name: 'Lc0 Small',
     color: '#7a4fd6',
-    meta: '365 visits',
+    meta: '400-visit budget',
     evalText: '+0.25',
     best: 'Ne2',
     line: 'Nh5 14. Ng3 Nf4 15. h4 a5',
@@ -82,8 +79,8 @@ const analysisHref = `/app/analysis/?fen=${encodeURIComponent(FEN)}`;
 <div class="preview-shell">
 <figure class="analysis-preview" aria-labelledby="preview-caption">
   <figcaption class="pv-caption" id="preview-caption">
-    <span class="pv-example">Example engine comparison</span>
-    <strong>Engines disagree: Ne2 / gxf6</strong>
+    <span class="pv-example">Recorded engine comparison</span>
+    <strong>One position, two engine lines</strong>
     <span class="pv-perspective">White to move · evaluations from White’s perspective</span>
   </figcaption>
 
@@ -92,7 +89,7 @@ const analysisHref = `/app/analysis/?fen=${encodeURIComponent(FEN)}`;
     <div
       class="preview-board cg-wrap"
       role="img"
-      aria-label="Board after 12…b4, White to move. Lc0's violet arrow shows Ne2 and Stockfish's blue arrow shows gxf6."
+      aria-label="Board after 12…b4, White to move. Recorded moves: Ne2 for Lc0 (violet), gxf6 for Stockfish (blue)."
     >
       <cg-board>
         {#each lastMove as sq (sq)}
@@ -143,7 +140,7 @@ const analysisHref = `/app/analysis/?fen=${encodeURIComponent(FEN)}`;
 
   <div class="pv-foot">
     <p class="pv-context"><b>B90</b> Sicilian Najdorf, English Attack · after 12…b4</p>
-    <p>Lc0 retreats the attacked knight. Stockfish takes on f6 instead, trading knights.</p>
+    <p>These lines are from one run. A fresh search may choose a different move.</p>
     <a href={analysisHref}>Analyse this position <span aria-hidden="true">→</span></a>
   </div>
 </figure>

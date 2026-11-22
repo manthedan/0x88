@@ -149,7 +149,7 @@ import {
   transitionAnalysis,
 } from './analysisRunState.ts';
 import { positionShareUrl } from './analysisShare.ts';
-import { analysisStatus } from './analysisStatus.ts';
+import { analysisStatus, pendingEngineText } from './analysisStatus.ts';
 import { loadRetirableResource } from './arenaResourceLoad.ts';
 import { subscribeAssetProbeRetry } from './assetProbe.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
@@ -1014,11 +1014,11 @@ function analysisProgressText(
   label: string,
   progress: { completedVisits?: number; requestedVisits?: number; visits: number; move?: string | null; value: number; elapsedMs?: number },
 ): string {
-  const completed = progress.completedVisits ?? progress.visits;
-  const requested = progress.requestedVisits ?? progress.visits;
-  const pct = requested > 0 ? ` ${((100 * completed) / requested).toFixed(0)}%` : '';
-  const speed = progress.elapsedMs && progress.elapsedMs > 0 ? ` · ${(completed / Math.max(1e-9, progress.elapsedMs / 1000)).toFixed(1)} v/s` : '';
-  return `${label}: ${completed}/${requested} visits${pct} · best ${progress.move ?? '—'} · Q ${progress.value.toFixed(3)}${speed}`;
+  const { visits } = progress;
+  const requested = Math.max(visits, progress.requestedVisits ?? visits);
+  const pct = requested > 0 ? ` ${((100 * visits) / requested).toFixed(0)}%` : '';
+  const speed = progress.elapsedMs && progress.elapsedMs > 0 ? ` · ${((progress.completedVisits ?? visits) / (progress.elapsedMs / 1000)).toFixed(1)} v/s` : '';
+  return `${label}: ${visits}/${requested} visits${pct} · best ${progress.move ?? '—'} · Q ${progress.value.toFixed(3)}${speed}`;
 }
 
 function hasBoundedSearchProgress(progress: SearchProgressSnapshot): boolean {
@@ -1099,14 +1099,14 @@ function canShowAnalysisSearchProgress(runId: number, fen: string): boolean {
 function showAnalysisProgress(runId: number, fen: string, label: string, progress: WorkerSearchProgress): void {
   if (!canShowAnalysisSearchProgress(runId, fen)) return;
   analysisUiProgressSamples += 1;
-  const completed = progress.completedVisits ?? progress.visits;
+  const { visits, completedVisits } = progress;
   const elapsedMs = progress.elapsedMs ?? 0;
   searchProgressByEngine.set(progressKey(runId, label), {
     label,
-    completed,
-    requested: progress.requestedVisits ?? progress.visits,
+    completed: visits,
+    requested: Math.max(visits, progress.requestedVisits),
     elapsedMs,
-    nps: elapsedMs > 0 ? completed / Math.max(1e-9, elapsedMs / 1000) : undefined,
+    nps: elapsedMs > 0 ? completedVisits / (elapsedMs / 1000) : undefined,
     best: progress.move ?? null,
     value: progress.value,
     units: 'visits',
@@ -2180,7 +2180,7 @@ function renderPgnImportNotice(text?: string): void {
   if (notice.textContent !== content) notice.textContent = content;
 }
 
-function renderAnalysisStatus(): void {
+function renderAnalysisStatus() {
   renderPgnImportNotice();
   if (retry) return;
   const status = maybeEl('analysisStatus');
@@ -2191,10 +2191,10 @@ function renderAnalysisStatus(): void {
   const { state, text, title } = analysisStatus({
     hidden: hiddenTab.hidden,
     suspended: hiddenTab.suspended.includes('analysis'),
-    activeRun: hasActiveAnalysisRun(),
+    activeRun: searchProgressByEngine.size > 0,
     ready,
     failed,
-    loading: (el('analyze') as HTMLButtonElement).disabled,
+    loading: hasActiveAnalysisRun() || (el('analyze') as HTMLButtonElement).disabled,
   });
   if (status.dataset.state !== state) status.dataset.state = state;
   if (status.textContent !== text) status.textContent = text;
@@ -2204,6 +2204,7 @@ function renderAnalysisStatus(): void {
   const label = maybeEl('analyzeLabel');
   const verb = state === 'done' ? 'Re-analyze' : 'Analyze';
   if (label && label.textContent !== verb) label.textContent = verb;
+  return state;
 }
 
 function activeEngineNames(): string[] {
@@ -2224,7 +2225,7 @@ function toggleEngineLines(name: string): void {
 }
 
 function renderEngineSummaries(lines: AnalysisLine[]): void {
-  renderAnalysisStatus();
+  const state = renderAnalysisStatus();
   el('enginesTabCount').textContent = String(activeEngineRows().length);
   const best = lines.filter((entry) => entry.multipv === 1 && !entry.error && entry.pvUci[0]);
   const groups = analysisMoveGroups(best);
@@ -2272,13 +2273,14 @@ function renderEngineSummaries(lines: AnalysisLine[]): void {
           ? `<button type="button" class="line-toggle" data-line-toggle="${htmlEscape(name)}" data-focus-key="lines|${htmlEscape(name)}" aria-expanded="${open}" aria-label="${open ? 'Hide' : 'Show'} ${extra} more line${extra > 1 ? 's' : ''} for ${htmlEscape(name)}" title="${open ? 'Show the top line only' : `Show all ${extra + 1} lines`}">${open ? 'Hide lines' : `${extra} more line${extra > 1 ? 's' : ''}`}</button>`
           : '';
         const header = `<div class="engine-summary"><button class="engine-summary-name" type="button" data-engine-toggle="${htmlEscape(name)}" data-focus-key="toggle|${htmlEscape(name)}" aria-pressed="${focused}" aria-label="${htmlEscape(`${name}: ${focused ? "show every engine's arrow" : "show only this engine's arrow and use it for the eval bar"}`)}" title="${htmlEscape(`${name}: ${focused ? "click again to show every engine's arrow" : 'show only its arrow (and use it for the eval bar)'}`)}">${engineAvatar(engine)}<span class="engine-summary-text"><strong>${htmlEscape(name)}</strong><small title="${htmlEscape(raw)}">${htmlEscape(stats)}</small></span></button><span class="engine-summary-score" title="${htmlEscape(name)} evaluation, White's perspective">${htmlEscape(line?.scoreText ?? '—')}</span>${move}${toggle}<button type="button" class="engine-gear" data-engine-settings="${index}" data-focus-key="settings|${index}" aria-label="${htmlEscape(name)} settings" title="${htmlEscape(name)} settings">${GEAR_ICON}</button></div>`;
-        return `<section class="engine-card${progress ? ' searching' : ''}${focused ? ' arrow-focus' : ''}${open ? ' open' : ''}" style="--engine-color:${swatch}" aria-label="${htmlEscape(name)}">${header}${engineLinesMarkup(engine, name, engineLines, open)}${meter}</section>`;
+        const pending = progress ? 'Searching…' : pendingEngineText(state);
+        return `<section class="engine-card${progress ? ' searching' : ''}${focused ? ' arrow-focus' : ''}${open ? ' open' : ''}" style="--engine-color:${swatch}" aria-label="${htmlEscape(name)}">${header}${engineLinesMarkup(engine, name, engineLines, open, pending)}${meter}</section>`;
       })
       .join(''),
   );
 }
 
-function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLine[], open: boolean): string {
+function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLine[], open: boolean, pending: string): string {
   const sorted = [...engineLines].sort((x, y) => x.multipv - y.multipv);
   const rows = (open ? sorted : sorted.slice(0, 1)).map((line, index) => {
     if (line.error)
@@ -2295,10 +2297,7 @@ function engineLinesMarkup(engine: string, name: string, engineLines: AnalysisLi
     const lead = index === 0 ? '' : `<span class="line-rank">${line.multipv}</span><span class="score">${htmlEscape(line.scoreText)}</span>`;
     return `<li class="result-line${index === 0 ? ' top-line' : ' alt-line'}" ${attrs}><div class="line-play">${lead}<span class="pv" data-result-scroll-key="${key}">${moves}</span><span class="pv-ellipsis" aria-hidden="true">…</span></div><div class="line-actions"><button type="button" class="line-preview" data-pv-preview data-focus-key="${key}|preview" aria-haspopup="dialog" aria-controls="pvPreview" aria-label="${htmlEscape(`Preview ${name} line ${line.multipv} on the board`)}"${preview.steps.length ? '' : ' disabled'} title="Preview this line on the board"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7zM4 5v14"/></svg></button></div></li>`;
   });
-  if (!rows.length)
-    rows.push(
-      `<li class="result-line pending-line"><span class="pending-text">${analysisIsAnalyzing(analysisRunState) ? 'Searching…' : 'Not analyzed yet. Press Analyze.'}</span></li>`,
-    );
+  if (!rows.length) rows.push(`<li class="result-line pending-line"><span class="pending-text">${htmlEscape(pending)}</span></li>`);
   return `<ol class="engine-lines" aria-label="${htmlEscape(name)} lines">${rows.join('')}</ol>`;
 }
 
@@ -3918,10 +3917,9 @@ function analysisAssetAbortError(): DOMException {
   return new DOMException('Analysis asset download cancelled', 'AbortError');
 }
 
-function createAnalysisAssetPreload(engineLabel: string, rawUrl: string): AnalysisAssetPreload {
+function createAnalysisAssetPreload(label: string, rawUrl: string): AnalysisAssetPreload {
   const controller = new AbortController();
-  const id = `asset:${++analysisAssetPreloadSequence}:${engineLabel}:${rawUrl}`;
-  const label = `${engineLabel} · ${assetFileLabel(rawUrl)}`;
+  const id = `asset:${++analysisAssetPreloadSequence}`;
   const entry: AnalysisAssetPreload = { controller, consumers: new Map(), promise: Promise.resolve() };
   entry.promise = (async () => {
     showLoadingProgressItem(id, { label, phase: 'Downloading' });
@@ -3984,7 +3982,7 @@ async function preloadAnalysisAsset(engineLabel: string, rawUrl: string | undefi
   for (;;) {
     if (signal.aborted) throw analysisAssetAbortError();
     let entry = preloadingAnalysisAssetPromises.get(rawUrl);
-    if (!entry || entry.controller.signal.aborted) entry = createAnalysisAssetPreload(engineLabel, rawUrl);
+    if (!entry || entry.controller.signal.aborted) entry = createAnalysisAssetPreload(analysisEngineName(engineLabel), rawUrl);
     try {
       await waitForAnalysisAssetPreload(entry, rawUrl, signal);
       return;
@@ -4298,6 +4296,10 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
               rowKeys[index] = analysisRunRowKey({ ...snapshot, servedModels: { ...snapshot.servedModels, small: lc0ServedModelUrl } }, row);
               activeAnalysisSelectionKey = selectionCacheKey = rowKeys.join('\u0001');
             }
+            if (options.force && engineLineCache.has(cacheKey) && row.strength <= 16_000) {
+              if (workerReady) void postWorker({ type: 'resetSearch' }).catch(() => undefined);
+              else searcher!.resetTree();
+            }
             if (workerReady) return await workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label, smallFirstLine?.resolve);
             const result = await searcher!.search(
               { positions: analysisPositions },
@@ -4540,9 +4542,9 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       analysisAbort = null;
       engines.retireAnalysisRunCentipawnKeys();
       clearAnalysisSearchProgress();
-      renderEngineComparison(lineCache.get(tree.current.fen) ?? []);
       maybeEl('stop')?.toggleAttribute('disabled', !hiddenAnalysisStopEnabled(hiddenTab));
       maybeEl('analyze')?.toggleAttribute('disabled', false);
+      renderEngineComparison(lineCache.get(tree.current.fen) ?? []);
     }
     void executeAnalysisEffects(effects);
   }
@@ -5087,7 +5089,14 @@ function wireEvents() {
   messageObserver.observe(message, { childList: true, characterData: true, subtree: true });
   mountAbort.signal.addEventListener('abort', () => messageObserver.disconnect(), { once: true });
   updateMessageState();
-  const statusObserver = new MutationObserver(renderAnalysisStatus);
+  const statusObserver = new MutationObserver(() => {
+    const state = renderAnalysisStatus();
+    if (!state) return;
+    const text = pendingEngineText(state);
+    for (const node of el('engineSummaries').querySelectorAll('.engine-card:not(.searching) .pending-text')) {
+      if (node.textContent !== text) node.textContent = text;
+    }
+  });
   for (const id of ['stop', 'analyze']) statusObserver.observe(el(id), { attributes: true, attributeFilter: ['disabled'] });
   mountAbort.signal.addEventListener('abort', () => statusObserver.disconnect(), { once: true });
   renderAnalysisStatus();
