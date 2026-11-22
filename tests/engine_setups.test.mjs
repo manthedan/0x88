@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
+import { abortSignalAny } from '../src/lc0/abortSignalAny.ts';
 import { ENGINE_PROFILE_BACKUP_KIND, engineSetupRuntime, normalizeEngineProfiles } from '../src/lc0/engineSetups.ts';
 
 const row = { family: 'sf', variant: 'lite', strength: 8 };
@@ -206,7 +207,7 @@ for (const action of ['add', 'change']) {
       ${extract("  el('engineList').addEventListener('change'", "  el('engineProfileSelect').addEventListener(")}
       ${extract('  const addEngineRow =', "  el('lc0RuntimeSelect').addEventListener(")}
     `;
-    new Function('engineRows', ...Object.keys(deps), stripTypeScriptTypes(controller))(rows, ...Object.values(deps));
+    new Function('engineRows', 'abortSignalAny', ...Object.keys(deps), stripTypeScriptTypes(controller))(rows, abortSignalAny, ...Object.values(deps));
     const updating =
       action === 'add'
         ? handlers.get('addEngine:click')()

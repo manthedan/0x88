@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
+import { abortSignalAny } from '../src/lc0/abortSignalAny.ts';
 import { ANALYSIS_BIG_NET_KEYS, ANALYSIS_BIG_NET_SESSION, createAnalysisEngines } from '../src/lc0/analysis/analysisEngines.ts';
 import * as pool from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
@@ -50,6 +51,7 @@ function link(code, deps = {}) {
     phoneReclaimSettings,
     isLc0BigNetVariant,
     untilAborted,
+    abortSignalAny,
     el: node,
     ...deps,
   };

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
+import { abortSignalAny } from '../src/lc0/abortSignalAny.ts';
 import { analysisCanPrepare } from '../src/lc0/analysisRunState.ts';
 import { loadRetirableResource } from '../src/lc0/arenaResourceLoad.ts';
 import { awaitEngineRetirements, trackEngineRetirement } from '../src/lc0/engineRetirement.ts';
@@ -323,6 +324,7 @@ for (const reason of ['navigation', 'seat cancellation', 'diagnostics failure'])
   `,
       {
         mountAbort: mount,
+        abortSignalAny,
         isStaleMount: (s) => s.aborted,
         selectedLc0Runtime: () => 'onnx',
         selectedSeatsNeedLc0Evaluator: () => true,
