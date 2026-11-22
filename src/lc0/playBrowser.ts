@@ -1029,7 +1029,7 @@ function ctxNewGame(ctx: PlayContext, prepareOpponent = true): void {
   ctxDisarmNewGame(ctx);
   ctxRestoreSelectedRuntimeWarning(ctx);
   ctxRender(ctx);
-  if (prepareOpponent) ctxPrepareOrStartEngine(ctx);
+  if (prepareOpponent || ctx.board.turn !== ctx.humanColor) ctxPrepareOrStartEngine(ctx);
 }
 
 function ctxTakeback(ctx: PlayContext): void {
@@ -2115,7 +2115,7 @@ function ctxInit(ctx: PlayContext): void {
       ctxRender(ctx);
       ctxPrepareOrStartEngine(ctx);
     }, 10_000);
-  } else if (!ctx.gameOver && (ctx.restoredGame || startupOpponent.family !== 'maia3')) ctxPrepareOrStartEngine(ctx);
+  } else if (!ctx.gameOver && (ctx.restoredGame || startupOpponent.family !== 'maia3' || ctx.board.turn !== ctx.humanColor)) ctxPrepareOrStartEngine(ctx);
 }
 
 function hasPlayBrowserDom(root: HTMLElement): boolean {

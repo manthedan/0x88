@@ -490,6 +490,7 @@ test('an incidental Play visit and a fresh side choice do not boot Maia before t
   const mount = slice('  ctxRender(ctx);\n  if (ctx.pendingPreferredEngineId)', '\nfunction hasPlayBrowserDom');
   const side = slice("  ctx.scope.listen(ctx.dom.selectEl('colorSelect'), 'change',", '  ctx.scope.listen(window, PHONE_LARGE_NET_CHANGE_EVENT');
   const status = slice('function ctxLiveStatusText(', 'function ctxRenderMoveList(');
+  const reset = slice("  ctxSetEngineNote(ctx, '');\n  ctxDisarmResign(ctx);\n  ctxDisarmNewGame(ctx);", '\nfunction ctxTakeback(');
   const calls = [];
   const retry = { hidden: true };
   const ctx = {
@@ -498,16 +499,20 @@ test('an incidental Play visit and a fresh side choice do not boot Maia before t
     engineReady: false,
     preparingEngine: false,
     engineThinking: false,
+    board: { turn: 'w' },
+    humanColor: 'w',
     dom: { selectEl() {}, buttonEl: () => retry },
     scope: { listen: (_el, _event, fn) => fn() },
   };
   const run = new Function(
     'calls',
     'ctx',
-    `const ctxRender = () => {}, ctxPrepareOrStartEngine = () => calls.push('load');
+    `const ctxRender = () => {}, ctxPrepareOrStartEngine = () => calls.push(ctx.board.turn === ctx.humanColor ? 'load' : 'engine move');
     const ctxPhase = () => 'setup', ctxSelectedEngine = () => ({ label: 'Maia3' });
+    const ctxSetEngineNote = () => {}, ctxDisarmResign = () => {}, ctxDisarmNewGame = () => {}, ctxRestoreSelectedRuntimeWarning = () => {};
     ${stripTypeScriptTypes(status)}
-    const ctxMaybeQueueRestart = (_ctx, prepare = true) => { if (prepare) ctxPrepareOrStartEngine(); };
+    function reset(prepareOpponent) { ${reset}
+    const ctxMaybeQueueRestart = (_ctx, prepare = true) => reset(prepare);
     function mount(startupOpponent) { ${mount}
     function side() { ${side} }
     return { mount, side, status: () => ctxLiveStatusText(ctx) };`,
@@ -518,10 +523,15 @@ test('an incidental Play visit and a fresh side choice do not boot Maia before t
   assert.equal(run.status(), 'Press Play to load your opponent.');
   retry.hidden = false;
   assert.match(run.status(), /Retry the engine/);
+  ctx.humanColor = 'b';
+  run.mount({ family: 'maia3' });
+  run.side();
+  assert.deepEqual(calls, ['engine move', 'engine move'], 'saved Black and newly selected Black each start the engine');
+  ctx.humanColor = 'w';
   ctx.restoredGame = true;
   run.mount({ family: 'maia3' });
   run.side();
-  assert.deepEqual(calls, ['load', 'load']);
+  assert.deepEqual(calls.slice(2), ['load', 'load']);
 });
 
 test('a failed opening-index fetch is retried by a later mount', async () => {
