@@ -4701,6 +4701,7 @@ async function startMatchUnchecked(minimumWarmupVisibleMs = 400, resume: ArenaCh
       refreshPlentyChessVariantUi();
       refreshStormphraxVariantUi();
       refreshSeatControls();
+      renderSideLabels();
       renderEngineOutputs();
     }
   }

@@ -82,6 +82,44 @@ test('the real live strip uses its game trail, not stale counters or the reviewe
   }
 });
 
+test('stopping Arena before the first game redraws both strips and eval bars in the idle state', async () => {
+  const source = readFileSync(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8');
+  const preparing = source.slice(source.indexOf('function arenaPreparingGame()'), source.indexOf('function stripSides()'));
+  const sideLabels = source.slice(source.indexOf('function renderSideLabels()'), source.indexOf('function setBoardSideEngines('));
+  const match = source.slice(source.indexOf('  let enginesReady = false;'), source.indexOf('\nasync function startMatch('));
+  const cleanup = match.slice(match.lastIndexOf('  } finally {'));
+  const redraws = [];
+  const stop = new Function(
+    'redraws',
+    stripTypeScriptTypes(`
+      const matchAbort = new AbortController(), mountSignal = new AbortController().signal;
+      let abort = matchAbort, running = true, startPending = false, reviewing = false, liveTrail = null, activeEngineIds = [];
+      const checkpointWrites = Promise.resolve(), engineOutputs = new Map(), thinkingEngineIds = new Set();
+      const el = () => ({toggleAttribute() {}});
+      const isMemoryConstrainedDevice = () => false, isStaleMount = () => false;
+      const noop = () => {};
+      const setArenaStartDisabled = noop, refreshOpeningPreview = noop, refreshStockfishControls = noop, refreshSeatControls = noop;
+      const refreshRecklessVariantUi = noop, refreshViridithasVariantUi = noop, refreshBerserkVariantUi = noop;
+      const refreshPlentyChessVariantUi = noop, refreshStormphraxVariantUi = noop, renderEngineOutputs = noop;
+      ${preparing}
+      ${sideLabels}
+      const renderStrips = () => redraws.push(['strips', arenaPreparingGame()]);
+      const renderEvalBars = () => redraws.push(['eval bars', arenaPreparingGame()]);
+      async function stop() {
+        renderSideLabels();
+        try { matchAbort.abort();
+      ${cleanup}
+    `) + '\nreturn stop;',
+  )(redraws);
+  await stop();
+  assert.deepEqual(redraws, [
+    ['strips', true],
+    ['eval bars', true],
+    ['strips', false],
+    ['eval bars', false],
+  ]);
+});
+
 test('search parity starts at the opening side, including black-to-move custom roots', () => {
   assert.deepEqual(
     arenaSideTimeMs(
