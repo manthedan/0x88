@@ -10,6 +10,7 @@ import {
   assertClientDocument,
   browserMaxAge,
   failedRequestEntries,
+  inspectAnalysis,
   isExpectedAppShellCacheControl,
   isExpectedOrtCacheControl,
   parseCacheControl,
@@ -40,6 +41,61 @@ test('document identity is rechecked after controller readiness and worker retir
   const source = readFileSync(script, 'utf8');
   assert.match(source, /async function inspectBrowser\(session, surface\) \{\s*await assertClientDocument\(session, surface\)/);
   assert.match(source, /await assertClientDocument\(session, 'Worker retirement'\);\s*return workerRetirementReport/);
+});
+
+test('Analysis smoke opens the developer runtime details before reading the deferred diagnostics', async () => {
+  const history = [];
+  const location = new URL('https://example.test/app/arena/');
+  const runtimeText =
+    'Centipawn: not selected · Reckless: persistent available · asset ok · Viridithas: asset ok · Berserk: asset ok · PlentyChess: asset ok · Stormphrax: asset ok';
+  let href = '/app/analysis/';
+  const link = {
+    getAttribute: () => href,
+    setAttribute: (_attribute, value) => {
+      href = value;
+    },
+    click: () => {
+      const next = new URL(href, location);
+      location.pathname = next.pathname;
+      location.search = next.search;
+    },
+  };
+  const document = {
+    title: 'Analysis',
+    querySelector(selector) {
+      if (selector === '.site-header nav.primary a[href="/app/analysis/"]') return link;
+      if (selector === '[data-testid="browser-capabilities"]') return { textContent: 'WebGPU ready · WASM threads ready · Model cache' };
+      if (selector === '.row-fam')
+        return { options: ['lc0', 'sf', 'reckless', 'berserk', 'viridithas', 'plentychess', 'stormphrax', 'centipawn'].map((value) => ({ value })) };
+      if (selector === '#recklessRuntimeInfo') {
+        assert.deepEqual(history, ['#manageEngines', 'Developer engine settings', 'Engine runtime details']);
+        return { textContent: runtimeText };
+      }
+      assert.fail(selector);
+    },
+  };
+  const control = (name) => ({ click: async () => history.push(name), first: () => ({ waitFor: async () => assert.ok(document.querySelector(name)) }) });
+  const session = {
+    args: { baseUrl: location.origin },
+    documentToken: 'original',
+    page: {
+      locator: control,
+      getByText: control,
+      evaluate: async (expression) =>
+        new Function('document', 'window', 'location', 'setTimeout', `return ${expression}`)(
+          document,
+          { __productionSmokeDocument: 'original' },
+          location,
+          (fn) => fn(),
+        ),
+    },
+  };
+  const result = await inspectAnalysis(session);
+  assert.equal(result.url, 'https://example.test/app/analysis/?dev');
+  assert.equal(location.search, '?dev');
+  assert.equal(result.runtimeText, runtimeText);
+  assert.equal(history.at(-1), '#closeEngineManager');
+  assert.equal(href, '/app/analysis/');
 });
 
 test('nightly smoke recognizes old and new deployed Play markup during rollout', async () => {

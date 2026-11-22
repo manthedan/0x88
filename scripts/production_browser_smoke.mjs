@@ -164,15 +164,20 @@ async function navigateSurface(session, path, fullNavigation = false) {
     `(() => {
     const link = document.querySelector('.site-header nav.primary a[href="${url.pathname}"]');
     if (!link) return false;
-    setTimeout(() => link.click(), 0);
+    setTimeout(() => {
+      const href = link.getAttribute('href');
+      link.setAttribute('href', ${JSON.stringify(url.pathname + url.search)});
+      link.click();
+      link.setAttribute('href', href);
+    }, 0);
     return true;
   })()`,
   );
   if (!clicked) throw new Error(`Could not find an internal link for ${url.pathname}`);
   await waitForEval(
     session,
-    `location.pathname.endsWith('/') ? location.pathname.slice(0, -1) : location.pathname`,
-    (value) => value === url.pathname.replace(/\/$/, ''),
+    `location.pathname.replace(/\\/$/, '') + location.search`,
+    (value) => value === url.pathname.replace(/\/$/, '') + url.search,
     30_000,
   );
   await assertClientDocument(session, url.pathname);
@@ -298,9 +303,14 @@ async function inspectArena(session) {
   return { url, ...result };
 }
 
-async function inspectAnalysis(session) {
-  const url = await navigateSurface(session, '/app/analysis/');
+export async function inspectAnalysis(session) {
+  const url = await navigateSurface(session, '/app/analysis/?dev');
   await inspectCapabilities(session, 'Analysis');
+  const timeout = 60_000;
+  await session.page.locator('.row-fam').first().waitFor({ state: 'attached', timeout });
+  await session.page.locator('#manageEngines').click({ timeout });
+  await session.page.getByText('Developer engine settings', { exact: true }).click({ timeout });
+  await session.page.getByText('Engine runtime details', { exact: true }).click({ timeout });
   const result = await waitForEval(
     session,
     `(() => ({
@@ -318,6 +328,7 @@ async function inspectAnalysis(session) {
   if (JSON.stringify(result.families) !== JSON.stringify(ENGINE_FAMILIES)) throw new Error(`Unexpected Analysis family order: ${result.families.join(', ')}`);
   if (/asset missing|runtime[^·]*failed|runtime[^·]*error/i.test(result.runtimeText))
     throw new Error(`Analysis runtime diagnostics reported a failure: ${result.runtimeText}`);
+  await session.page.locator('#closeEngineManager').click({ timeout });
   await inspectBrowser(session, 'Analysis');
   return { url, ...result };
 }
