@@ -42,7 +42,10 @@ test('successful verified session does not reload or mutate a shared model resul
   const bytes = model(),
     shared = result(bytes),
     loads = [];
+  let folded;
   t.mock.method(ort.InferenceSession, 'create', async (input) => {
+    folded = input;
+    assert.ok(folded.byteLength > 0);
     assert.notEqual(input.buffer, bytes);
     return { async release() {} };
   });
@@ -60,6 +63,7 @@ test('successful verified session does not reload or mutate a shared model resul
   );
   assert.equal(loads.length, 1, 'normal warm loads do not re-download/re-read for fallback');
   assert.equal('model' in created.modelLoad, false);
+  assert.equal(folded.byteLength, 0, 'release the private folded buffer before the first inference');
   assert.equal(shared.model, bytes);
   assert.ok(bytes.byteLength > 0, 'shared/coalesced buffers are never detached or mutated');
   await created.evaluator.dispose();

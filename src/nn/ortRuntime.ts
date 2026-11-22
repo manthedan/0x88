@@ -341,6 +341,7 @@ type OrtModelInput = string | Uint8Array | ArrayBuffer;
 
 type PreparedOrtModelInput = {
   input: OrtModelInput;
+  foldedBuffer?: ArrayBuffer;
   /** Lazy verified reload when available; raw input retained only for callers without reload provenance. */
   original?: OrtModelSource;
 };
@@ -376,7 +377,9 @@ async function prepareOrtModelInput(modelPath: OrtModelInput, reloadModel?: () =
       bytesAfter: result.bytesAfter,
       elapsedMs: result.elapsedMs,
     };
-    return result.foldedNodes > 0 ? { input: result.bytes, original: reloadModel ?? bytes } : { input: bytes };
+    return result.foldedNodes > 0
+      ? { input: result.bytes, original: reloadModel ?? bytes, foldedBuffer: result.bytes.buffer as ArrayBuffer }
+      : { input: bytes };
   } catch (err) {
     console.warn(`Centipawn: ORT dequantize fold skipped: ${err instanceof Error ? err.message : String(err)}`);
     lastOrtDequantFold = {
@@ -1187,6 +1190,7 @@ async function createOrtSessionFromSource(takeModel: () => OrtModelInput, option
   const { providers, wasmFallback } = await prepareOrtThread(options);
   let prepared: PreparedOrtModelInput | undefined = await prepareOrtModelInput(takeModel(), options.reloadModel);
   const attempts = planOrtSessionAttempts(prepared, providers, wasmFallback, options);
+  const foldedBuffer = prepared.foldedBuffer;
   prepared = undefined;
   let firstMessage: string | undefined;
   let lastMessage: string | null = null;
@@ -1204,7 +1208,8 @@ async function createOrtSessionFromSource(takeModel: () => OrtModelInput, option
       const extra = attempt.providers.includes('webgpu') ? options.webgpuSessionOptions : undefined;
       const creating = ort.InferenceSession.create(input as never, { ...sessionOptions(attempt.providers), ...extra });
       input = undefined; // ORT owns its ingestion lifetime; do not keep an extra JS root until it returns.
-      const session = await creating;
+      // ORT has ingested its own WASM copy. Only the fold writer's private buffer is disposable.
+      const session = attempt.kind === 'primary' && foldedBuffer ? await creating.finally(() => foldedBuffer.transfer?.(0)) : await creating;
       const t1 = typeof performance === 'undefined' ? Date.now() : performance.now();
       createdOrtSessions += 1;
       if (options.signal?.aborted) {
