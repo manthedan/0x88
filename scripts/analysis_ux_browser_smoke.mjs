@@ -31,6 +31,10 @@ try {
     await download.promise;
     await route.continue();
   });
+  await page.route('**/stockfish/*.wasm', async (route) => {
+    await download.promise;
+    await route.continue();
+  });
   try {
     await page.goto(base);
     const link = page.getByRole('link', { name: 'Analyse this position' });

@@ -241,8 +241,10 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     // Lc0 Small: the selected runtime vs the one the loaded worker backend runs.
     let currentRuntime = smallLc0Runtime ?? 'onnx', backendRuntime = currentRuntime;
     let workerReady = smallLc0Runtime !== null, workerSearchWarm = workerReady;
-    const smallSearchLog = [];
+    const smallSearchLog = [], smallWorkerMessages = [];
+    const postWorker = async (message) => { smallWorkerMessages.push(message); };
     const workerLc0Lines = async (_runId, _fen, _visits, _positions, searchedMultiPv, engine) => {
+      smallWorkerMessages.push({ type: 'search' });
       smallSearchLog.push(backendRuntime);
       return [{ engine, pvUci: ['d2d4'], multipv: 1, scoreText: '+0.10', detail: backendRuntime, pvSan: '', searchedMultiPv }];
     };
@@ -385,6 +387,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
         settingsChanged({ reloadLc0: true, disposeUnused: false });
       },
       smallSearchLog,
+      smallWorkerMessages,
       idle: () => ['idle', 'disposed'].includes(analysisRunState.execution.tag),
       stop: cancelActiveAnalysisRun,
       leave: () => { mountAbort.abort(); void dispatchAnalysis({ type: 'DISPOSE' }); },
@@ -1092,6 +1095,7 @@ for (const keepSelection of [false, true]) {
     if (keepSelection) await page.fireScheduled();
     await settled(page);
     assert.deepEqual(page.smallSearchLog, keepSelection ? ['onnx', 'onnx'] : ['onnx'], 'force must bypass the cached row only for the matching selection');
+    assert.deepEqual(page.smallWorkerMessages, keepSelection ? [{ type: 'search' }, { type: 'resetSearch' }, { type: 'search' }] : [{ type: 'search' }]);
     assert.deepEqual(page.state().modes, []);
     page.settleCritical();
     assert.equal(page.state().execution.tag, 'idle', 'settlement never replays twice');
