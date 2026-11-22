@@ -22,6 +22,7 @@ import { chooseMove } from '../search/puct.ts';
 import { abortSignalAny } from './abortSignalAny.ts';
 import { acknowledgeInputTransfer, takePlayHandoff, writeAnalysisHandoff } from './analysisHandoff.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
+import { resetAssetProbeRetry } from './assetProbe.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { type BigNetKey, peekBigNetSearcher, releaseUnusedBigNetSearchers } from './bigNetSessionPool.ts';
 import { boardCheck, hidePromotionOverlay, legalDests, matchUserMoves, showPromotionOverlay } from './boardUx.ts';
@@ -2087,12 +2088,20 @@ function ctxInit(ctx: PlayContext): void {
       ctxResolvePendingPreferredEngine(ctx);
     }
   };
-  const probeOpponentNet = (variant: BigNetKey) => void waitForBigNetAsset(BIG_NETS[variant], ctx.scope.signal).then(refreshIfMounted);
-  let opponentOptionsProbed = false;
+  const probingOpponentNets = new Set<BigNetKey>();
+  const probeOpponentNet = (variant: BigNetKey) => {
+    const config = BIG_NETS[variant];
+    if (probingOpponentNets.has(variant) || bigNetAssetStatusSync(config) !== 'unknown') return;
+    probingOpponentNets.add(variant);
+    void waitForBigNetAsset(config, ctx.scope.signal).then(() => {
+      probingOpponentNets.delete(variant);
+      refreshIfMounted();
+    });
+  };
+  let opponentPickerVisited = false;
   const probeOpponentOptions = () => {
-    if (opponentOptionsProbed) return;
-    opponentOptionsProbed = true;
-    void probeBt4Support().then(refreshIfMounted);
+    if (!opponentPickerVisited) void probeBt4Support().then(refreshIfMounted);
+    opponentPickerVisited = true;
     for (const option of ENGINE_OPTIONS) {
       if (option.family === 'lc0' && option.variant !== 'small') probeOpponentNet(option.variant as BigNetKey);
     }
@@ -2100,6 +2109,13 @@ function ctxInit(ctx: PlayContext): void {
   const opponentSelect = ctx.dom.selectEl('engineSelect');
   ctx.scope.listen(opponentSelect, 'focus', probeOpponentOptions);
   ctx.scope.listen(opponentSelect, 'pointerenter', probeOpponentOptions);
+  ctx.scope.listen(opponentSelect, 'pointerdown', probeOpponentOptions);
+  ctx.scope.listen(opponentSelect, 'keydown', probeOpponentOptions);
+  ctx.scope.listen(window, 'online', () => {
+    if (!opponentPickerVisited) return;
+    for (const variant of probingOpponentNets) resetAssetProbeRetry([BIG_NETS[variant].modelUrl]);
+    probeOpponentOptions();
+  });
   const startupOpponent = ENGINE_OPTIONS.find((option) => option.id === ctx.pendingPreferredEngineId) ?? ctxSelectedEngine(ctx);
   if (startupOpponent.family === 'lc0' && startupOpponent.variant !== 'small') {
     void probeBt4Support().then(refreshIfMounted);

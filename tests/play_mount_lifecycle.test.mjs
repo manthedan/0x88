@@ -13,9 +13,10 @@ import { moveToUci } from '../src/chess/moveCodec.ts';
 import { legalMoves, makeMove } from '../src/chess/movegen.ts';
 import { sanToMove } from '../src/chess/pgn.ts';
 import { moveToSan } from '../src/chess/san.ts';
+import { resetAssetProbeRetry } from '../src/lc0/assetProbe.ts';
 import { legalDests, matchUserMoves } from '../src/lc0/boardUx.ts';
 import { createRootDom } from '../src/lc0/browserDom.ts';
-import { BIG_NETS, bigNetAssetStatusSync, bigNetOptionState, checkBigNetAsset, waitForBigNetAsset } from '../src/lc0/bt4Engine.ts';
+import { BIG_NETS, bigNetAssetStatusSync, bigNetOptionState, waitForBigNetAsset } from '../src/lc0/bt4Engine.ts';
 import { enginePlayOptions } from '../src/lc0/engineCatalog.ts';
 import { createMountScope } from '../src/lc0/mountScope.ts';
 import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
@@ -465,12 +466,13 @@ test('v0 Play waits for picker intent before probing its optional opponents', as
   const refreshed = [];
   const listeners = new Map();
   const deps = {
+    window: new EventTarget(),
     ctx: { dom: { selectEl: () => ({}) }, scope: { signal: new AbortController().signal, listen: (_, type, fn) => listeners.set(type, fn) } },
     ctxSelectedEngine: () => ({ family: 'maia3' }),
     ENGINE_OPTIONS: enginePlayOptions().filter((option) => option.v0),
     BIG_NETS,
+    bigNetAssetStatusSync,
     probeBt4Support: async () => false,
-    checkBigNetAsset,
     waitForBigNetAsset,
     ctxIsDisposed: () => false,
     ctxRefreshEngineOptions: () => refreshed.push(bigNetOptionState(BIG_NETS.bt4).disabled),
@@ -502,12 +504,13 @@ for (const dispose of [false, true]) {
     const config = { ...BIG_NETS.lqo, modelUrl: `https://example.test/play-retry-${dispose}.onnx` };
     const results = [];
     const deps = {
+      window: new EventTarget(),
       ctx: { dom: { selectEl: () => picker }, scope },
       ctxSelectedEngine: () => ({ family: 'maia3' }),
       ENGINE_OPTIONS: [{ family: 'lc0', variant: 'lqo' }],
       BIG_NETS: { lqo: config },
+      bigNetAssetStatusSync,
       probeBt4Support: async () => true,
-      checkBigNetAsset,
       waitForBigNetAsset,
       ctxIsDisposed: () => !scope.live(),
       ctxRefreshEngineOptions: () => results.push(bigNetAssetStatusSync(config)),
@@ -530,6 +533,61 @@ for (const dispose of [false, true]) {
     assert.equal(heads, dispose ? 1 : 2);
     assert.equal(results.at(-1), dispose ? 'unknown' : 'present');
     scope.dispose();
+  });
+}
+
+for (const reconnect of ['online', 'pointerdown']) {
+  test(`Queen Odds remains retryable after three cache misses (${reconnect})`, async (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+    const play = readFileSync('src/lc0/playBrowser.ts', 'utf8');
+    const start = play.indexOf('  const refreshIfMounted =');
+    const code = play.slice(start, play.indexOf('  ctxRender(ctx);', start));
+    const scope = createMountScope(new FakeElement(), new URL('https://example.test/app/play/'));
+    t.after(() => scope.dispose());
+    const picker = new EventTarget();
+    const window = new EventTarget();
+    const config = { ...BIG_NETS.lqo, modelUrl: `https://example.test/play-reconnect-${reconnect}.onnx` };
+    let reachable = false;
+    let rendered;
+    let heads = 0;
+    Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => reconnect !== 'online' || reachable });
+    t.after(() => delete navigator.onLine);
+    t.mock.method(globalThis, 'fetch', async (url, { method }) => {
+      if (url !== config.modelUrl) return new Response(null, { status: 404 });
+      assert.equal(method, 'HEAD');
+      heads++;
+      if (!reachable) throw new TypeError('Network unreachable');
+      return new Response(null, { status: 200 });
+    });
+    const deps = {
+      window,
+      ctx: { dom: { selectEl: () => picker }, scope },
+      ctxSelectedEngine: () => ({ family: 'maia3' }),
+      ENGINE_OPTIONS: [{ family: 'lc0', variant: 'lqo' }],
+      BIG_NETS: { lqo: config },
+      bigNetAssetStatusSync,
+      probeBt4Support: async () => true,
+      waitForBigNetAsset,
+      ctxIsDisposed: () => !scope.live(),
+      ctxRefreshEngineOptions: () => (rendered = bigNetOptionState(config)),
+      ctxResolvePendingPreferredEngine() {},
+      resetAssetProbeRetry,
+    };
+    new Function(...Object.keys(deps), stripTypeScriptTypes(code))(...Object.values(deps));
+    picker.dispatchEvent(new Event('focus'));
+    for (const elapsed of [0, 1000, 2000]) {
+      t.mock.timers.tick(elapsed);
+      await new Promise(setImmediate);
+    }
+    assert.equal(heads, reconnect === 'online' ? 0 : 3);
+    assert.equal(bigNetAssetStatusSync(config), 'unknown');
+    assert.doesNotMatch(rendered.suffix, /not hosted/);
+
+    reachable = true;
+    (reconnect === 'online' ? window : picker).dispatchEvent(new Event(reconnect));
+    await new Promise(setImmediate);
+    assert.equal(heads, reconnect === 'online' ? 1 : 4);
+    assert.equal(rendered.disabled, false);
   });
 }
 

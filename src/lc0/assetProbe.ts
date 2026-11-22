@@ -86,10 +86,10 @@ export function notifyAssetProbeChange(urls: readonly string[], listener?: () =>
 
 /** One-shot cooldown notification. Unsubscribe (or abort) when the listener
  * goes away; without listeners no retry timer or callback is retained. */
-export function subscribeAssetProbeRetry(urls: readonly string[], listener: () => void, signal?: AbortSignal): () => void {
+export function subscribeAssetProbeRetry(urls: readonly string[], listener: () => void, signal?: AbortSignal): (() => void) | undefined {
   const key = JSON.stringify(urls);
   const failure = failures.get(key);
-  if (!failure || failure.attempts >= maxAttempts || signal?.aborted) return () => {};
+  if (!failure || failure.attempts >= maxAttempts || signal?.aborted) return;
   const unsubscribe = subscribeAssetProbeChange(urls, listener, signal);
   const round = subscribers.get(key);
   if (round) round.dueAt = Math.min(round.dueAt ?? Infinity, failure.retryAt);
@@ -97,10 +97,17 @@ export function subscribeAssetProbeRetry(urls: readonly string[], listener: () =
   return unsubscribe;
 }
 
+export function resetAssetProbeRetry(urls: readonly string[]): void {
+  if (failures.delete(JSON.stringify(urls))) notifyAssetProbeChange(urls);
+}
+
 /** Completion callbacks may render and probe again. Remain silent during the
  * cooldown, then wake those renders once so recovery needs no unrelated UI event. */
 export function assetProbeRetryAllowed(urls: readonly string[], onRetry?: () => void): boolean {
-  if (Date.now() >= (failures.get(JSON.stringify(urls))?.retryAt ?? 0)) {
+  const key = JSON.stringify(urls);
+  const failure = failures.get(key);
+  if (Date.now() >= (failure?.retryAt ?? 0)) {
+    if (failure?.attempts === maxAttempts) failures.delete(key);
     subscribeAssetProbeChange(urls, onRetry);
     return true;
   }
@@ -122,9 +129,6 @@ function headAbortSignal(group: AbortSignal, head: AbortController): { signal: A
   return { signal: head.signal, cleanup: () => group.removeEventListener('abort', forwardAbort) };
 }
 
-/** Only HTTP success and 404/410 are definitive. A bounded transient failure
- * leaves availability unknown until the third attempt, then settles missing for
- * the session so existing pickers stop displaying checking indefinitely. */
 export async function probeAssetUrls(
   urls: readonly string[],
   {
@@ -138,10 +142,6 @@ export async function probeAssetUrls(
   } = {},
 ): Promise<AssetProbeStatus> {
   const key = JSON.stringify(urls);
-  if ((failures.get(key)?.attempts ?? 0) >= maxAttempts) {
-    notifyAssetProbeChange(urls);
-    return 'missing';
-  }
   if (!assetProbeRetryAllowed(urls)) return 'unknown';
   const controller = new AbortController();
   let finish!: (status: AssetProbeStatus) => void;
@@ -193,10 +193,6 @@ export async function probeAssetUrls(
     if (status === 'unknown') {
       const previous = failures.get(key);
       const attempts = (previous?.attempts ?? 0) + 1;
-      if (attempts >= maxAttempts) {
-        failures.set(key, { attempts, retryAt: 0 });
-        return 'missing';
-      }
       failures.set(key, { attempts, retryAt: Date.now() + 1_000 * 2 ** (attempts - 1) });
     } else {
       failures.delete(key);

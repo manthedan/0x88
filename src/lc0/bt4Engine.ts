@@ -11,7 +11,14 @@ import {
 } from '../nn/ortConfig.ts';
 import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
 import type { OrtRuntimeDiagnostics } from '../nn/ortRuntime.ts';
-import { assetProbeRetryAllowed, notifyAssetProbeChange, probeAssetUrls, subscribeAssetProbeChange, subscribeAssetProbeRetry } from './assetProbe.ts';
+import {
+  assetProbeRetryAllowed,
+  notifyAssetProbeChange,
+  probeAssetUrls,
+  resetAssetProbeRetry,
+  subscribeAssetProbeChange,
+  subscribeAssetProbeRetry,
+} from './assetProbe.ts';
 import { assetPathname, isLocalDevelopmentOrigin, resolvePublicAssetUrl } from './assetUrls.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
@@ -282,17 +289,20 @@ export async function checkBigNetAsset(config: BigNetConfig = BT4_NET, onStatus?
 }
 
 export async function waitForBigNetAsset(config: BigNetConfig, signal: AbortSignal): Promise<Bt4AssetStatus> {
+  const urls = [config.modelUrl];
+  if (!signal.aborted) resetAssetProbeRetry(urls);
   while (!signal.aborted) {
     const status = await checkBigNetAsset(config);
     if (status !== 'unknown' || signal.aborted) return status;
-    await new Promise<void>((resolve) => {
+    const retry = await new Promise<boolean>((resolve) => {
       const wake = () => {
         signal.removeEventListener('abort', wake);
-        resolve();
+        resolve(!signal.aborted);
       };
-      signal.addEventListener('abort', wake, { once: true });
-      subscribeAssetProbeRetry([config.modelUrl], wake, signal);
+      if (subscribeAssetProbeRetry(urls, wake, signal)) signal.addEventListener('abort', wake, { once: true });
+      else resolve(false);
     });
+    if (!retry) break;
   }
   return 'unknown';
 }

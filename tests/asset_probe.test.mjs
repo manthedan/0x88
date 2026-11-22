@@ -252,7 +252,7 @@ for (const [name, check, read, ok] of [
   ['BT4', checkBigNetAsset, bigNetAssetStatusSync, 'present'],
 ]) {
   for (const recover of [true, false]) {
-    test(`${name} render-driven probes ${recover ? 'recover automatically after cooldown' : 'settle missing after three failures'}`, async (t) => {
+    test(`${name} render-driven probes ${recover ? 'recover automatically after cooldown' : 'stay unknown after three failures'}`, async (t) => {
       t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
       const variant = {
         key: 'custom',
@@ -296,11 +296,12 @@ for (const [name, check, read, ok] of [
         await flush(t);
         assert.equal(calls, firstCalls * 3);
       }
-      assert.equal(read(variant), recover ? ok : 'missing');
-      if (!recover) {
+      if (recover) assert.equal(read(variant), ok);
+      else {
+        assert.match(read(variant), /^(unknown|checking)$/);
         const option = name === 'BT4' ? bigNetOptionState(variant) : browserVariantOption('test', name, { assetStatus: read(variant), requirePresent: true });
         assert.equal(option.disabled, true);
-        assert.match(option.label ?? option.suffix, /missing|not hosted/);
+        assert.doesNotMatch(option.label ?? option.suffix, /missing|not hosted/);
       }
       const settledNotifications = notifications;
       t.mock.timers.tick(120_000);
@@ -335,18 +336,22 @@ test('retry notifications share one unref timer and cancel when the last listene
   assert.equal(cancel.mock.calls[0].arguments[0], handle);
 });
 
-test('the shared helper keeps exhausted probes missing without more requests', async (t) => {
+test('an exhausted probe stays unknown and can recover on a later check', async (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
-  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 503 }));
+  let status = 503;
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response(null, { status }));
   const urls = ['/exhausted-probe.wasm'];
   assert.equal(await probeAssetUrls(urls), 'unknown');
   t.mock.timers.tick(1_000);
   assert.equal(await probeAssetUrls(urls), 'unknown');
   t.mock.timers.tick(2_000);
-  assert.equal(await probeAssetUrls(urls), 'missing');
-  t.mock.timers.tick(120_000);
-  assert.equal(await probeAssetUrls(urls), 'missing');
+  assert.equal(await probeAssetUrls(urls), 'unknown');
+  assert.equal(await probeAssetUrls(urls), 'unknown');
   assert.equal(fetch.mock.callCount(), 6, 'three HEADs plus three cache attempts');
+  status = 200;
+  t.mock.timers.tick(4_000);
+  assert.equal(await probeAssetUrls(urls), 'present');
+  assert.equal(fetch.mock.callCount(), 7);
 });
 
 // Match Analysis/Arena: every callback is a fresh closure, and each render
@@ -419,13 +424,16 @@ for (const [name, check, read, ok, headsPerVariant] of [
         t.mock.timers.tick(120_000);
         await settle();
         t.diagnostic(`renders=${counts.join(' → ')}; HEADs=${requests}`);
-        assert.deepEqual(variants.map(read), Array(3).fill(recoverOnThird ? ok : 'missing'));
-        assert.equal(requests, 9 * headsPerVariant, 'three attempts per variant, then no requests after settlement');
+        for (const variant of variants) {
+          if (recoverOnThird) assert.equal(read(variant), ok);
+          else assert.match(read(variant), /^(unknown|checking)$/);
+        }
+        assert.equal(requests, 9 * headsPerVariant, 'three automatic attempts per variant');
         assert.ok(counts[0] <= 13, 'at most four callbacks per key in a completion batch, plus the initial render');
         assert.ok(counts[1] <= 37, 'at most twelve cooldown and twelve completion callbacks per attempt');
         assert.ok(counts[2] <= 61, 'three attempts have a fixed callback budget');
         assert.deepEqual(counts, extraRenders ? [13, 37, 61] : [4, 25, 49]);
-        assert.equal(renders, counts[2], 'server recovery after exhaustion cannot restart the settled picker');
+        assert.equal(renders, counts[2], 'exhaustion schedules no further renders');
       });
     }
   }
