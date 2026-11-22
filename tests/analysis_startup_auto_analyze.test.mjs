@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
+import { untilAborted } from '../src/lc0/modelCache.ts';
 
 // The end of Analysis init(), after the startup asset checks have been awaited.
 const text = readFileSync(new URL('../src/lc0/analysisBrowser.ts', import.meta.url), 'utf8');
@@ -80,6 +81,57 @@ test('a saved setup with Lc0 Small dispatches analysis before backend readiness 
   assert.deepEqual((await startup({ autoAnalyze: false, smallLc0: true })).calls, ['backend:true']);
   assert.deepEqual((await startup({ autoAnalyze: true, smallLc0: true })).calls, ['analyze']);
 });
+
+for (const outcome of ['Lc0 first line', 'stalled Lc0', 'cancelled']) {
+  test(`Stockfish Lite cold startup: ${outcome}`, async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const gateStart = text.indexOf('async function waitForSmallFirstLine(');
+    const gate = gateStart < 0 ? '' : text.slice(gateStart, text.indexOf('async function analyzeCurrent(', gateStart));
+    const createStart = text.indexOf('    let releaseSmallFirstLine');
+    const create = text.slice(createStart < 0 ? text.indexOf('    const smallFirstLine =') : createStart, text.indexOf('    const tasks: Promise<void>[]'));
+    const sfStart = text.indexOf('pushTask(index, label, async (beginSearch) => {', text.indexOf("} else if (row.family === 'sf') {", text.indexOf(create)));
+    const waitStart = text.indexOf('\n', sfStart);
+    const waitEnd = text.indexOf('          return engines.withCpuLease(', waitStart);
+    const start = stripTypeScriptTypes(`${gate}
+      function setup() {
+        const runRows = [{ family: 'lc0', variant: 'small' }, { family: 'sf', variant: 'lite' }];
+        const needsSmallLc0Backend = true, smallLc0Pending = true, workerReady = false, workerSearchWarm = false;
+        ${create}
+        return { publish: () => releaseSmallFirstLine(), async stockfish() { ${text.slice(waitStart, waitEnd)} boot(); } };
+      }`);
+    const controller = new AbortController();
+    const boot = t.mock.fn();
+    const api = new Function('untilAborted', 'controller', 'boot', 'Promise', `${start}; return setup();`)(
+      untilAborted,
+      controller,
+      boot,
+      outcome === 'stalled Lc0'
+        ? Promise
+        : class SafariPromise extends Promise {
+            static withResolvers = undefined;
+          },
+    );
+    const running = api.stockfish();
+    await new Promise(setImmediate);
+    assert.equal(boot.mock.callCount(), 0);
+    if (outcome === 'cancelled') {
+      controller.abort();
+      await assert.rejects(running, { name: 'AbortError' });
+      assert.equal(boot.mock.callCount(), 0);
+    } else {
+      if (outcome === 'Lc0 first line') api.publish();
+      else {
+        t.mock.timers.tick(2999);
+        await new Promise(setImmediate);
+        assert.equal(boot.mock.callCount(), 0);
+        t.mock.timers.tick(1);
+      }
+      await new Promise(setImmediate);
+      assert.equal(boot.mock.callCount(), 1);
+      await running;
+    }
+  });
+}
 
 test('Analysis fetches the opening index once when the position leaves the starting board', async () => {
   const start = text.indexOf('let openingNameIndex:');

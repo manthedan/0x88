@@ -5,6 +5,7 @@
  */
 
 import * as v from 'valibot';
+import { abortSignalAny } from './abortSignalAny.ts';
 import { ChessComArchivesResponseSchema, ChessComGamesResponseSchema } from './gameImportSchema.ts';
 
 export type ImportSite = 'lichess' | 'chesscom';
@@ -97,7 +98,7 @@ async function withRequestSignal<T>(label: string, opts: ImportOptions, signal: 
   const limit = timeoutMs(opts);
   const timeout = AbortSignal.timeout(limit);
   try {
-    return await run(signal ? AbortSignal.any([signal, timeout]) : timeout);
+    return await run(signal ? abortSignalAny([signal, timeout]) : timeout);
   } catch (error) {
     if (timeout.aborted && !signal?.aborted) throw new Error(`${label} did not respond within ${Math.round(limit / 1000)} s`);
     throw error;

@@ -1,3 +1,4 @@
+import { abortSignalAny } from './abortSignalAny.ts';
 import { type BigNetConfig, bigNetLoadWarning } from './bt4Engine.ts';
 import { isMemoryConstrainedDevice } from './deviceMemoryClass.ts';
 import { inspectLargeNetDownload, type LargeNetDownloadState } from './largeNetDownload.ts';
@@ -60,7 +61,7 @@ async function requestDownloadConsent(
   activeConsent?.controller.abort();
   activeConsent = request;
   try {
-    const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    const requestSignal = signal ? abortSignalAny([signal, controller.signal]) : controller.signal;
     return await showLargeNetConsent(request, config, requestSignal, desktopWarning, downloadNotice, inspect);
   } finally {
     if (activeConsent === request) activeConsent = undefined;
@@ -82,12 +83,14 @@ async function showLargeNetConsent(
   const previousFocus = document.activeElement as HTMLElement | null;
   const previousFocusId = previousFocus?.id;
   const previousFocusLabel = previousFocus?.getAttribute('aria-label');
-  const cancelled = Promise.withResolvers<null>();
-  const abortLookup = () => cancelled.resolve(null);
+  let abortLookup!: () => void;
+  const cancelled = new Promise<null>((resolve) => {
+    abortLookup = () => resolve(null);
+  });
   signal?.addEventListener('abort', abortLookup, { once: true });
   let state: LargeNetDownloadState | null = null;
   try {
-    state = phone ? await Promise.race([inspect(config, signal).catch(() => null), cancelled.promise]) : null;
+    state = phone ? await Promise.race([inspect(config, signal).catch(() => null), cancelled]) : null;
   } finally {
     signal?.removeEventListener('abort', abortLookup);
   }

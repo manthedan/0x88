@@ -3,6 +3,7 @@ import { moveToUci } from '../chess/moveCodec.ts';
 import { legalMoves } from '../chess/movegen.ts';
 import { type OrtSessionDiagnostics, ortDequantFoldEnabled, requestedOrtRuntimeDiagnosticOptions } from '../nn/ortConfig.ts';
 import type { OrtDeviceLoss } from '../nn/ortDeviceLoss.ts';
+import { abortSignalAny } from './abortSignalAny.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
 import { disposeOrtWorker } from './disposeOrtWorker.ts';
 import { terminateEngineWorker } from './engineRetirement.ts';
@@ -359,7 +360,7 @@ export class Maia3BrowserEvaluator {
     const create = async (loadModel: (signal: AbortSignal) => Promise<Lc0ModelLoadResult>) => {
       options.signal?.throwIfAborted();
       const loading = new AbortController();
-      const loadSignal = options.signal ? AbortSignal.any([options.signal, loading.signal]) : loading.signal;
+      const loadSignal = options.signal ? abortSignalAny([options.signal, loading.signal]) : loading.signal;
       const worker = new Worker(new URL('./maia3Worker.ts', import.meta.url), { type: 'module', name: 'maia3-evaluator' });
       // Publish the close once, synchronously when an abort starts it: an owner's
       // retirement snapshot taken right after abort() must already include it.

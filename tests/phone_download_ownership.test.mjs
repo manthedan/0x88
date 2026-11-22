@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
+import { abortSignalAny } from '../src/lc0/abortSignalAny.ts';
 import { BigNetSessionPool } from '../src/lc0/bigNetSessionPool.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
 import { LC0_MODEL_DOWNLOAD_NOT_APPROVED } from '../src/lc0/modelCache.ts';
@@ -20,6 +21,7 @@ function extract(text, first, last, tail = '') {
 
 /** Play reaches its DOM and listeners through ctx.dom / ctx.scope; point them at this harness's fakes. */
 function playScope(ctx, deps) {
+  deps.abortSignalAny = abortSignalAny;
   ctx.dom = { el: deps.el, selectEl: deps.selectEl, buttonEl: deps.buttonEl };
   ctx.scope = { listen: (target, type, fn) => deps.trackListener(ctx, target, type, fn), clearTimeout: (id) => deps.clearTimeout(id) };
   return ctx;
@@ -68,6 +70,7 @@ for (const replacement of [
     const deps = {
       engineRows: initial,
       BIG_NETS,
+      abortSignalAny,
       mountAbort,
       normalizeDeployEngineRow: (row) => row,
       clampStrengthForRow: (row) => row.strength,
@@ -192,6 +195,7 @@ for (const phase of [
       setArenaStartDisabled() {},
       syncArenaPhase() {},
       seatAvailabilityDirty: false,
+      abortSignalAny,
       checkpointWrites: phase === 'checkpoint-writes' ? gate.promise : Promise.resolve(),
       isStaleMount: () => false,
       checkpointUnreadable: false,

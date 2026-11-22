@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
+import { abortSignalAny } from '../src/lc0/abortSignalAny.ts';
 import { BIG_NETS } from '../src/lc0/bt4Engine.ts';
 
 const source = Object.fromEntries(['arena', 'play'].map((name) => [name, readFileSync(new URL(`../src/lc0/${name}Browser.ts`, import.meta.url), 'utf8')]));
@@ -42,6 +43,7 @@ for (const action of ['cpu', 'startup', 'replacement-picker']) {
     const deps = {
       ctx,
       BIG_NETS,
+      abortSignalAny,
       trackListener: (_ctx, _node, _event, listener) => {
         handler = listener;
       },
@@ -118,6 +120,7 @@ function arenaPicker(requestConsent, overrides = {}) {
   const approvals = new Set();
   const deps = {
     BIG_NETS,
+    abortSignalAny,
     running: false,
     startPending: false,
     abort: null,

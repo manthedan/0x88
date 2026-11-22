@@ -126,6 +126,26 @@ test('consent says whether it covers a download: a cache hit does not', async (t
   assert.equal(await pending, 'cached', 'crash consent for a cached net approves no download');
 });
 
+test('large-net consent works without Promise.withResolvers and AbortSignal.any', async (t) => {
+  for (const [object, key] of [
+    [Promise, 'withResolvers'],
+    [AbortSignal, 'any'],
+  ]) {
+    const original = Object.getOwnPropertyDescriptor(object, key);
+    Object.defineProperty(object, key, { configurable: true, value: undefined });
+    t.after(() => Object.defineProperty(object, key, original));
+  }
+  const f = browser(t);
+  const pending = f.request(BIG_NETS.lqo);
+  // A rejection must surface immediately rather than fail later while waiting for the dialog.
+  const dialog = await Promise.race([pending.then(() => assert.fail('consent returned before showing a dialog')), f.dialog()]);
+  choose(dialog, true);
+  assert.equal(await pending, true);
+  const hanging = f.request(BIG_NETS.lqo, { inspect: () => new Promise(() => {}) });
+  f.abort.abort();
+  assert.equal(await hanging, false);
+});
+
 test('download copy uses selected artifact bytes, not the stale config estimate', async (t) => {
   const f = browser(t);
   f.state.downloadBytes = 164789252;

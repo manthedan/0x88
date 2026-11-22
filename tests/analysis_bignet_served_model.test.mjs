@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
+import { abortSignalAny } from '../src/lc0/abortSignalAny.ts';
 import { ANALYSIS_BIG_NET_KEYS, ANALYSIS_BIG_NET_SESSION, createAnalysisEngines } from '../src/lc0/analysis/analysisEngines.ts';
 import { analysisRunBroker, analysisRunRowKey, captureAnalysisRun } from '../src/lc0/analysisRunSnapshot.ts';
 import {
@@ -423,6 +424,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     'phone',
     'consent',
     'untilAborted',
+    'abortSignalAny',
     code,
   )(
     START_FEN,
@@ -454,6 +456,7 @@ function analysisPage({ rows, searchers, smallLc0Runtime = null, acquireBigNet =
     phone,
     consent,
     untilAborted,
+    abortSignalAny,
   );
 }
 

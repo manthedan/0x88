@@ -25,6 +25,7 @@ import { centipawnModelIdForUrls } from '../nn/runtimeRegistry.ts';
 import { centipawnSearchOptions } from '../search/centipawn.ts';
 import type { Node as PuctNode } from '../search/puct.ts';
 import { type SearchResult as CentipawnSearchResult, chooseMove } from '../search/puct.ts';
+import { abortSignalAny } from './abortSignalAny.ts';
 import { ENGINE_ARROW_OPACITY, ENGINE_ARROW_WIDTH, engineBrushes, evalBarWhitePercent, formatScore, qToCentipawns } from './analysisFormat.ts';
 import { analysisEngineName, engineMonogram } from './analysisPresentation.ts';
 import { arenaAdjudicationLabel, arenaAdjudicationTags } from './arenaAdjudication.ts';
@@ -4816,7 +4817,7 @@ async function loadLc0Evaluator(mountSignal: AbortSignal = mountAbort.signal, ma
   lc0LoadAbort?.abort();
   const loadAbort = new AbortController();
   lc0LoadAbort = loadAbort;
-  const signal = AbortSignal.any([mountSignal, loadAbort.signal, ...(matchSignal ? [matchSignal] : [])]);
+  const signal = abortSignalAny([mountSignal, loadAbort.signal, ...(matchSignal ? [matchSignal] : [])]);
   const runtime = selectedLc0Runtime();
   if (!selectedSeatsNeedLc0Evaluator()) {
     lc0LoadAbort = null;
@@ -5365,7 +5366,7 @@ function wireEvents() {
         target.value = row.variant;
         const request = new AbortController();
         arenaPickerConsentAbort = request;
-        const signal = AbortSignal.any([mountAbort.signal, request.signal]);
+        const signal = abortSignalAny([mountAbort.signal, request.signal]);
         const consent = await requestLargeNetDownloadConsent(config, signal);
         if (!consent) return;
         if (signal.aborted || arenaPickerConsentAbort !== request || seatRows[seat] !== row || running || startPending) return;

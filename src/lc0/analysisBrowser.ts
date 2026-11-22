@@ -21,6 +21,7 @@ import {
 } from '../nn/runtimeAudit.ts';
 import { centipawnSearchOptions } from '../search/centipawn.ts';
 import { chooseMove } from '../search/puct.ts';
+import { abortSignalAny } from './abortSignalAny.ts';
 import {
   ANALYSIS_BIG_NET_KEYS,
   ANALYSIS_BIG_NET_SESSION,
@@ -1403,7 +1404,7 @@ function abortEngineSelectionConsent(): void {
 }
 function beginEnginePickerRequest(): AbortSignal {
   pickerConsentAbort = new AbortController();
-  return AbortSignal.any([mountAbort.signal, pickerConsentAbort.signal]);
+  return abortSignalAny([mountAbort.signal, pickerConsentAbort.signal]);
 }
 async function applyEngineProfile(profile: EngineAnalysisProfile, options: { selected?: string; persistLast?: boolean; note?: string } = {}): Promise<void> {
   abortEngineSelectionConsent();
@@ -1412,7 +1413,7 @@ async function applyEngineProfile(profile: EngineAnalysisProfile, options: { sel
   const runtime = engineSetupRuntime(profile.lc0Runtime, params.has('dev'));
   const runtimeChanged = selectedLc0Runtime() !== runtime;
   cancelAllAnalysisAssetPrefetches();
-  const signal = AbortSignal.any([mountAbort.signal, request.signal]);
+  const signal = abortSignalAny([mountAbort.signal, request.signal]);
   const rows = await profileRowsForUse(profile.rows, true, signal);
   if (signal.aborted || profileLoadAbort !== request) return;
   engineRows = rows;
@@ -4071,7 +4072,7 @@ function cancelSmallLc0Load(): void {
 function ensureSmallLc0ForAnalysis(): Promise<boolean> {
   if (!smallLc0Load) {
     const controller = new AbortController();
-    const signal = AbortSignal.any([mountAbort.signal, controller.signal]);
+    const signal = abortSignalAny([mountAbort.signal, controller.signal]);
     const ready = loadLc0BackendOwned(() => signal.aborted, signal, true).finally(() => {
       if (smallLc0Load?.controller === controller) smallLc0Load = undefined;
     });
@@ -4084,6 +4085,18 @@ let analysisHasExplicitInput = false;
 
 function automaticAnalysisAllowed(): boolean {
   return shouldAutoAnalyzePosition(deviceMemoryClass(), analysisHasExplicitInput, tree.root.fen, START_FEN, mainlineNodes().length - 1);
+}
+
+async function waitForSmallFirstLine(firstLine: Promise<void>, signal: AbortSignal): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, 3000);
+  });
+  try {
+    await untilAborted(Promise.race([firstLine, deadline]), signal);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function analyzeCurrent(options: { force?: boolean } = {}) {
@@ -4167,7 +4180,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       }
       el('message').textContent = `Loading ${uninitializedBigNets.map((key) => `Lc0 ${BIG_NETS[key].name}`).join(' + ')}…`;
       const prompt = {
-        signal: AbortSignal.any([controller.signal, mountAbort.signal]),
+        signal: abortSignalAny([controller.signal, mountAbort.signal]),
         current: () => analysisCanPrepare(analysisRunState, owner),
         ask: requestLargeNetRedownloadConsent,
       };
@@ -4222,12 +4235,15 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
     };
     if (lineGroups.some((lines) => lines.length > 0)) publishLines();
     else renderEngineComparison([]);
+    let releaseSmallFirstLine = () => {};
     const smallFirstLine =
       runRows.length === 2 &&
       needsSmallLc0Backend &&
       runRows.some((row) => row.family === 'sf' && row.variant === 'lite') &&
       (smallLc0Pending || (workerReady && !workerSearchWarm))
-        ? Promise.withResolvers<void>()
+        ? new Promise<void>((resolve) => {
+            releaseSmallFirstLine = resolve;
+          })
         : undefined;
     const tasks: Promise<void>[] = [];
     let hadTaskFailure = false;
@@ -4273,7 +4289,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
       const cacheKey = snapshot.rowKeys[index];
       const smallRow = row.family === 'lc0' && !isLc0BigNetVariant(row.variant);
       if (!options.force && engineLineCache.has(cacheKey) && !(smallLc0Pending && smallRow)) {
-        if (smallRow) smallFirstLine?.resolve();
+        if (smallRow) releaseSmallFirstLine();
         continue;
       }
       if (row.family === 'lc0' && isLc0BigNetVariant(row.variant)) {
@@ -4298,7 +4314,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
               rowKeys[index] = analysisRunRowKey({ ...snapshot, servedModels: { ...snapshot.servedModels, small: lc0ServedModelUrl } }, row);
               activeAnalysisSelectionKey = selectionCacheKey = rowKeys.join('\u0001');
             }
-            if (workerReady) return await workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label, smallFirstLine?.resolve);
+            if (workerReady) return await workerLc0Lines(runId, fen, row.strength, analysisPositions, analysisMultiPv, label, releaseSmallFirstLine);
             const result = await searcher!.search(
               { positions: analysisPositions },
               {
@@ -4308,14 +4324,14 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
                 signal: controller.signal,
                 yieldEveryMs: 16,
                 onProgress: (progress) => {
-                  if (progress.visits > 0) smallFirstLine?.resolve();
+                  if (progress.visits > 0) releaseSmallFirstLine();
                   showAnalysisProgress(runId, fen, label, progress);
                 },
               },
             );
             return lc0AnalysisLines(result, fen, 'Lc0');
           } finally {
-            smallFirstLine?.resolve();
+            releaseSmallFirstLine();
           }
         });
       } else if (row.family === 'centipawn') {
@@ -4355,7 +4371,7 @@ async function performAnalysis(owner: Owner, intent: Intent): Promise<void> {
           threadedStockfishAvailable() ? (kind === 'lite' ? 'lite-threaded' : 'threaded') : kind === 'lite' ? 'lite-single' : 'single',
         );
         pushTask(index, label, async (beginSearch) => {
-          if (smallFirstLine) await untilAborted(smallFirstLine.promise, controller.signal);
+          if (smallFirstLine) await waitForSmallFirstLine(smallFirstLine, controller.signal);
           return engines.withCpuLease(`sf-${kind}`, controller.signal, async (lease) => {
             const engine = engines.getStockfish(kind);
             engines.cpuSessions.setThreads(engine, Math.min(lease.threads, engine.maxThreads()));
