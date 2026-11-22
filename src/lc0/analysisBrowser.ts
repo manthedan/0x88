@@ -6163,6 +6163,7 @@ async function init(mountSignal: AbortSignal) {
     engineRows = loadManualEngineRows() ?? engineRows;
   }
   await Promise.all([...new Set(engineRows.map((row) => row.family))].map(resolveAnalysisCpuDefault));
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
   if (isStaleMount(mountSignal)) return;
   renderEngineProfiles(lastProfile?.name ?? '');
   installRuntimeAuditPanel();

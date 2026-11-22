@@ -39,6 +39,34 @@ function startup({ autoAnalyze, smallLc0 }) {
   return run(...Object.values(deps)).then(() => ({ calls, analyzeDisabled: elements.get('analyze').disabled }));
 }
 
+test('Analysis yields before the initial render and skips it if the route unmounts', async () => {
+  const start = text.indexOf('  await Promise.all([...new Set(engineRows.map(', initStart);
+  const end = text.indexOf('  installRuntimeAuditPanel();', start);
+  const body = stripTypeScriptTypes(`async function render(){${text.slice(start, end)}}`);
+  const mount = new AbortController();
+  const calls = [];
+  const timers = [];
+  const render = new Function(
+    'deps',
+    `const { mountSignal, resolveAnalysisCpuDefault, setTimeout, renderEngineProfiles } = deps;
+    const engineRows = [], lastProfile = undefined, isStaleMount = (signal) => signal.aborted;
+    return ${body};`,
+  )({
+    mountSignal: mount.signal,
+    resolveAnalysisCpuDefault: assert.fail,
+    setTimeout: (callback) => timers.push(callback),
+    renderEngineProfiles: () => calls.push('render'),
+  });
+  const pending = render();
+  await Promise.resolve();
+  assert.deepEqual(calls, []);
+  assert.equal(timers.length, 1);
+  mount.abort();
+  timers[0]();
+  await pending;
+  assert.deepEqual(calls, []);
+});
+
 test('a saved setup without Lc0 Small honours Auto-analyze turned off during startup checks', async () => {
   assert.ok(tailStart > initStart, 'init() startup tail found');
   const off = await startup({ autoAnalyze: false, smallLc0: false });
