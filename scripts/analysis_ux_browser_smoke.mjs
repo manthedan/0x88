@@ -62,7 +62,10 @@ try {
   assert.equal(requestedVisits, 400);
   assert.equal(completedVisits, requestedVisits, 'Re-analyze must search the full visit budget, not just read a reused tree');
   assert.match(await page.locator('#engineSummaries').innerText(), /400 total visits/);
+  await assertNamedButtons(page);
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('tab', { name: /^Engines/ }).click();
+  await page.getByRole('button', { name: 'Board tools', exact: true }).click();
   await assertNamedButtons(page);
   console.log('Analysis UX smoke passed');
 } finally {
