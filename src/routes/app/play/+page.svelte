@@ -428,7 +428,7 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
   .play-workspace:global([data-phase=setup]) #newGame{min-height:48px; font-size:16px; font-weight:700}
   .play-workspace:global([data-phase=setup]) .play-icon{display:block}
   .play-workspace:global([data-phase=setup]) .new-icon{display:none}
-  .play-workspace:global([data-phase=setup]) .play-hint{display:block}
+  .play-workspace:global([data-phase=setup][data-human-can-move=true]) .play-hint{display:block}
   .play-workspace:global([data-phase=setup]) .game-actions{gap:8px}
   .play-workspace:global(:not([data-phase=setup]):not([data-config=open])) :is(.setup-pane, .settings-disclosure){display:none}
   .play-workspace:global(:not([data-phase=setup])[data-config=open]) .setup-pane{flex:none; border-bottom:1px solid var(--rule)}

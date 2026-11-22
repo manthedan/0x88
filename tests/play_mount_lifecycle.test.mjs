@@ -8,8 +8,14 @@ import { stripTypeScriptTypes } from 'node:module';
 import test from 'node:test';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
+import { parseFen, START_FEN } from '../src/chess/board.ts';
+import { moveToUci } from '../src/chess/moveCodec.ts';
+import { legalMoves, makeMove } from '../src/chess/movegen.ts';
+import { sanToMove } from '../src/chess/pgn.ts';
+import { moveToSan } from '../src/chess/san.ts';
+import { legalDests, matchUserMoves } from '../src/lc0/boardUx.ts';
 import { createRootDom } from '../src/lc0/browserDom.ts';
-import { BIG_NETS, bigNetOptionState, checkBigNetAsset } from '../src/lc0/bt4Engine.ts';
+import { BIG_NETS, bigNetAssetStatusSync, bigNetOptionState, checkBigNetAsset, waitForBigNetAsset } from '../src/lc0/bt4Engine.ts';
 import { enginePlayOptions } from '../src/lc0/engineCatalog.ts';
 import { createMountScope } from '../src/lc0/mountScope.ts';
 import { createPlayEngines } from '../src/lc0/play/playEngines.ts';
@@ -459,12 +465,13 @@ test('v0 Play waits for picker intent before probing its optional opponents', as
   const refreshed = [];
   const listeners = new Map();
   const deps = {
-    ctx: { dom: { selectEl: () => ({}) }, scope: { listen: (_, type, fn) => listeners.set(type, fn) } },
+    ctx: { dom: { selectEl: () => ({}) }, scope: { signal: new AbortController().signal, listen: (_, type, fn) => listeners.set(type, fn) } },
     ctxSelectedEngine: () => ({ family: 'maia3' }),
     ENGINE_OPTIONS: enginePlayOptions().filter((option) => option.v0),
     BIG_NETS,
     probeBt4Support: async () => false,
     checkBigNetAsset,
+    waitForBigNetAsset,
     ctxIsDisposed: () => false,
     ctxRefreshEngineOptions: () => refreshed.push(bigNetOptionState(BIG_NETS.bt4).disabled),
     ctxResolvePendingPreferredEngine: () => {},
@@ -484,12 +491,133 @@ test('v0 Play waits for picker intent before probing its optional opponents', as
   assert.equal(refreshed.at(-1), false, 'the probe refresh enables BT4');
 });
 
+for (const dispose of [false, true]) {
+  test(`Play retries unknown Queen Odds availability only while mounted (dispose=${dispose})`, async (t) => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+    const play = readFileSync('src/lc0/playBrowser.ts', 'utf8');
+    const start = play.indexOf('  const refreshIfMounted =');
+    const code = play.slice(start, play.indexOf('  ctxRender(ctx);', start));
+    const scope = createMountScope(new FakeElement(), new URL('https://example.test/app/play/'));
+    const picker = new EventTarget();
+    const config = { ...BIG_NETS.lqo, modelUrl: `https://example.test/play-retry-${dispose}.onnx` };
+    const results = [];
+    const deps = {
+      ctx: { dom: { selectEl: () => picker }, scope },
+      ctxSelectedEngine: () => ({ family: 'maia3' }),
+      ENGINE_OPTIONS: [{ family: 'lc0', variant: 'lqo' }],
+      BIG_NETS: { lqo: config },
+      probeBt4Support: async () => true,
+      checkBigNetAsset,
+      waitForBigNetAsset,
+      ctxIsDisposed: () => !scope.live(),
+      ctxRefreshEngineOptions: () => results.push(bigNetAssetStatusSync(config)),
+      ctxResolvePendingPreferredEngine() {},
+    };
+    let heads = 0;
+    t.mock.method(globalThis, 'fetch', async (url, { method }) => {
+      if (url !== config.modelUrl) return new Response(null, { status: 404 });
+      assert.equal(method, 'HEAD');
+      return new Response(null, { status: ++heads === 1 ? 503 : 200 });
+    });
+    new Function(...Object.keys(deps), stripTypeScriptTypes(code))(...Object.values(deps));
+    picker.dispatchEvent(new Event('pointerenter'));
+    await new Promise(setImmediate);
+    assert.equal(heads, 1);
+    assert.equal(results.at(-1), 'unknown');
+    if (dispose) scope.dispose();
+    t.mock.timers.tick(1000);
+    await new Promise(setImmediate);
+    assert.equal(heads, dispose ? 1 : 2);
+    assert.equal(results.at(-1), dispose ? 'unknown' : 'present');
+    scope.dispose();
+  });
+}
+
+for (const inputMethod of ['board', 'typed']) {
+  test(`fresh White can play e4 via ${inputMethod} and get a Maia reply without preflight`, async () => {
+    const play = readFileSync('src/lc0/playBrowser.ts', 'utf8');
+    const slice = (start, end) => play.slice(play.indexOf(start), play.indexOf(end, play.indexOf(start)));
+    const render = slice('  const humanCanMove =', '  // Screen readers and keyboard users');
+    const input = { value: '', classList: { add() {}, remove() {} }, setCustomValidity() {}, reportValidity() {} };
+    const elements = { moveInput: input, main: { dataset: {} }, boardAnnouncement: {}, progressAnnouncement: {} };
+    const board = parseFen(START_FEN);
+    const ctx = {
+      board,
+      humanColor: 'w',
+      positions: [board],
+      moves: [],
+      sans: [],
+      viewPly: null,
+      restoredGame: false,
+      engineReady: false,
+      started: false,
+      abort: new AbortController(),
+      dom: { el: (id) => elements[id], buttonEl: () => ({ hidden: true }) },
+    };
+    let searches = 0;
+    const deps = {
+      ctx,
+      moveToSan,
+      moveToUci,
+      legalMoves,
+      makeMove,
+      legalDests,
+      matchUserMoves,
+      sanToMove,
+      ctxSelectedEngine: () => ({ family: 'maia3', label: 'Maia3' }),
+      ctxOpponentName: (option) => option.label,
+      ctxVerifySelectedEngineReady: assert.fail,
+      ctxSetEngineNote() {},
+      ctxCheckGameOver() {},
+      ctxRender() {},
+      ctxSetEngineThinking: (_, thinking) => {
+        ctx.engineThinking = thinking;
+      },
+      releaseUnusedBigNetSearchers() {},
+      wakeLocks: { acquire: async () => () => {} },
+      ctxSetEngineFailure: (_, error) => assert.fail(error),
+      ctxRequestEngineMove: async () => {
+        searches++;
+        assert.deepEqual(ctx.sans, ['e4']);
+        assert.equal(ctx.board.turn, 'b');
+        return 'e7e5';
+      },
+      displayedPly: () => ctx.moves.length,
+      boardToFen: () => START_FEN,
+      boardCheck: () => false,
+      browsing: false,
+      Chessground: (_el, config) => config,
+    };
+    const code = stripTypeScriptTypes(`${slice('function ctxApplyMove(', 'function ctxNewGame(')}\n${render}`);
+    const submit = new Function(...Object.keys(deps), `${code}\nreturn () => ctxSubmitTypedMove(ctx);`)(...Object.values(deps));
+    assert.equal(searches, 0, 'nothing boots from render');
+    if (inputMethod === 'board') {
+      assert.ok(ctx.ground.movable.dests.get('e2')?.includes('e4'));
+      ctx.ground.movable.events.after('e2', 'e4');
+    } else {
+      input.value = 'e5';
+      submit();
+      assert.equal(searches, 0, 'an invalid typed move does not boot the engine');
+      assert.deepEqual(ctx.sans, []);
+      input.value = 'e4';
+      submit();
+    }
+    assert.deepEqual(ctx.sans, ['e4']);
+    assert.equal(ctx.started, true);
+    await new Promise(setImmediate);
+    assert.equal(searches, 1);
+    assert.deepEqual(ctx.sans, ['e4', 'e5']);
+    assert.equal(ctx.engineReady, true);
+  });
+}
+
 test('an incidental Play visit and a fresh side choice do not boot Maia before the opponent is picked', () => {
   const play = readFileSync('src/lc0/playBrowser.ts', 'utf8');
   const slice = (start, end) => play.slice(play.indexOf(start), play.indexOf(end, play.indexOf(start)));
   const mount = slice('  ctxRender(ctx);\n  if (ctx.pendingPreferredEngineId)', '\nfunction hasPlayBrowserDom');
   const side = slice("  ctx.scope.listen(ctx.dom.selectEl('colorSelect'), 'change',", '  ctx.scope.listen(window, PHONE_LARGE_NET_CHANGE_EVENT');
-  const status = slice('function ctxLiveStatusText(', 'function ctxRenderMoveList(');
+  const status =
+    slice('function ctxCanStartWithMaiaMove(', '/** Why the player cannot move') + slice('function ctxLiveStatusText(', 'function ctxRenderMoveList(');
   const reset = slice("  ctxSetEngineNote(ctx, '');\n  ctxDisarmResign(ctx);\n  ctxDisarmNewGame(ctx);", '\nfunction ctxTakeback(');
   const calls = [];
   const retry = { hidden: true };
@@ -508,7 +636,7 @@ test('an incidental Play visit and a fresh side choice do not boot Maia before t
     'calls',
     'ctx',
     `const ctxRender = () => {}, ctxPrepareOrStartEngine = () => calls.push(ctx.board.turn === ctx.humanColor ? 'load' : 'engine move');
-    const ctxPhase = () => 'setup', ctxSelectedEngine = () => ({ label: 'Maia3' });
+    const ctxPhase = () => 'setup', ctxSelectedEngine = () => ({ label: 'Maia3', family: 'maia3' });
     const ctxSetEngineNote = () => {}, ctxDisarmResign = () => {}, ctxDisarmNewGame = () => {}, ctxRestoreSelectedRuntimeWarning = () => {};
     ${stripTypeScriptTypes(status)}
     function reset(prepareOpponent) { ${reset}
@@ -520,7 +648,7 @@ test('an incidental Play visit and a fresh side choice do not boot Maia before t
   run.mount({ family: 'maia3' });
   run.side();
   assert.deepEqual(calls, []);
-  assert.equal(run.status(), 'Press Play to load your opponent.');
+  assert.equal(run.status(), 'Press Play or make a move.');
   retry.hidden = false;
   assert.match(run.status(), /Retry the engine/);
   ctx.humanColor = 'b';

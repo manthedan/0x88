@@ -19,6 +19,7 @@ import {
 } from '../nn/runtimeAudit.ts';
 import { centipawnSearchOptions } from '../search/centipawn.ts';
 import { chooseMove } from '../search/puct.ts';
+import { abortSignalAny } from './abortSignalAny.ts';
 import { acknowledgeInputTransfer, takePlayHandoff, writeAnalysisHandoff } from './analysisHandoff.ts';
 import { createAnalysisKeyboardBoard } from './analysisKeyboardBoard.ts';
 import { resolvePublicAssetUrl } from './assetUrls.ts';
@@ -33,10 +34,10 @@ import {
   bigNetMemoryCaution,
   bigNetOptionState,
   bt4SupportedSync,
-  checkBigNetAsset,
   phoneBlockedBigNetModelUrl,
   probeBt4Support,
   renderBigNetCpuWarning,
+  waitForBigNetAsset,
 } from './bt4Engine.ts';
 import { writeClipboard } from './clipboard.ts';
 import { isMemoryConstrainedDevice, phoneReclaimSettings } from './deviceMemoryClass.ts';
@@ -933,12 +934,7 @@ async function ctxEngineTurn(ctx: PlayContext): Promise<void> {
 }
 
 function ctxOnUserMove(ctx: PlayContext, from: Key, to: Key): void {
-  if (ctx.viewPly !== null) {
-    ctxRender(ctx);
-    return;
-  }
-  if (!ctx.engineReady && !ctx.preparingEngine && !ctx.gameOver && ctx.board.turn === ctx.humanColor) void ctxVerifySelectedEngineReady(ctx);
-  if (ctx.preparingEngine || !ctx.engineReady || ctx.engineThinking || ctx.gameOver || ctx.board.turn !== ctx.humanColor) {
+  if (ctxHumanMoveBlockedReason(ctx)) {
     ctxRender(ctx);
     return;
   }
@@ -965,13 +961,27 @@ function ctxApplyHumanMove(ctx: PlayContext, move: Move): void {
   if (!ctx.gameOver) void ctxEngineTurn(ctx);
 }
 
+function ctxCanStartWithMaiaMove(ctx: PlayContext): boolean {
+  return (
+    !ctx.started &&
+    !ctx.restoredGame &&
+    !ctx.practicePosition &&
+    !ctx.pendingPreferredEngineId &&
+    ctxSelectedEngine(ctx).family === 'maia3' &&
+    ctx.dom.buttonEl('retryEngine').hidden
+  );
+}
+
 /** Why the player cannot move right now, or null when a move would be accepted. */
 function ctxHumanMoveBlockedReason(ctx: PlayContext): string | null {
   if (ctx.viewPly !== null) return 'You are viewing an earlier move. Press End to return to the game.';
   if (ctx.gameOver) return 'The game is over.';
   if (ctx.engineThinking) return `${ctxOpponentName(ctxSelectedEngine(ctx))} is thinking.`;
   if (ctx.board.turn !== ctx.humanColor) return 'It is not your move.';
-  if (ctx.preparingEngine || !ctx.engineReady) return `${ctxOpponentName(ctxSelectedEngine(ctx))} is still loading.`;
+  if (ctx.pendingPromotion) return 'Choose a promotion piece.';
+  if (ctx.pendingPreferredEngineId || ctx.preparingEngine || (!ctx.engineReady && !ctxCanStartWithMaiaMove(ctx))) {
+    return `${ctxOpponentName(ctxSelectedEngine(ctx))} is not ready.`;
+  }
   return null;
 }
 
@@ -986,7 +996,6 @@ function ctxSubmitTypedMove(ctx: PlayContext): void {
     input.reportValidity();
     ctx.dom.el('boardAnnouncement').textContent = message;
   };
-  if (!ctx.engineReady && !ctx.preparingEngine && !ctx.gameOver && ctx.board.turn === ctx.humanColor) void ctxVerifySelectedEngineReady(ctx);
   const blocked = ctxHumanMoveBlockedReason(ctx);
   if (blocked) {
     fail(blocked);
@@ -1143,7 +1152,7 @@ function ctxLiveStatusText(ctx: PlayContext): string {
   if (ctx.thinkingShown) return `${ctxOpponentName(ctxSelectedEngine(ctx))} is thinking…`;
   if (ctx.engineThinking) return `${ctxOpponentName(ctxSelectedEngine(ctx))} to move`;
   if (ctx.practicePosition && !ctx.started) return 'Choose your side and opponent, then press Play.';
-  if (!ctx.engineReady) {
+  if (!ctx.engineReady && !ctxCanStartWithMaiaMove(ctx)) {
     if (ctxPhase(ctx) === 'setup' && ctx.dom.buttonEl('retryEngine').hidden) return 'Press Play to load your opponent.';
     return `${ctxSelectedEngine(ctx).label} is not ready. Retry the engine or choose another opponent.`;
   }
@@ -1572,15 +1581,8 @@ function ctxRender(ctx: PlayContext): void {
   ctxRenderMoveNav(ctx);
   ctxRenderPromotionPicker(ctx);
   ctxRenderRestartBanner(ctx);
-  const humanCanMove =
-    !browsing &&
-    !ctx.pendingPreferredEngineId &&
-    !ctx.preparingEngine &&
-    ctx.engineReady &&
-    !ctx.engineThinking &&
-    !ctx.gameOver &&
-    !ctx.pendingPromotion &&
-    ctx.board.turn === ctx.humanColor;
+  const humanCanMove = ctxHumanMoveBlockedReason(ctx) === null;
+  ctx.dom.el('main').dataset.humanCanMove = String(humanCanMove);
   const shownPly = displayedPly(ctx.viewPly, ctx.moves.length);
   const shownBoard = ctx.positions[shownPly] ?? ctx.board;
   const lastUci = shownPly > 0 ? moveToUci(ctx.moves[shownPly - 1]) : undefined;
@@ -1731,7 +1733,7 @@ async function ctxCheckRestoredDownloadConsent(ctx: PlayContext): Promise<boolea
   const option = ctxSelectedEngine(ctx);
   if (ctx.restoredDownloadEngineId !== option.id) return true;
   if (ctx.restoredDownloadConsent) return ctx.restoredDownloadConsent;
-  const signal = AbortSignal.any([ctx.abort.signal, ctx.consentAbort.signal]);
+  const signal = abortSignalAny([ctx.abort.signal, ctx.consentAbort.signal]);
   const pending = requestLargeNetConsent(BIG_NETS[option.variant as BigNetKey], signal, false)
     .then((accepted) => {
       if (signal.aborted || ctx.disposed || ctx.opponent.active.engineId !== option.id) return false;
@@ -2018,7 +2020,7 @@ function ctxInit(ctx: PlayContext): void {
     ctxCancelPickerConsent(ctx);
     const request = { controller: new AbortController(), resumeFallback };
     ctx.pickerConsent = request;
-    const signal = AbortSignal.any([ctx.consentAbort.signal, ctx.abort.signal, request.controller.signal]);
+    const signal = abortSignalAny([ctx.consentAbort.signal, ctx.abort.signal, request.controller.signal]);
     ctx.pendingPreferredEngineId = null;
     if (ctx.pendingPreferredEngineTimer) {
       ctx.scope.clearTimeout(ctx.pendingPreferredEngineTimer);
@@ -2085,13 +2087,14 @@ function ctxInit(ctx: PlayContext): void {
       ctxResolvePendingPreferredEngine(ctx);
     }
   };
+  const probeOpponentNet = (variant: BigNetKey) => void waitForBigNetAsset(BIG_NETS[variant], ctx.scope.signal).then(refreshIfMounted);
   let opponentOptionsProbed = false;
   const probeOpponentOptions = () => {
     if (opponentOptionsProbed) return;
     opponentOptionsProbed = true;
     void probeBt4Support().then(refreshIfMounted);
     for (const option of ENGINE_OPTIONS) {
-      if (option.family === 'lc0' && option.variant !== 'small') void checkBigNetAsset(BIG_NETS[option.variant as BigNetKey]).then(refreshIfMounted);
+      if (option.family === 'lc0' && option.variant !== 'small') probeOpponentNet(option.variant as BigNetKey);
     }
   };
   const opponentSelect = ctx.dom.selectEl('engineSelect');
@@ -2100,7 +2103,7 @@ function ctxInit(ctx: PlayContext): void {
   const startupOpponent = ENGINE_OPTIONS.find((option) => option.id === ctx.pendingPreferredEngineId) ?? ctxSelectedEngine(ctx);
   if (startupOpponent.family === 'lc0' && startupOpponent.variant !== 'small') {
     void probeBt4Support().then(refreshIfMounted);
-    void checkBigNetAsset(BIG_NETS[startupOpponent.variant as BigNetKey]).then(refreshIfMounted);
+    probeOpponentNet(startupOpponent.variant as BigNetKey);
   }
   ctxRender(ctx);
   if (ctx.pendingPreferredEngineId) {
