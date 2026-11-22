@@ -143,7 +143,7 @@ const analysisHref = `/app/analysis/?fen=${encodeURIComponent(FEN)}`;
 
   <div class="pv-foot">
     <p class="pv-context"><b>B90</b> Sicilian Najdorf, English Attack · after 12…b4</p>
-    <p>Lc0 moves the attacked knight to safety. Stockfish captures on f6 first. Positive scores favour White.</p>
+    <p>Lc0 retreats the attacked knight. Stockfish takes on f6 instead, trading knights.</p>
     <a href={analysisHref}>Analyse this position <span aria-hidden="true">→</span></a>
   </div>
 </figure>
