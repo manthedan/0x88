@@ -13,12 +13,14 @@ const code = js.code
 const { default: Preview } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 const { body: html } = render(Preview);
 
-test('home comparison is explicitly an example with unmodified measured results', () => {
-  assert.match(html, /Example engine comparison/);
+test('home comparison labels the recorded lines without promising the live result', () => {
+  assert.match(html, /Recorded engine comparison/);
+  assert.match(html, /These lines are from one run\. A fresh search may choose a different move\./);
+  assert.doesNotMatch(html, /Engines disagree:|trading knights/);
   assert.match(html, /White to move · evaluations from White’s perspective/);
   assert.match(html, /0\.30 pawns/);
   assert.match(html, /Lc0 Small/);
-  assert.match(html, /365 visits/);
+  assert.match(html, /400-visit budget/);
   assert.match(html, />\+0\.25</);
   assert.match(html, /Stockfish Lite/);
   assert.match(html, /depth 12/);
@@ -68,7 +70,7 @@ test('home arrows keep one best move per engine at the owner’s uniform width',
 test('home PVs group complete move pairs and retain native mobile disclosures', () => {
   assert.equal((html.match(/<details /g) ?? []).length, 2);
   assert.doesNotMatch(html, /<details[^>]*\bopen\b/);
-  assert.match(html, /<summary[^>]*>365 visits/);
+  assert.match(html, /<summary[^>]*>400-visit budget/);
   assert.match(html, /<summary[^>]*>depth 12/);
   assert.match(html, />13\. Ne2 Nh5<\/span> /);
   assert.match(html, />14\. Ng3 Nf4<\/span> /);

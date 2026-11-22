@@ -1292,7 +1292,7 @@ function renderEvalBars(): void {
       scoreCp: output?.whiteCp ?? (output?.qWhite !== undefined ? qToCentipawns(output.qWhite) : undefined),
       mateIn: output?.mateInWhitePov,
     };
-    const tag = engineMonogram(name);
+    const tag = arenaPreparingGame() ? '—' : engineMonogram(name);
     const thinking = running && !reviewing && board.turn === (index === 0 ? 'w' : 'b') && !!seat.id && thinkingEngineIds.has(seat.id);
     return { ...seat, name, tag, thinking, score, percent: evalPercent(score), text: output?.evalText ?? '—', color: engineBrushes(name).swatch };
   });
@@ -1437,7 +1437,15 @@ interface StripSide {
   seat: string | null;
 }
 
+function arenaPreparingGame(): boolean {
+  return running && !reviewing && !liveTrail;
+}
+
 function stripSides(): { w: StripSide; b: StripSide } {
+  if (arenaPreparingGame()) {
+    const preparing = { id: null, name: 'Preparing engines…', seat: null };
+    return { w: preparing, b: preparing };
+  }
   if (reviewing && reviewTrail?.sides)
     return {
       w: { id: null, name: reviewTrail.sides.whiteName, seat: null },
@@ -1461,6 +1469,7 @@ function stripSides(): { w: StripSide; b: StripSide } {
 function renderStrips(): void {
   const sides = stripSides();
   const turn = board.turn;
+  const preparing = arenaPreparingGame();
   const now = performance.now();
   const sideTimeMs = liveTrail ? arenaSideTimeMs(liveTrail.charts, parseFen(liveTrail.entries[liveTrail.openingPlies].fen).turn) : { w: 0, b: 0 };
   const update = (nodeId: string, color: 'w' | 'b', side: StripSide) => {
@@ -1477,21 +1486,22 @@ function renderStrips(): void {
     const showClock = !reviewing && (running || usedMs > 0);
     node.dataset.turn = String(thinking);
     const head =
-      `${side.name ? engineAvatarHtml(side.name) : ''}` +
+      `${preparing ? '<span class="arena-avatar placeholder" aria-hidden="true"></span>' : side.name ? engineAvatarHtml(side.name) : ''}` +
       `<span class="strip-id"><strong>${htmlEscape(name)}</strong><small><span class="side-dot ${color}" aria-hidden="true"></span>${meta}</small></span>`;
+    const clockText = preparing ? '—' : formatSeconds(usedMs);
     // The clock ticks every 100 ms. Update only its text, so the thinking spinner isn't recreated
     // (and its animation restarted) on every tick.
     const signature = `${head}|${showClock}`;
     const clock = node.querySelector<HTMLElement>('.strip-clock-value');
     if (node.dataset.signature === signature && (!showClock || clock)) {
-      if (clock) clock.textContent = formatSeconds(usedMs);
+      if (clock) clock.textContent = clockText;
       return;
     }
     node.dataset.signature = signature;
     node.innerHTML =
       head +
       (showClock
-        ? `<span class="strip-metric strip-clock" title="Cumulative search time used this game, not a countdown"><small>Total used</small><span class="strip-clock-value">${formatSeconds(usedMs)}</span></span>`
+        ? `<span class="strip-metric strip-clock" title="Cumulative search time used this game, not a countdown"><small>Total used</small><span class="strip-clock-value">${clockText}</span></span>`
         : '');
   };
   update('blackSideLabel', 'b', sides.b);

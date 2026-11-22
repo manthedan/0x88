@@ -20,6 +20,25 @@ test('analysis model assets are only preloaded once per mounted page', async () 
   assert.match(source, /preloadedAnalysisAssetUrls\.add\(rawUrl\)/);
 });
 
+test('asset download renders the engine label, not the content-addressed filename', async () => {
+  const source = await preparationSource();
+  const preload = source.slice(0, source.indexOf('async function waitForAnalysisAssetPreload'));
+  const items = [];
+  const createPreload = new Function(
+    'showLoadingProgressItem',
+    `let analysisAssetPreloadSequence = 0;
+    const preloadingAnalysisAssetPromises = new Map(), preloadedAnalysisAssetUrls = new Set();
+    const assetFileLabel = (url) => url.split('/').pop();
+    const fetch = async () => new Response(new Uint8Array([1]));
+    const hideLoadingProgressItem = () => {};
+    ${stripTypeScriptTypes(preload)}
+    return createAnalysisAssetPreload;`,
+  )((_id, item) => items.push(item));
+  await createPreload('Reckless Relaxed SIMD', 'https://assets.example/000955cb88fbe762d123.wasm').promise;
+  assert.ok(items.length >= 2);
+  assert.deepEqual([...new Set(items.map(({ label }) => label))], ['Reckless Relaxed SIMD']);
+});
+
 test('warm CPU engine preparation uses search progress without reopening startup progress', async () => {
   const host = await readFile(engineHostUrl, 'utf8');
   const source = host.slice(host.indexOf('async function prepareCpuEngine('), host.indexOf('async function analyzeCpuPosition('));
@@ -77,7 +96,7 @@ test('a Small-to-BT4 settings change retires the old run’s displayed progress 
   };
   ui.dispatchAnalysis({ type: 'REQUEST', intent: ui.analysisIntent(), delayMs: 0 });
   const smallRun = admit('small');
-  const sample = { visits: 352, requestedVisits: 400, move: 'd2d4', value: 0.2 };
+  const sample = { visits: 392, completedVisits: 352, requestedVisits: 400, elapsedMs: 1000, move: 'd2d4', value: 0.2 };
   ui.showAnalysisProgress(smallRun, START_FEN, 'Lc0', sample);
   assert.equal(searchProgressByEngine.size, 1);
 
@@ -96,7 +115,9 @@ test('a Small-to-BT4 settings change retires the old run’s displayed progress 
   ui.showIndeterminateSearchProgress(bt4Run, START_FEN, 'SF Lite');
   const [net, cpu] = searchProgressByEngine.values();
   assert.equal(analysisEngineName(net.label), 'Lc0 BT4-it332');
-  assert.equal(net.completed, 352);
+  assert.equal(net.completed, 392, 'the visit-budget meter includes inherited root visits');
+  assert.equal(net.requested, 400);
+  assert.equal(net.nps, 352, 'the speed counts only new visits');
   assert.equal(analysisEngineName(cpu.label), 'Stockfish Lite');
   assert.equal(cpu.indeterminate, true);
 });

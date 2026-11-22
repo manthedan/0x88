@@ -37,6 +37,7 @@ function statusPage({ hidden = false, active = false, aborted = false, reload = 
     let hiddenTab = initialHiddenTabPause(hidden);
     const analysisRunState = { execution: { tag: reload ? 'maintaining' : active && !aborted ? 'running' : 'idle' } };
     const retry = null, lineCache = new Map(), tree = { current: { fen: 'current' } };
+    const searchProgressByEngine = { size: active && !aborted ? 1 : 0 };
     const document = { getElementById: el }, maybeEl = el;
     const renderPgnImportNotice = () => {};
     const analysisEngineName = (name) => name;
@@ -75,13 +76,16 @@ test('hidden queued analysis is paused while Stop can cancel its resume', () => 
   assert.equal(page.el('stop').disabled, false);
 });
 
-test('active search and reload status come from the scheduling owner, not Stop', () => {
-  for (const options of [{ active: true }, { reload: true }]) {
+test('the header distinguishes active search from backend loading, regardless of Stop', () => {
+  for (const [options, state, text] of [
+    [{ active: true }, 'running', 'Analyzing…'],
+    [{ reload: true }, 'loading', 'Loading…'],
+  ]) {
     const page = statusPage(options);
     assert.equal(page.el('stop').disabled, true);
     page.renderAnalysisStatus();
-    assert.equal(page.el('analysisStatus').dataset.state, 'running');
-    assert.equal(page.el('analysisStatus').textContent, 'Analyzing…');
+    assert.equal(page.el('analysisStatus').dataset.state, state);
+    assert.equal(page.el('analysisStatus').textContent, text);
   }
 });
 

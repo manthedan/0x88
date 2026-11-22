@@ -41,7 +41,7 @@ function controller() {
     const reviewMetadata = new Map(), lineCache = new Map(), completeAnalysisKeys = new Set();
     const retry = false, reviewSignature = () => '', clearAnalysisWorkspace = () => {};
     const analysisEngineName = engine => engine;
-    const hiddenTab = { hidden: false, suspended: [] }, hasActiveAnalysisRun = () => false;
+    const hiddenTab = { hidden: false, suspended: [] }, hasActiveAnalysisRun = () => false, searchProgressByEngine = new Map();
     ${statusFunctions}
     function afterNavigation() {
       // A ready engine starts synchronously, before the browser can paint the load message.
