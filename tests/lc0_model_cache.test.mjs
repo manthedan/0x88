@@ -866,6 +866,28 @@ test('loadLc0ModelForOrt evicts and revalidates a stale cache entry when the mod
   );
 });
 
+test('verified cache writes stream views of the model instead of copying its entire buffer', async (t) => {
+  const bytes = new Uint8Array(768 * 1024).fill(42);
+  const hash = await sha256Hex(bytes);
+  await withMockedEnv(
+    async () => {
+      const chunks = [];
+      t.mock.method(FakeCache.prototype, 'put', async (_request, response) => {
+        for await (const chunk of response.body) chunks.push(chunk);
+      });
+      const result = await loadLc0ModelForOrt(MODEL_URL, { cache: true, manifestUrl: MANIFEST_URL, channelUrl: null });
+      assert.equal(result.cacheStatus, 'miss');
+      assert.ok(chunks.length > 1);
+      assert.equal(
+        chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0),
+        bytes.byteLength,
+      );
+      assert.ok(chunks.every((chunk) => chunk.buffer === result.model));
+    },
+    { serveBytes: () => bytes, manifestBytes: bytes.length, manifestSha256: hash },
+  );
+});
+
 test('loadLc0ModelForOrt streams progress downloads into a preallocated buffer', async () => {
   const progress = [];
   const stream = new ReadableStream({

@@ -1242,7 +1242,17 @@ async function fetchAndCacheModel(
   let cacheWritable = check.sha256Checked;
   if (cacheWritable) {
     try {
-      await cache.put(cacheKey, new Response(download.bytes));
+      const bytes = new Uint8Array(download.bytes);
+      let offset = 0;
+      const body = new ReadableStream<Uint8Array<ArrayBuffer>>({
+        pull(controller) {
+          const end = Math.min(offset + 256 * 1024, bytes.length);
+          if (end > offset) controller.enqueue(bytes.subarray(offset, end));
+          offset = end;
+          if (offset === bytes.length) controller.close();
+        },
+      });
+      await cache.put(cacheKey, new Response(body));
     } catch {
       cacheWritable = false;
     }
