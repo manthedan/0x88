@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { patchAnalysisResults } from '../src/lc0/analysisPresentation.ts';
+import { fitAnalysisPvRows, patchAnalysisResults } from '../src/lc0/analysisPresentation.ts';
 
 function fixture({ focus = false, oldKey = 'fen|sf|1', newKey = oldKey, left = 10, right = 60 } = {}) {
   let markup = 'before';
@@ -40,6 +40,42 @@ function fixture({ focus = false, oldKey = 'fen|sf|1', newKey = oldKey, left = 1
   }
   return { newScroll, focusOptions };
 }
+
+test('PV fitting reads every row before mutating clipped move buttons', () => {
+  let writing = false;
+  const bounds = (top) => {
+    assert.equal(writing, false, 'an accessibility write could invalidate layout before this read');
+    return { top };
+  };
+  const move = (top) => ({
+    getBoundingClientRect: () => bounds(top),
+    setAttribute(name, value) {
+      writing = true;
+      assert.equal(name, 'aria-hidden');
+      this.hidden = value;
+    },
+  });
+  const row = (moves) => ({
+    clientHeight: 20,
+    getBoundingClientRect: () => bounds(10),
+    querySelectorAll: () => moves,
+    parentElement: { classList: { toggle: (_name, clipped) => classes.push(clipped) } },
+  });
+  const classes = [];
+  const visible = move(10);
+  const clipped = move(30);
+  const second = move(10);
+  fitAnalysisPvRows({ querySelectorAll: () => [row([visible, clipped]), row([second])] });
+  assert.deepEqual(classes, [true, false]);
+  assert.deepEqual(
+    [visible, clipped, second].map(({ inert, hidden }) => [inert, hidden]),
+    [
+      [false, 'false'],
+      [true, 'true'],
+      [false, 'false'],
+    ],
+  );
+});
 
 test('live result updates retain inline PV scroll by position, engine and line', () => {
   assert.equal(fixture().newScroll.scrollLeft, 280);

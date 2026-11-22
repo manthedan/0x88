@@ -236,16 +236,19 @@ export function analysisConsensus(lines: AnalysisLine[]): string {
 
 /** Wrapped moves are clipped as whole buttons; the complete PV remains in Preview. */
 export function fitAnalysisPvRows(container: HTMLElement): void {
-  for (const pv of container.querySelectorAll<HTMLElement>('.engine-lines .pv')) {
-    const top = pv.getBoundingClientRect().top;
+  const rows = Array.from(container.querySelectorAll<HTMLElement>('.engine-lines .pv'), (pv) => {
+    const bottom = pv.getBoundingClientRect().top + pv.clientHeight;
+    const moves = Array.from(pv.querySelectorAll<HTMLButtonElement>('.pv-move'), (move) => ({ move, outside: move.getBoundingClientRect().top >= bottom }));
+    return { row: pv.parentElement, moves };
+  });
+  for (const { row, moves } of rows) {
     let clipped = false;
-    for (const move of pv.querySelectorAll<HTMLButtonElement>('.pv-move')) {
-      const outside = move.getBoundingClientRect().top >= top + pv.clientHeight;
+    for (const { move, outside } of moves) {
       move.inert = outside;
       move.setAttribute('aria-hidden', String(outside));
       clipped ||= outside;
     }
-    pv.parentElement?.classList.toggle('pv-clipped', clipped);
+    row?.classList.toggle('pv-clipped', clipped);
   }
 }
 
