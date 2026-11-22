@@ -968,7 +968,7 @@ function ctxCanStartWithMaiaMove(ctx: PlayContext): boolean {
     !ctx.practicePosition &&
     !ctx.pendingPreferredEngineId &&
     ctxSelectedEngine(ctx).family === 'maia3' &&
-    ctx.dom.buttonEl('retryEngine').hidden
+    ctx.dom.buttonEl('retryEngine').hidden === true
   );
 }
 
