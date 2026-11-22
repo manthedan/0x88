@@ -23,18 +23,20 @@ try {
       }
     };
   });
-  const model = '**/models/lc0/t1-256x10-distilled-swa-2432500.batch1.f16.qdq8*.onnx';
+  // Local builds serve friendly paths; the R2 release serves the same bytes
+  // from content-addressed /artifacts/sha256/ URLs, so hold both forms.
+  const model = /\/models\/lc0\/t1-256x10-distilled-swa-2432500\.batch1\.f16\.qdq8[^/]*\.onnx$/;
+  const engine = /\/(?:stockfish\/[^/]+\.wasm|artifacts\/sha256\/[a-f0-9]{64}\/)/;
   const request = Promise.withResolvers();
   const download = Promise.withResolvers();
-  await page.route(model, async (route) => {
-    request.resolve();
-    await download.promise;
-    await route.continue();
-  });
-  await page.route('**/stockfish/*.wasm', async (route) => {
-    await download.promise;
-    await route.continue();
-  });
+  await page.route(
+    (url) => model.test(url.pathname) || engine.test(url.pathname),
+    async (route) => {
+      request.resolve();
+      await download.promise;
+      await route.continue();
+    },
+  );
   try {
     await page.goto(base);
     const link = page.getByRole('link', { name: 'Analyse this position' });
