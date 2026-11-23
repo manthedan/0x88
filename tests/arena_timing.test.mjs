@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
-import { parseFen, START_FEN } from '../src/chess/board.ts';
+import { boardToFen, parseFen, START_FEN } from '../src/chess/board.ts';
+import { engineBrushes } from '../src/lc0/analysisFormat.ts';
+import { engineMonogram } from '../src/lc0/analysisPresentation.ts';
 import { arenaSideTimeMs } from '../src/lc0/arenaTiming.ts';
+import { arenaComparisonStatus, arenaLaneOutput, compareArenaEvals, evalPercent, searchAgeLabel } from '../src/lc0/evalCompare.ts';
 
 test('live totals belong to the current game even while an older chart is under review', () => {
   const reviewed = [
@@ -81,6 +84,114 @@ test('the real live strip uses its game trail, not stale counters or the reviewe
     assert.match(node.innerHTML, /strip-clock-value">0ms</);
   }
 });
+
+for (const [mode, ms, showThinking] of [
+  ['movetime', 50, false],
+  ['movetime', 100, false],
+  ['movetime', 250, false],
+  ['movetime', 300, true],
+  ['movetime', 1000, true],
+  ['fixed', 50, true],
+]) {
+  test(`Arena thinking indicators with ${mode} and movetime input ${ms}`, () => {
+    const source = readFileSync(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8');
+    const slice = (start, end) => source.slice(source.indexOf(start), source.indexOf(end));
+    const thinkingEngineIds = new Set();
+    const engineOutputs = new Map();
+    const lanes = Array.from({ length: 2 }, () => {
+      const classes = new Set();
+      const properties = new Map();
+      return {
+        classes,
+        properties,
+        classList: { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) },
+        style: { setProperty: (name, value) => properties.set(name, value) },
+        querySelector: () => ({}),
+      };
+    });
+    const nodes = new Map(
+      ['arenaEvalBar', 'evalSource', 'whiteSideLabel', 'blackSideLabel'].map((id) => [
+        id,
+        {
+          dataset: {},
+          classList: { toggle() {} },
+          setAttribute(name, value) {
+            this[name] = value;
+          },
+          querySelector: () => null,
+          querySelectorAll: () => lanes,
+        },
+      ]),
+    );
+    const deps = {
+      running: true,
+      reviewing: false,
+      board: parseFen(START_FEN),
+      lastUci: null,
+      boardWhiteId: 'white',
+      boardWhiteName: 'Lc0 Small',
+      boardBlackId: 'black',
+      boardBlackName: 'Stockfish Lite',
+      liveTrail: { charts: [], openingPlies: 0, entries: [{ fen: START_FEN }] },
+      thinkingEngineIds,
+      thinkingSince: new Map([['white', 0]]),
+      performance: { now: () => 200 },
+      arenaSearchProgress: new Map([['white', { completed: 10, requested: 20 }]]),
+      engineOutputs,
+      isolatedCpuSeats: new Map(),
+      engines: new Map([['white', { name: 'Lc0 Small' }]]),
+      selectEl: () => ({ value: mode }),
+      inputEl: () => ({ value: String(ms) }),
+      el: (id) => nodes.get(id),
+      arenaSideTimeMs,
+      parseFen,
+      boardToFen,
+      engineBrushes,
+      engineMonogram,
+      arenaLaneOutput,
+      compareArenaEvals,
+      arenaComparisonStatus,
+      evalPercent,
+      searchAgeLabel,
+      displayEngineName: String,
+      htmlEscape: String,
+      engineAvatarHtml: () => '',
+    };
+    const draw = new Function(
+      ...Object.keys(deps),
+      `${stripTypeScriptTypes(`
+        ${slice('function hasBoundedArenaSearch(', 'function setArenaSearchProgress(')}
+        ${slice('function formatSeconds(', 'function renderBoard(')}
+        ${slice('function arenaBudgetMode(', 'function arenaCacheEntries(')}
+      `)}\nreturn () => { renderSideLabels(); return engineCardHtml('white'); };`,
+    )(...Object.values(deps));
+    const waitingCard = draw();
+    thinkingEngineIds.add('white');
+    const searchingCard = draw();
+    const strip = nodes.get('whiteSideLabel');
+    assert.equal(strip.dataset.turn, String(showThinking));
+    assert.equal(strip.innerHTML.includes('strip-thinking'), showThinking);
+    assert.match(strip.innerHTML, /strip-clock-value">0\.20 s</);
+    assert.equal(lanes[0].classes.has('thinking'), showThinking);
+    assert.equal(lanes[1].classes.has('thinking'), false);
+    for (const id of ['arenaEvalBar', 'evalSource']) assert.equal(nodes.get(id)['aria-label'].includes('searching now'), showThinking);
+    assert.equal(searchingCard.includes('class="eng-card thinking"'), showThinking);
+    assert.equal(searchingCard.includes('eng-thinking-label'), showThinking);
+    assert.equal(searchingCard.includes('eng-search-meter'), showThinking);
+    if (!showThinking) assert.equal(searchingCard, waitingCard);
+
+    thinkingEngineIds.clear();
+    engineOutputs.set('white', { engineId: 'white', engineName: 'Lc0 Small', fen: START_FEN, whiteCp: 60, evalText: '+0.60' });
+    const completedCard = draw();
+    assert.match(completedCard, /class="eng-eval"[^>]*>\+0\.60</);
+    assert.match(nodes.get('evalSource').innerHTML, /<strong>\+0\.60<\/strong>/);
+    assert.equal(lanes[0].properties.get('--pct'), `${evalPercent({ scoreCp: 60 })}%`);
+    if (!showThinking) {
+      thinkingEngineIds.add('white');
+      assert.equal(draw(), completedCard);
+    }
+  });
+}
 
 test('stopping Arena before the first game redraws both strips and eval bars in the idle state', async () => {
   const source = readFileSync(new URL('../src/lc0/arenaBrowser.ts', import.meta.url), 'utf8');

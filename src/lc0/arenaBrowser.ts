@@ -1273,6 +1273,10 @@ function formatSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
 }
 
+function arenaThinkingIndicatorsEnabled(): boolean {
+  return arenaBudgetMode() === 'fixed' || arenaMovetimeMs() > 250;
+}
+
 const evalLaneOutputs: (EngineOutputSnapshot | undefined)[] = [];
 
 function renderEvalBars(): void {
@@ -1281,6 +1285,7 @@ function renderEvalBars(): void {
     evalLaneOutputs[index] = arenaLaneOutput(evalLaneOutputs[index], id ? engineOutputs.get(id) : undefined, id, index === 0 ? 'w' : 'b');
   });
   const sides = stripSides();
+  const showThinking = running && !reviewing && arenaThinkingIndicatorsEnabled();
   const lanes = [
     { id: sides.w.id, name: sides.w.name, side: 'White', shortSide: 'W' },
     { id: sides.b.id, name: sides.b.name, side: 'Black', shortSide: 'B' },
@@ -1293,7 +1298,7 @@ function renderEvalBars(): void {
       mateIn: output?.mateInWhitePov,
     };
     const tag = arenaPreparingGame() ? '—' : engineMonogram(name);
-    const thinking = running && !reviewing && board.turn === (index === 0 ? 'w' : 'b') && !!seat.id && thinkingEngineIds.has(seat.id);
+    const thinking = showThinking && board.turn === (index === 0 ? 'w' : 'b') && !!seat.id && thinkingEngineIds.has(seat.id);
     return { ...seat, name, tag, thinking, score, percent: evalPercent(score), text: output?.evalText ?? '—', color: engineBrushes(name).swatch };
   });
   const state = compareArenaEvals(
@@ -1367,7 +1372,7 @@ function engineCardHtml(id: string): string {
   const snapshot = engineOutputs.get(id);
   const rawName = snapshot?.engineName ?? isolatedCpuSeats.get(id)?.seat.name ?? engines.get(id)?.name ?? id;
   const name = displayEngineName(rawName);
-  const thinking = running && thinkingEngineIds.has(id);
+  const thinking = running && thinkingEngineIds.has(id) && arenaThinkingIndicatorsEnabled();
   const side = boardSideFor(id);
   const progress = arenaSearchProgress.get(id) ?? { label: rawName, units: 'search' as const, indeterminate: true };
   const live = thinking ? arenaSearchProgressHtml(progress) : '';
@@ -1479,12 +1484,13 @@ function renderStrips(): void {
     const since = side.id ? thinkingSince.get(side.id) : undefined;
     const moveMs = thinking && since !== undefined ? Math.max(0, now - since) : 0;
     const usedMs = sideTimeMs[color] + moveMs;
-    const meta = thinking
+    const showThinking = thinking && arenaThinkingIndicatorsEnabled();
+    const meta = showThinking
       ? `<span class="strip-thinking">${colorName} · thinking · move ${board.fullmove}</span>`
       : `${colorName}${side.seat ? ` · ${side.seat}` : ''}`;
     const name = side.name ? displayEngineName(side.name) : 'No engine';
     const showClock = !reviewing && (running || usedMs > 0);
-    node.dataset.turn = String(thinking);
+    node.dataset.turn = String(showThinking);
     const head =
       `${preparing ? '<span class="arena-avatar placeholder" aria-hidden="true"></span>' : side.name ? engineAvatarHtml(side.name) : ''}` +
       `<span class="strip-id"><strong>${htmlEscape(name)}</strong><small><span class="side-dot ${color}" aria-hidden="true"></span>${meta}</small></span>`;
