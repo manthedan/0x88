@@ -45,7 +45,7 @@ Native `agent_browser`, unique session `ort-profiler-native-5196`, Google Chrome
 All browser inference/profiling was inside the machine-wide lock holder:
 
 ```sh
-/private/tmp/claude-501/-Users-macthedan-projects-lc0-browser/701135f9-2bed-49a5-8cf9-e17058c5574a/scratchpad/benchlock node .local-dev-artifacts/ort-profiler/hold-lock.mjs
+$SCRATCH/benchlock node .local-dev-artifacts/ort-profiler/hold-lock.mjs
 ```
 
 The holder signalled acquisition before opening the inference page and was released after closing the browser. The owned server was then stopped by its recorded PID. Initial IPv4 HTTP-404 navigation attempts executed no inference.

@@ -84,7 +84,7 @@ Absolute costs differed sharply between the two lock windows on this busy shared
 - Built Play, Centipawn Standard: `e4 ...e5`; Takeback restores the starting board; `d4` resumes play; New game restores the starting board and engine-ready state. Screenshots saved and read.
 - Built Arena: Centipawn auto/TVMJS, 32 visits vs Stockfish Lite depth 8, fixed budget. UI retained 10 games (rather than the requested one); all 10 completed, nine losses / one draw, no illegal move/runtime failure; PGNs saved. **Baseline smoke only**, not a reuse-vs-off strength comparison. The `maxPlies=12` query is ignored by Arena; no capped-game claim.
 
-Scratchpad root (`SP`): `/private/tmp/claude-501/-Users-macthedan-projects-lc0-browser/701135f9-2bed-49a5-8cf9-e17058c5574a/scratchpad`.
+Scratchpad root (`SP`): `$SCRATCH`.
 
 Artifacts under SP:
 

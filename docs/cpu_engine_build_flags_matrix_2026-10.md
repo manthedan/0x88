@@ -73,7 +73,7 @@ All five artifact sets of each engine have the identical runtime-preload digest 
 2. Node screen and browser product gate: **10 rounds**, five artifact sets per engine, **20 positions at depth 11** per cell. Artifact order rotates and reverses on alternating rounds; over ten rounds each artifact occupies every slot twice. Each Node cell is a fresh subprocess; each browser cell a fresh classic Worker. One unreported start-position search at the measured depth warms the search before the measured suite.
 3. Independent Berserk browser confirmation: **6 rounds**, current / `-O2 -flto` / `-O3 -flto`, **20 positions at depth 12**. Each artifact occupies each slot twice. This checks the LTO win and whether the larger `-O3 -flto` build adds repeatable value.
 4. All engine execution/timing occurred under the supplied machine-wide mutex:
-   `/private/tmp/claude-501/-Users-macthedan-projects-lc0-browser/701135f9-2bed-49a5-8cf9-e17058c5574a/scratchpad/benchlock`.
+   `$SCRATCH/benchlock`.
    The Node parity-plus-screen runner was wrapped directly. Browser automation ran only while a `benchlock node .../hold-browser-lock.mjs` sentinel held the mutex, after its acquisition marker appeared; its release marker was written only after both browser batches completed and were captured. No overlapping timing runs were used.
 5. Browser search follows the product's classic-Worker / modularized factory / `ccall('command')` path and posts each UCI stdout/stderr line to the parent, matching product transport overhead. The harness measures search inside the Worker, not rendered UI response latency. It is staged locally beside the production build, not shipped as a new product route.
 6. **Wall NPS** is `sum(final nodes) * 1000 / sum(ccall go wall milliseconds)`; **UCI NPS** is the same numerator divided by the sum of final engine-reported `time` milliseconds. **Suite TTD** is the summed search wall time for all 20 positions, excluding reset, position setup, startup, and warmup. Printed per-position NPS and all per-position times remain in the raw reports.
@@ -210,7 +210,7 @@ For every engine add `o2`, `o3`, `o2-lto`, and `o3-lto` cells with the local pat
 Node commands (substitute each engine's five JS paths in `--js`):
 
 ```sh
-BENCHLOCK=/private/tmp/claude-501/-Users-macthedan-projects-lc0-browser/701135f9-2bed-49a5-8cf9-e17058c5574a/scratchpad/benchlock
+BENCHLOCK=$SCRATCH/benchlock
 "$BENCHLOCK" node scripts/emscripten_uci_bench.mjs \
   --js <current.js>,<o2.js>,<o3.js>,<o2-lto.js>,<o3-lto.js> \
   --depths 9,11 --hash 16 --json <parity.json>

@@ -337,7 +337,7 @@ rows, timing summaries, test logs, release API response). Yukon evidence:
 book/toolchain identity, native parity, completed x86 WASM reports).
 
 ```sh
-BENCHLOCK=/private/tmp/claude-501/-Users-macthedan-projects-lc0-browser/701135f9-2bed-49a5-8cf9-e17058c5574a/scratchpad/benchlock
+BENCHLOCK=$SCRATCH/benchlock
 "$BENCHLOCK" node scripts/emscripten_uci_bench.mjs --js <six-v8-js-paths> --depths 9,11 --hash 16 --json wasm-parity.json
 # Yukon, from ~/upgrades/plentychess (same-commit native engine):
 taskset -c 3 node scripts/native_uci_parity.mjs --engine upstream/new/engine --reference wasm-parity.json --hash 16 --json native-parity.json

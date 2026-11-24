@@ -300,7 +300,7 @@ removing never-imported development packages cannot shrink an existing bundle.
 Full per-chunk filenames/sizes are in baseline-size.json and final-size.json.
 
 Evidence directory (outside Git):
-`/private/tmp/claude-501/-Users-macthedan-projects-lc0-browser/26f45daa-4af3-4263-9d99-977d828fc361/scratchpad/deps-upgrade/`.
+`$SCRATCH/deps-upgrade/`.
 Contains baseline/final build and install logs, audit JSON/text, outdated and
 registry metadata, full test logs, size inventories, browser diagnostics/result
 notes and verified PNGs for Home, Docs, both Play opponents, Analysis and Arena.

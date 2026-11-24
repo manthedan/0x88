@@ -78,7 +78,7 @@ Stop test: 60-game schedule, K=2, 1,000 ms/move; stopped with two games running 
 
 Timing runs held benchlock in <20-minute chunks; no builds were run while holding it. Other agents' timing loads were serialized. The desktop was not an OS-level clean room: load average roughly 3, modest Brave/WindowServer/VM background activity, no sustained external engine/GPU load observed. Final built wall-clock spread was under 1.5%; no core pinning or thermal/device-portability claim.
 
-Screenshots (opened/visually checked), under the delegated scratchpad root `/private/tmp/claude-501/-Users-macthedan-projects-lc0-browser/701135f9-2bed-49a5-8cf9-e17058c5574a/scratchpad/`:
+Screenshots (opened/visually checked), under the delegated scratchpad root `$SCRATCH/`:
 
 - `arena-parallel-games-gate.png`
 - `arena-parallel-games-built-K2-standings.png`
