@@ -4,6 +4,7 @@ import { showRouteControllerFailure } from '#lib/chunkLoadError.ts';
 import BrowserCapabilities from '#lib/components/BrowserCapabilities.svelte';
 import PhoneLargeNetPreference from '#lib/components/PhoneLargeNetPreference.svelte';
 import SiteHeader from '#lib/components/SiteHeader.svelte';
+import SocialMeta from '#lib/components/SocialMeta.svelte';
 import { beforeNavigate } from '$app/navigation';
 
 let mountedUrl: URL | null = null;
@@ -53,6 +54,7 @@ onMount(() => {
 <svelte:head>
   <title>{title}</title>
   <meta name="description" content={description} />
+  <SocialMeta {title} {description} path="/app/arena/" />
 </svelte:head>
 
 <SiteHeader pageTitle="Arena" />

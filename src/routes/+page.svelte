@@ -3,6 +3,7 @@ import { onMount } from 'svelte';
 import { type BrowserCapabilityReport, detectBrowserCapabilities } from '#lib/browserCapabilities.ts';
 import AnalysisPreview from '#lib/components/AnalysisPreview.svelte';
 import SiteHeader from '#lib/components/SiteHeader.svelte';
+import SocialMeta from '#lib/components/SocialMeta.svelte';
 import { footerNav } from '#lib/nav.ts';
 import { engineFamilyOptions } from '../lc0/engineCatalog.ts';
 
@@ -133,6 +134,7 @@ const ratingTicks = Array.from({ length: 11 }, (_, i) => ratingX(600 + i * 200))
 <svelte:head>
   <title>{title}</title>
   <meta name="description" content={description} />
+  <SocialMeta {title} {description} path="/" />
 </svelte:head>
 <SiteHeader landing />
 <main id="main" class="home">

@@ -2,6 +2,7 @@
 import { onMount, tick } from 'svelte';
 import { type BrowserCapabilityReport, detectBrowserCapabilities } from '#lib/browserCapabilities.ts';
 import SiteHeader from '#lib/components/SiteHeader.svelte';
+import SocialMeta from '#lib/components/SocialMeta.svelte';
 import { activeDocsTopic, docsSearchShortcut, toggleDocsGroup } from '#lib/docsNavigation.ts';
 
 const title = '0x88 Chess — documentation';
@@ -362,6 +363,7 @@ onMount(() => {
 <svelte:head>
   <title>{title}</title>
   <meta name="description" content={description} />
+  <SocialMeta {title} {description} path="/docs/" />
 </svelte:head>
 <SiteHeader landing />
 <main id="main">
