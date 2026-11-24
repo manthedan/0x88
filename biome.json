@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.6.8/schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
     "includes": [
@@ -40,6 +40,22 @@
     }
   },
   "overrides": [
+    {
+      "includes": [
+        "scripts/analysis_ux_browser_smoke.mjs",
+        "scripts/engine_integrity_browser_smoke.mjs",
+        "scripts/memory_harness/run.mjs",
+        "scripts/uat/probe.mjs",
+        "tests/uat_recorder.test.mjs"
+      ],
+      "linter": {
+        "rules": {
+          "performance": {
+            "useDomNodeTextContent": "off"
+          }
+        }
+      }
+    },
     {
       "includes": ["src/app.html"],
       "linter": {
