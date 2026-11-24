@@ -208,7 +208,8 @@
         "src/lib/components/BrowserCapabilities.svelte",
         "src/lib/components/PhoneLargeNetPreference.svelte",
         "src/lib/components/RestoreNotice.svelte",
-        "src/lib/components/SiteHeader.svelte"
+        "src/lib/components/SiteHeader.svelte",
+        "src/lib/components/SocialMeta.svelte"
       ]
     },
     "tests/feature_walk.test.mjs": {
@@ -303,7 +304,8 @@
         "src/lib/docsNavigation.ts",
         "src/lib/memprobe.ts",
         "src/lib/nav.ts",
-        "src/lib/routeController.ts"
+        "src/lib/routeController.ts",
+        "src/lib/site.ts"
       ]
     },
     "tests/ort_session_failure.test.mjs": {
