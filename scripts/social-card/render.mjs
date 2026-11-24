@@ -9,7 +9,7 @@
  *   node scripts/social-card/render.mjs [landing-url]   (default https://0x88.app/)
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -21,6 +21,8 @@ const work = mkdtempSync(join(tmpdir(), 'social-card-'));
 const env = { ...process.env, AGENT_BROWSER_SESSION: 'social-card' };
 const browser = (...args) => execFileSync('agent-browser', args, { env, encoding: 'utf8' });
 
+const card = join(work, 'social-card.png');
+const icon = join(work, 'apple-touch-icon.png');
 try {
   // 1. The example board, dark theme, at 2x so the card stays sharp.
   browser('set', 'viewport', '1440', '900', '2');
@@ -41,17 +43,20 @@ try {
   browser('set', 'viewport', '180', '180', '1');
   browser('open', pathToFileURL(join(here, 'icon.html')).href);
   browser('wait', '500');
-  browser('screenshot', join(repo, 'public/apple-touch-icon.png'));
+  browser('screenshot', icon);
+
+  // Downsample the 2x capture for smooth text at the 1200x630 size platforms request.
+  execFileSync('magick', [card2x, '-filter', 'Lanczos', '-resize', '1200x630!', '-strip', card]);
+
+  copyFileSync(card, join(repo, 'public/social-card.png'));
+  copyFileSync(icon, join(repo, 'public/apple-touch-icon.png'));
 } finally {
   try {
     browser('close');
   } catch {}
+  rmSync(work, { recursive: true, force: true });
+  rmSync(join(here, 'board.png'), { force: true });
 }
-
-// Downsample the 2x capture for smooth text at the 1200x630 size platforms request.
-execFileSync('magick', [join(work, 'card@2x.png'), '-filter', 'Lanczos', '-resize', '1200x630!', '-strip', join(repo, 'public/social-card.png')]);
-rmSync(work, { recursive: true, force: true });
-rmSync(join(here, 'board.png'), { force: true });
 
 for (const file of ['public/social-card.png', 'public/apple-touch-icon.png']) {
   console.log(`${file} ${(statSync(join(repo, file)).size / 1024).toFixed(0)} KB`);
