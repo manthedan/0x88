@@ -234,7 +234,9 @@ test('a required value differing only in separator whitespace and order is accep
 });
 
 test('dropping cross-origin CORP from content-addressed artifacts is rejected', async () => {
-  const dir = await fixture((toml) => replaceOnce(toml, '    Cross-Origin-Resource-Policy = "cross-origin"\n', ''));
+  const dir = await fixture((toml) =>
+    replaceOnce(toml, '    Access-Control-Allow-Origin = "*"\n    Cross-Origin-Resource-Policy = "cross-origin"\n', '    Access-Control-Allow-Origin = "*"\n'),
+  );
   const result = await runChecker(dir);
   assert.equal(result.status, 1);
   assert.ok(
@@ -278,7 +280,11 @@ test('Vite hashed bundles, which carry the global CSS, keep their immutable poli
 // Netlify: "Any line beginning with # will be ignored as a comment."
 test('a commented-out directive does not satisfy a requirement', async () => {
   const dir = await fixture((toml) =>
-    replaceOnce(toml, '    Cross-Origin-Resource-Policy = "cross-origin"', '    # Cross-Origin-Resource-Policy = "cross-origin"'),
+    replaceOnce(
+      toml,
+      '    Access-Control-Allow-Origin = "*"\n    Cross-Origin-Resource-Policy = "cross-origin"',
+      '    Access-Control-Allow-Origin = "*"\n    # Cross-Origin-Resource-Policy = "cross-origin"',
+    ),
   );
   const result = await runChecker(dir);
   assert.equal(result.status, 1);

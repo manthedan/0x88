@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>0x88 link preview card</title>
+<!-- Rendered at 1200x630 by scripts/social-card/render.mjs into public/social-card.png. -->
+<link rel="stylesheet" href="../../src/styles/app-shell.css" />
+<style>
+  html,body{margin:0; width:1200px; height:630px; overflow:hidden; background:var(--bg)}
+  .card{
+    box-sizing:border-box; width:1200px; height:630px; padding:74px 64px;
+    display:grid; grid-template-columns:minmax(0,1fr) 482px; gap:52px; align-items:center;
+    background:radial-gradient(120% 90% at 0% 0%, var(--bg-2) 0%, var(--bg) 60%);
+  }
+  .copy{display:grid; align-content:space-between; height:100%; min-width:0}
+  .brand{display:flex; align-items:center; gap:14px}
+  .mark{
+    display:grid; place-items:center; width:52px; height:52px; border-radius:11px;
+    background:var(--accent); color:var(--on-accent); font:700 17px/1 var(--mono); letter-spacing:-.04em;
+  }
+  .brand-text{color:var(--ink); font:600 26px/1 var(--mono); letter-spacing:-.02em}
+  h1{margin:0 0 16px; font:600 56px/1.04 var(--serif); letter-spacing:-.02em; color:var(--ink)}
+  .lede{margin:0; max-width:30ch; color:var(--text); font:400 24px/1.4 var(--sans)}
+  .results{display:grid; gap:10px; margin:0; padding:0; list-style:none}
+  .results li{
+    display:grid; grid-template-columns:24px minmax(0,1fr) auto auto; gap:12px; align-items:center;
+    padding:10px 16px; border:1px solid var(--rule-strong); border-radius:10px; background:var(--panel-inset);
+  }
+  .swatch{color:var(--engine); font:750 28px/1 var(--sans)}
+  .name{color:var(--ink); font:650 22px/1.2 var(--sans)}
+  .eval{color:var(--ink); font:700 24px/1 var(--mono); letter-spacing:-.03em}
+  .best{
+    padding:4px 9px; border-radius:6px; color:var(--ink); font:650 19px/1.3 var(--mono);
+    background:color-mix(in srgb, var(--engine) 22%, var(--panel));
+  }
+  .board{
+    width:482px; height:482px; border-radius:6px; overflow:hidden;
+    box-shadow:0 30px 60px -28px rgba(0,0,0,.7), 0 0 0 1px var(--board-border);
+  }
+  .board img{display:block; width:100%; height:100%}
+</style>
+</head>
+<body>
+<main class="card">
+  <section class="copy">
+    <div class="brand"><span class="mark">0x88</span><span class="brand-text">0x88.app</span></div>
+    <div>
+      <h1>Lc0 and Stockfish in a browser tab</h1>
+      <p class="lede">Compare engines, review games, play Maia3 or run tournaments on your own GPU and CPU.</p>
+    </div>
+    <ol class="results" aria-label="Example engine results">
+      <li style="--engine:#7a4fd6"><span class="swatch">↗</span><span class="name">Lc0 Small</span><span class="eval">+0.25</span><span class="best">Ne2</span></li>
+      <li style="--engine:#1f5fcf"><span class="swatch">↗</span><span class="name">Stockfish Lite</span><span class="eval">+0.55</span><span class="best">gxf6</span></li>
+    </ol>
+  </section>
+  <div class="board"><img src="board.png" alt="" /></div>
+</main>
+</body>
+</html>

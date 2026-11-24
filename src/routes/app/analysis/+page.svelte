@@ -5,6 +5,7 @@ import BrowserCapabilities from '#lib/components/BrowserCapabilities.svelte';
 import PhoneLargeNetPreference from '#lib/components/PhoneLargeNetPreference.svelte';
 import RestoreNotice from '#lib/components/RestoreNotice.svelte';
 import SiteHeader from '#lib/components/SiteHeader.svelte';
+import SocialMeta from '#lib/components/SocialMeta.svelte';
 import { afterNavigate } from '$app/navigation';
 
 let mountedUrl: URL | null = null;
@@ -55,6 +56,7 @@ onMount(() => {
 <svelte:head>
   <title>{title}</title>
   <meta name="description" content={description} />
+  <SocialMeta {title} {description} path="/app/analysis/" />
 </svelte:head>
 
 <SiteHeader pageTitle="Analysis" />

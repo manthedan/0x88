@@ -3,6 +3,7 @@ import BrowserCapabilities from '#lib/components/BrowserCapabilities.svelte';
 import PhoneLargeNetPreference from '#lib/components/PhoneLargeNetPreference.svelte';
 import RestoreNotice from '#lib/components/RestoreNotice.svelte';
 import SiteHeader from '#lib/components/SiteHeader.svelte';
+import SocialMeta from '#lib/components/SocialMeta.svelte';
 import { routeController } from '#lib/routeController.ts';
 import { browser } from '$app/env';
 import { page } from '$app/state';
@@ -18,6 +19,7 @@ const play = routeController(async () => (await import('../../../lc0/playBrowser
 <svelte:head>
   <title>{title}</title>
   <meta name="description" content={description} />
+  <SocialMeta {title} {description} path="/app/play/" />
 </svelte:head>
 
 <SiteHeader pageTitle="Play" />
